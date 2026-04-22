@@ -1,0 +1,398 @@
+/* ─── Tag Panel Overlay ─── */
+.tag-panel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: tagOverlayFadeIn 0.2s ease;
+}
+
+@keyframes tagOverlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.tag-panel {
+  width: 380px;
+  max-height: 85vh;
+  background: rgba(16, 17, 24, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  backdrop-filter: blur(24px);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: tagPanelSlideIn 0.25s ease;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+@keyframes tagPanelSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── Header ─── */
+.tag-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tag-panel-header-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tag-panel-pin-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(0, 229, 255, 0.1);
+  color: #00e5ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tag-panel-title-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  letter-spacing: 0.3px;
+}
+
+.tag-panel-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.15s;
+  line-height: 1;
+}
+
+.tag-panel-close:hover {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ─── Body ─── */
+.tag-panel-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.tag-field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.tag-field-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+.tag-field-input:focus {
+  border-color: rgba(0, 229, 255, 0.4);
+}
+
+.tag-field-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.2s;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+.tag-field-textarea:focus {
+  border-color: rgba(0, 229, 255, 0.4);
+}
+
+/* ─── Save Button ─── */
+.tag-save-btn {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(0, 150, 255, 0.15));
+  color: #00e5ff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tag-save-btn:hover {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.3), rgba(0, 150, 255, 0.25));
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.1);
+}
+
+.tag-save-btn.saving {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* ─── Upload Zone ─── */
+.tag-upload-zone {
+  border: 2px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.tag-upload-zone:hover {
+  border-color: rgba(0, 229, 255, 0.2);
+  background: rgba(0, 229, 255, 0.02);
+}
+
+.tag-upload-zone.drag-over {
+  border-color: rgba(0, 229, 255, 0.5);
+  background: rgba(0, 229, 255, 0.05);
+  box-shadow: 0 0 30px rgba(0, 229, 255, 0.08) inset;
+}
+
+.tag-upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 12px;
+}
+
+.tag-upload-placeholder svg {
+  opacity: 0.4;
+}
+
+.tag-upload-formats {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.tag-upload-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: rgba(0, 229, 255, 0.7);
+  font-size: 12px;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(0, 229, 255, 0.2);
+  border-top-color: #00e5ff;
+  border-radius: 50%;
+  animation: spinTag 0.7s linear infinite;
+}
+
+@keyframes spinTag {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── Media Preview ─── */
+.tag-media-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-img-preview {
+  max-width: 100%;
+  max-height: 160px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.tag-pdf-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 183, 77, 0.8);
+  padding: 12px 0;
+}
+
+.tag-pdf-preview svg {
+  opacity: 0.7;
+}
+
+.tag-replace-hint {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.2);
+}
+
+/* ─── Footer / Delete ─── */
+.tag-panel-footer {
+  padding: 16px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.tag-delete-btn {
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 74, 90, 0.15);
+  background: rgba(255, 74, 90, 0.05);
+  color: rgba(255, 74, 90, 0.7);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tag-delete-btn:hover {
+  background: rgba(255, 74, 90, 0.1);
+  border-color: rgba(255, 74, 90, 0.3);
+  color: #ff4a5a;
+}
+
+/* ─── Title Prompt Modal ─── */
+.tag-title-prompt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: tagOverlayFadeIn 0.15s ease;
+}
+
+.tag-title-prompt {
+  width: 340px;
+  background: rgba(16, 17, 24, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: tagPanelSlideIn 0.2s ease;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+.tag-title-prompt h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0 0 4px;
+}
+
+.tag-title-prompt p {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  margin: 0 0 16px;
+}
+
+.tag-title-prompt input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+.tag-title-prompt input:focus {
+  border-color: rgba(0, 229, 255, 0.4);
+}
+
+.tag-title-prompt-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tag-title-prompt-actions button {
+  flex: 1;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tag-prompt-cancel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.tag-prompt-cancel:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.tag-prompt-confirm {
+  border: none;
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(0, 150, 255, 0.15));
+  color: #00e5ff;
+}
+
+.tag-prompt-confirm:hover {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.3), rgba(0, 150, 255, 0.25));
+}
+
+.tag-prompt-confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

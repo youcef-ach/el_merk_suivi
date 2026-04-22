@@ -1,0 +1,381 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ─── Studio Layout ─── */
+.studio-layout {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  overflow: hidden;
+}
+
+.studio-viewport {
+  flex: 1;
+  position: relative;
+  height: 100%;
+}
+
+/* ─── Sidebar ─── */
+.studio-sidebar {
+  width: 320px;
+  height: 100vh;
+  background: rgba(13, 14, 20, 0.95);
+  backdrop-filter: blur(20px);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  font-family: 'Inter', -apple-system, sans-serif;
+  z-index: 50;
+}
+
+.sidebar-header {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.sidebar-header p {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  margin: 6px 0 0;
+}
+
+/* ─── Tool Section ─── */
+.tool-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.tool-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin: 0 0 12px 0;
+}
+
+/* ─── Measure Toggle Button ─── */
+.measure-toggle {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.7);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.measure-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.measure-toggle.active {
+  background: rgba(0, 229, 255, 0.08);
+  border-color: rgba(0, 229, 255, 0.3);
+  color: #00e5ff;
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.08);
+}
+
+.measure-toggle-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.measure-toggle .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  margin-left: auto;
+  transition: all 0.3s ease;
+}
+
+.measure-toggle.active .status-dot {
+  background: #00e5ff;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+  animation: measure-pulse 2s infinite;
+}
+
+@keyframes measure-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 229, 255, 0.6); }
+  50% { box-shadow: 0 0 16px rgba(0, 229, 255, 0.9); }
+}
+
+/* ─── Measurement Hint ─── */
+.measure-hint {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: rgba(0, 229, 255, 0.04);
+  border: 1px solid rgba(0, 229, 255, 0.1);
+  border-radius: 6px;
+  font-size: 12px;
+  color: rgba(0, 229, 255, 0.6);
+  line-height: 1.5;
+}
+
+.measure-hint.pending {
+  background: rgba(255, 183, 77, 0.06);
+  border-color: rgba(255, 183, 77, 0.15);
+  color: rgba(255, 183, 77, 0.7);
+}
+
+/* ─── Measurements List ─── */
+.measurements-list {
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+
+.measurement-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  transition: all 0.15s ease;
+}
+
+.measurement-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.measurement-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.measurement-index {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: rgba(0, 229, 255, 0.1);
+  color: #00e5ff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.measurement-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+
+.measurement-unit {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-left: 3px;
+  font-weight: 400;
+}
+
+.measurement-delete {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.measurement-delete:hover {
+  color: #ff4a5a;
+  background: rgba(255, 74, 90, 0.1);
+}
+
+/* ─── Clear All Button ─── */
+.clear-all-btn {
+  width: 100%;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.4);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 10px;
+}
+
+.clear-all-btn:hover {
+  background: rgba(255, 74, 90, 0.06);
+  border-color: rgba(255, 74, 90, 0.2);
+  color: #ff4a5a;
+}
+
+/* ─── Empty State ─── */
+.empty-measurements {
+  text-align: center;
+  padding: 20px 12px;
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+}
+
+.empty-measurements svg {
+  display: block;
+  margin: 0 auto 8px;
+  opacity: 0.3;
+}
+
+/* ─── Back Button (Studio) ─── */
+.studio-back-btn {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.studio-back-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* ─── Measurement Mode Cursor Overlay ─── */
+.measurement-cursor-active {
+  cursor: crosshair !important;
+}
+
+.measurement-cursor-active canvas {
+  cursor: crosshair !important;
+}
+
+/* ─── Tag Mode Cursor ─── */
+.tag-cursor-active {
+  cursor: crosshair !important;
+}
+
+.tag-cursor-active canvas {
+  cursor: crosshair !important;
+}
+
+/* ─── Pointer Mode Cursor ─── */
+.pointer-cursor-active {
+  cursor: crosshair !important;
+}
+
+.pointer-cursor-active canvas {
+  cursor: crosshair !important;
+}
+
+/* ─── Tags List ─── */
+.tags-list {
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+
+.tag-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tag-list-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.tag-list-item.selected {
+  background: rgba(0, 229, 255, 0.06);
+  border-color: rgba(0, 229, 255, 0.2);
+}
+
+.tag-list-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tag-list-pin {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.08);
+  color: #00e5ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tag-list-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tag-list-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag-list-desc {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.tag-has-media {
+  color: rgba(255, 183, 77, 0.5);
+  flex-shrink: 0;
+}
+
