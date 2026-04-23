@@ -14,10 +14,33 @@ const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const jwt_1 = require("@nestjs/jwt");
 const bcrypt = require("bcrypt");
+const client_1 = require("@prisma/client");
 let AuthService = class AuthService {
     constructor(prisma, jwtService) {
         this.prisma = prisma;
         this.jwtService = jwtService;
+    }
+    async registerEnterprise(dto) {
+        const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
+        if (existingUser) {
+            throw new common_1.ConflictException('Email already in use');
+        }
+        const hashedPassword = await bcrypt.hash(dto.password, 10);
+        const { enterprise, user } = await this.prisma.$transaction(async (tx) => {
+            const enterprise = await tx.enterprise.create({
+                data: { name: dto.enterpriseName },
+            });
+            const user = await tx.user.create({
+                data: {
+                    email: dto.email,
+                    password: hashedPassword,
+                    role: client_1.Role.ADMIN,
+                    enterpriseId: enterprise.id,
+                },
+            });
+            return { enterprise, user };
+        });
+        return this.generateToken(user, enterprise.name);
     }
     async register(dto) {
         const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
@@ -29,12 +52,16 @@ let AuthService = class AuthService {
             data: {
                 email: dto.email,
                 password: hashedPassword,
+                enterpriseId: dto.enterpriseId,
             },
         });
         return this.generateToken(user);
     }
     async login(dto) {
-        const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+        const user = await this.prisma.user.findUnique({
+            where: { email: dto.email },
+            include: { enterprise: true },
+        });
         if (!user) {
             throw new common_1.UnauthorizedException('Invalid credentials');
         }
@@ -42,13 +69,19 @@ let AuthService = class AuthService {
         if (!isMatch) {
             throw new common_1.UnauthorizedException('Invalid credentials');
         }
-        return this.generateToken(user);
+        return this.generateToken(user, user.enterprise?.name);
     }
-    generateToken(user) {
-        const payload = { email: user.email, sub: user.id, role: user.role };
+    generateToken(user, enterpriseName) {
+        const payload = { email: user.email, sub: user.id, role: user.role, enterpriseId: user.enterpriseId };
         return {
             access_token: this.jwtService.sign(payload),
-            user: { id: user.id, email: user.email, role: user.role }
+            user: {
+                id: user.id,
+                email: user.email,
+                role: user.role,
+                enterpriseId: user.enterpriseId,
+                enterpriseName: enterpriseName || null,
+            }
         };
     }
 };

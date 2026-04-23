@@ -1,12 +1,13 @@
-import ModelAndScansViewer from '../components/ModelAndScansViewer';
+import { Navigate } from 'react-router';
 
 export function meta() {
   return [
-    { title: "360° Virtual Tour" },
-    { name: "description", content: "Immersive Matterport-style 360° virtual tour" },
+    { title: "VirtualTwin SaaS" },
+    { name: "description", content: "Enterprise 3D inspection platform" },
   ];
 }
 
 export default function HomePage() {
-  return <ModelAndScansViewer />;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  return <Navigate to={token ? '/dashboard' : '/auth'} replace />;
 }

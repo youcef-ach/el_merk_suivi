@@ -7,13 +7,23 @@ import './auth.css';
 
 export function meta() {
   return [
-    { title: "Authentication | 360° Virtual Tour" },
+    { title: "Authentication | VirtualTwin SaaS" },
   ];
 }
 
-const authSchema = z.object({
+const loginSchema = z.object({
   email: z.string().email({ message: "Invalid email address" }),
   password: z.string().min(6, { message: "Password must be at least 6 characters" }),
+});
+
+const registerSchema = z.object({
+  enterpriseName: z.string().min(2, { message: "Enterprise name is required" }),
+  email: z.string().email({ message: "Invalid email address" }),
+  password: z.string().min(6, { message: "Password must be at least 6 characters" }),
+  confirmPassword: z.string().min(6),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
 });
 
 export default function AuthPage() {
@@ -22,36 +32,58 @@ export default function AuthPage() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  const { register, handleSubmit, formState: { errors }, reset } = useForm({
-    resolver: zodResolver(authSchema),
-    defaultValues: {
-      email: '',
-      password: '',
-    }
+  const loginForm = useForm({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' },
   });
 
-  const onSubmit = async (data) => {
+  const registerForm = useForm({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { enterpriseName: '', email: '', password: '', confirmPassword: '' },
+  });
+
+  const activeForm = isLogin ? loginForm : registerForm;
+
+  const onLogin = async (data) => {
     setApiError('');
     setIsLoading(true);
-
-    const endpoint = isLogin ? '/auth/login' : '/auth/register';
-    
     try {
-      const response = await fetch(`http://localhost:3000${endpoint}`, {
+      const response = await fetch('http://localhost:3000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ email: data.email, password: data.password }),
       });
-
       const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Authentication failed');
-      }
+      if (!response.ok) throw new Error(result.message || 'Authentication failed');
 
       localStorage.setItem('access_token', result.access_token);
       localStorage.setItem('user', JSON.stringify(result.user));
+      navigate('/dashboard');
+    } catch (err) {
+      setApiError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  const onRegister = async (data) => {
+    setApiError('');
+    setIsLoading(true);
+    try {
+      const response = await fetch('http://localhost:3000/auth/register-enterprise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enterpriseName: data.enterpriseName,
+          email: data.email,
+          password: data.password,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Registration failed');
+
+      localStorage.setItem('access_token', result.access_token);
+      localStorage.setItem('user', JSON.stringify(result.user));
       navigate('/dashboard');
     } catch (err) {
       setApiError(err.message);
@@ -63,7 +95,8 @@ export default function AuthPage() {
   const toggleAuthMode = () => {
     setIsLogin(!isLogin);
     setApiError('');
-    reset();
+    loginForm.reset();
+    registerForm.reset();
   };
 
   return (
@@ -74,46 +107,67 @@ export default function AuthPage() {
 
       <div className="auth-card">
         <div className="auth-header">
-          <h1>{isLogin ? 'Welcome Back' : 'Create Account'}</h1>
-          <p>{isLogin ? 'Access your 3D digital twins.' : 'Join the Matterport experience.'}</p>
+          <h1>{isLogin ? 'Welcome Back' : 'Register Enterprise'}</h1>
+          <p>{isLogin
+            ? 'Sign in to access your 3D digital twin workspace.'
+            : 'Create your enterprise account to start managing inspections.'}
+          </p>
         </div>
 
         {apiError && <div className="auth-error">{apiError}</div>}
 
-        <form onSubmit={handleSubmit(onSubmit)} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div className="input-group">
-            <span className="input-label">Email Address</span>
-            <input
-              type="email"
-              className="auth-input"
-              placeholder="operator@domain.com"
-              {...register("email")}
-            />
-            {errors.email && <span style={{ color: '#ff4a5a', fontSize: '12px' }}>{errors.email.message}</span>}
-          </div>
+        {isLogin ? (
+          <form onSubmit={loginForm.handleSubmit(onLogin)} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="input-group">
+              <span className="input-label">Email Address</span>
+              <input type="email" className="auth-input" placeholder="admin@enterprise.com" {...loginForm.register("email")} />
+              {loginForm.formState.errors.email && <span style={{ color: '#ff4a5a', fontSize: '12px' }}>{loginForm.formState.errors.email.message}</span>}
+            </div>
 
-          <div className="input-group">
-            <span className="input-label">Password</span>
-            <input
-              type="password"
-              className="auth-input"
-              placeholder="••••••••"
-              {...register("password")}
-            />
-            {errors.password && <span style={{ color: '#ff4a5a', fontSize: '12px' }}>{errors.password.message}</span>}
-          </div>
+            <div className="input-group">
+              <span className="input-label">Password</span>
+              <input type="password" className="auth-input" placeholder="••••••••" {...loginForm.register("password")} />
+              {loginForm.formState.errors.password && <span style={{ color: '#ff4a5a', fontSize: '12px' }}>{loginForm.formState.errors.password.message}</span>}
+            </div>
 
-          <button 
-            type="submit" 
-            className="auth-button"
-            disabled={isLoading}
-          >
-            {isLoading ? 'Authenticating...' : (isLogin ? 'Sign In Target' : 'Register')}
-          </button>
-        </form>
+            <button type="submit" className="auth-button" disabled={isLoading}>
+              {isLoading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={registerForm.handleSubmit(onRegister)} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="input-group">
+              <span className="input-label">Enterprise Name</span>
+              <input type="text" className="auth-input" placeholder="Your Company / Organization" {...registerForm.register("enterpriseName")} />
+              {registerForm.formState.errors.enterpriseName && <span style={{ color: '#ff4a5a', fontSize: '12px' }}>{registerForm.formState.errors.enterpriseName.message}</span>}
+            </div>
+
+            <div className="input-group">
+              <span className="input-label">Admin Email</span>
+              <input type="email" className="auth-input" placeholder="admin@enterprise.com" {...registerForm.register("email")} />
+              {registerForm.formState.errors.email && <span style={{ color: '#ff4a5a', fontSize: '12px' }}>{registerForm.formState.errors.email.message}</span>}
+            </div>
+
+            <div className="input-group">
+              <span className="input-label">Password</span>
+              <input type="password" className="auth-input" placeholder="••••••••" {...registerForm.register("password")} />
+              {registerForm.formState.errors.password && <span style={{ color: '#ff4a5a', fontSize: '12px' }}>{registerForm.formState.errors.password.message}</span>}
+            </div>
+
+            <div className="input-group">
+              <span className="input-label">Confirm Password</span>
+              <input type="password" className="auth-input" placeholder="••••••••" {...registerForm.register("confirmPassword")} />
+              {registerForm.formState.errors.confirmPassword && <span style={{ color: '#ff4a5a', fontSize: '12px' }}>{registerForm.formState.errors.confirmPassword.message}</span>}
+            </div>
+
+            <button type="submit" className="auth-button" disabled={isLoading}>
+              {isLoading ? 'Creating Enterprise...' : 'Create Enterprise Account'}
+            </button>
+          </form>
+        )}
 
         <div className="auth-toggle">
-          {isLogin ? "Don't have an account? " : "Already registered? "}
+          {isLogin ? "Don't have an enterprise account? " : "Already registered? "}
           <span className="auth-toggle-link" onClick={toggleAuthMode}>
             {isLogin ? 'Register here' : 'Sign in here'}
           </span>

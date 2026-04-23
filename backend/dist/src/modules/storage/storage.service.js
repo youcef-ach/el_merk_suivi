@@ -26,6 +26,7 @@ let StorageService = class StorageService {
     }
     async onModuleInit() {
         await this.ensureBucketExists('virtual-tours');
+        await this.ensureBucketExists('virtual-inspections');
     }
     async getPresignedPutUrl(bucket, fileName) {
         try {

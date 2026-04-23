@@ -4,7 +4,7 @@ import { useThreeScene } from '../hooks/useThreeScene';
 import { useTourData } from '../hooks/useTourData';
 import { executeFlightAnimation, toggleBoxFading, toggleModelFading } from '../utils/tourAnimations';
 
-const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect }, ref) => {
+const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect, onPointerDragStart, onPointerDragMove, onPointerDragEnd }, ref) => {
   // --- Persistent dummy texture to prevent shader recompilation lag ---
   const dummyTex = useMemo(() => {
     const tex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat);
@@ -12,7 +12,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
     return tex;
   }, []);
 
-  const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, sceneReady } = useThreeScene([dummyTex]);
+  const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, sceneReady } = useThreeScene([dummyTex]);
   const { 
     modelRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
     scanSpheres, loadPanoramaTextures, isDataLoaded 
@@ -47,9 +47,18 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
   onPointerClickRef.current = onPointerClick;
   onPointerSelectRef.current = onPointerSelect;
 
+  const onPointerDragStartRef = useRef(null);
+  const onPointerDragMoveRef = useRef(null);
+  const onPointerDragEndRef = useRef(null);
+  onPointerDragStartRef.current = onPointerDragStart;
+  onPointerDragMoveRef.current = onPointerDragMove;
+  onPointerDragEndRef.current = onPointerDragEnd;
+
   // Active state trackers
   const activeBoxIndexRef = useRef(1);
   const activeSphereRef = useRef(null);
+  const wasDraggingRef = useRef(false);
+  const pointerDownPosRef = useRef({ x: 0, y: 0 });
 
   // Hotspot Overlay view state
   const [isInscan, setIsInscan] = useState(false);
@@ -69,12 +78,15 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
   };
 
   // Synchronize Area Pointers visibility (Only display in Dollhouse mode)
+  // Also toggle keyboard movement: enabled in dollhouse, disabled in panorama
   useEffect(() => {
     const group = sceneRef.current?.getObjectByName('areaPointers');
     if (group) {
       group.visible = !isInscan || isMeshView;
     }
-  }, [isInscan, isMeshView, sceneRef]);
+    // Enable keyboard in dollhouse view, disable in panorama
+    keyboardEnabledRef.current = !isInscan || isMeshView;
+  }, [isInscan, isMeshView, sceneRef, keyboardEnabledRef]);
 
   // --- Click Event & Raycasting ---
   useEffect(() => {
@@ -88,6 +100,17 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
     const mouse = new THREE.Vector2();
 
     const onClick = (event) => {
+      // Suppress click if it's the tail-end of a handle drag
+      if (wasDraggingRef.current) {
+        wasDraggingRef.current = false;
+        return;
+      }
+
+      // Suppress click if the mouse moved significantly (orbit drag over a wall)
+      const dx = event.clientX - pointerDownPosRef.current.x;
+      const dy = event.clientY - pointerDownPosRef.current.y;
+      if (Math.sqrt(dx * dx + dy * dy) > 5) return;
+
       // Unconditionally try to click/select a pointer first (studio mode)
       if (onPointerSelectRef.current) {
         const didHitPointer = onPointerSelectRef.current(event);
@@ -117,7 +140,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
             const tagId = hitSprite.userData.tagId;
             // Fetch tag info from backend
             const token = localStorage.getItem('access_token');
-            fetch(`http://localhost:3000/tours/${tourId}`, {
+            fetch(`http://localhost:3000/inspections/${tourId}`, {
               headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             })
               .then(r => r.json())
@@ -263,8 +286,38 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
 
     renderer.domElement.addEventListener('click', onClick);
 
+    // Drag events for area pointer wall resizing
+    const onDown = (e) => {
+      pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+      if (onPointerDragStartRef.current) {
+        const started = onPointerDragStartRef.current(e);
+        if (started) {
+          wasDraggingRef.current = true;
+          e.stopPropagation();
+        }
+      }
+    };
+    const onMove = (e) => {
+      if (wasDraggingRef.current && onPointerDragMoveRef.current) {
+        onPointerDragMoveRef.current(e);
+      }
+    };
+    const onUp = (e) => {
+      if (wasDraggingRef.current && onPointerDragEndRef.current) {
+        onPointerDragEndRef.current(e);
+        // wasDraggingRef stays true — will be cleared by the next click event
+      }
+    };
+
+    renderer.domElement.addEventListener('pointerdown', onDown);
+    renderer.domElement.addEventListener('pointermove', onMove);
+    renderer.domElement.addEventListener('pointerup', onUp);
+
     return () => {
       renderer.domElement.removeEventListener('click', onClick);
+      renderer.domElement.removeEventListener('pointerdown', onDown);
+      renderer.domElement.removeEventListener('pointermove', onMove);
+      renderer.domElement.removeEventListener('pointerup', onUp);
     };
   }, [isDataLoaded, scanSpheres, cameraRef, rendererRef, controlsRef, sceneRef, modelRef, box1Ref, box2Ref, panoramaGroup1Ref, panoramaGroup2Ref, loadPanoramaTextures, dummyTex]);
 

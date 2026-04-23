@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
 import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
 import { createTagSpriteMaterial } from './useTags';
 
@@ -43,7 +44,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
         const token = localStorage.getItem('access_token');
         if (!token || token === 'undefined') throw new Error("Missing authentication token in browser");
 
-        const res = await fetch(`http://localhost:3000/tours/${tourId}`, {
+        const res = await fetch(`http://localhost:3000/inspections/${tourId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -54,13 +55,13 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
 
         const tour = await res.json();
         if (tour.glbModelUrl) {
-          glbUrl = `http://localhost:9000/virtual-tours/${tour.glbModelUrl}`;
+          glbUrl = `http://localhost:9000/virtual-inspections/${tour.glbModelUrl}`;
         } else {
           throw new Error('This tour has no GLB architecture model attached to it.');
         }
 
         if (tour.scansJsonUrl) {
-          jsonUrl = `http://localhost:9000/virtual-tours/${tour.scansJsonUrl}`;
+          jsonUrl = `http://localhost:9000/virtual-inspections/${tour.scansJsonUrl}`;
         } else {
           throw new Error('This tour has no Scan telemetry mapping attached to it.');
         }
@@ -81,6 +82,9 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
       // Load GLB model and scan JSON in parallel
       const glbPromise = new Promise((resolve, reject) => {
         const gltfLoader = new GLTFLoader();
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+        gltfLoader.setDRACOLoader(dracoLoader);
         gltfLoader.load(glbUrl, resolve, undefined, reject);
       });
 
@@ -193,7 +197,10 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
                 ap.posZ,
                 ap.height ?? 15.0,
                 ap.thickness ?? 0.04,
-                ap.labelSize ?? 1.0
+                ap.labelSize ?? 1.0,
+                ap.sizeX ?? 3.0,
+                ap.sizeY ?? 3.0,
+                ap.wallHeight ?? 3.0
               );
               ptr.userData = { pointerId: ap.id };
               areaPointersGroup.add(ptr);
@@ -302,7 +309,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
       const faces = ['py', 'pz', 'px', 'nz', 'nx', 'ny'];
 
       const baseUrl = tourId
-        ? `http://localhost:9000/virtual-tours/tours/${tourId}/`
+        ? `http://localhost:9000/virtual-inspections/inspections/${tourId}/`
         : `/`;
 
       const loadPromises = faces.map((face) => {

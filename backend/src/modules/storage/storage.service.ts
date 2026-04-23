@@ -18,6 +18,7 @@ export class StorageService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureBucketExists('virtual-tours');
+    await this.ensureBucketExists('virtual-inspections');
   }
 
   /**

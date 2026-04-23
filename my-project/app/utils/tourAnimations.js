@@ -199,21 +199,22 @@ export const executeFlightAnimation = ({
 
   } else {
     // ──────────────────────────────────────
-    // PANO → PANO  (1.6s total)
-    // Cinematic cross-dissolve with subtle model bridge
+    // PANO → PANO  (clean 2-phase transition)
     //
-    // Timeline:
-    //   0.0s – 1.6s : Camera flies from current position to target
-    //   0.0s – 0.9s : Current panorama fades out gently (power2.inOut for smooth ease)
-    //   0.2s – 0.8s : Model briefly surfaces to ~40% as visual bridge
-    //   0.5s – 1.5s : Next panorama fades in (overlaps with current fade-out)
+    // Phase 1 (0.0s – 0.7s): Parallel
+    //   • Current panorama fades OUT  (1 → 0)
+    //   • 3D model fades IN           (0 → 1)
     //
-    // The heavy overlap (0.5s–0.9s both panos partially visible + model bridge)
-    // ensures there is never an empty frame.
+    // Phase 2 (0.7s – 1.4s): Immediately follows, parallel
+    //   • 3D model fades OUT          (1 → 0)
+    //   • Next panorama fades IN      (0 → 1)
+    //
+    // No time gap — Phase 2 starts the instant Phase 1 ends.
     // ──────────────────────────────────────
-    const FLIGHT = 1.6;
-    const MODEL_PEAK = 0.4; // Model peaks at 40% — visible bridge but never jarring
+    const PHASE = 0.7;          // Duration of each phase
+    const FLIGHT = PHASE * 2;   // Total camera flight = both phases
 
+    // Camera flight spans the full duration
     tl.to(camera.position, {
       x: targetPos.x,
       y: targetPos.y,
@@ -228,30 +229,29 @@ export const executeFlightAnimation = ({
       }
     }, 0);
 
-    // Current panorama: slow, gentle fade-out over the first portion
+    // ── Phase 1: Current pano OUT + Model IN ──
     if (currentBox) {
       currentBox.material.forEach(mat => {
-        tl.to(mat, { opacity: 0, duration: 0.9, ease: "power2.inOut" }, 0);
+        tl.to(mat, { opacity: 0, duration: PHASE, ease: "power2.inOut" }, 0);
       });
     }
-
-    // 3D model: subtle bridge (rises to MODEL_PEAK then dissolves back)
-    // Starts slightly after the current pano begins fading, ends before next pano is fully in
     if (model) {
       getModelMaterials(model).forEach(mat => {
         mat.colorWrite = true;
+        mat.transparent = true;
         mat.needsUpdate = true;
-        // Rise up: 0.2s → 0.8s
-        tl.to(mat, { opacity: MODEL_PEAK, duration: 0.6, ease: "power1.out" }, 0.2);
-        // Fall back down: 0.8s → 1.4s
-        tl.to(mat, { opacity: 0, duration: 0.6, ease: "power2.in" }, 0.8);
+        tl.to(mat, { opacity: 1, duration: PHASE, ease: "power2.inOut" }, 0);
       });
     }
 
-    // Next panorama: begins materializing midway, overlapping with the current fade-out
-    // This creates a true cross-dissolve where both panos are partially visible simultaneously
+    // ── Phase 2: Model OUT + Next pano IN ──
+    if (model) {
+      getModelMaterials(model).forEach(mat => {
+        tl.to(mat, { opacity: 0, duration: PHASE, ease: "power2.inOut" }, PHASE);
+      });
+    }
     nextBox.material.forEach(mat => {
-      tl.to(mat, { opacity: 1, duration: 1.0, ease: "power2.out" }, 0.5);
+      tl.to(mat, { opacity: 1, duration: PHASE, ease: "power2.inOut" }, PHASE);
     });
   }
 

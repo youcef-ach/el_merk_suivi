@@ -205,7 +205,7 @@ export const useTags = (viewerRef, tourId) => {
     const token = getToken();
     if (!token) return;
 
-    fetch(`${API}/tours/${tourId}`, {
+    fetch(`${API}/inspections/${tourId}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(r => r.json())
@@ -332,7 +332,7 @@ export const useTags = (viewerRef, tourId) => {
     if (!token || !tourId) return;
 
     try {
-      const res = await fetch(`${API}/tours/${tourId}/tags`, {
+      const res = await fetch(`${API}/inspections/${tourId}/tags`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -366,7 +366,7 @@ export const useTags = (viewerRef, tourId) => {
     if (!token || !tourId) return;
 
     try {
-      const res = await fetch(`${API}/tours/${tourId}/tags/${tagId}`, {
+      const res = await fetch(`${API}/inspections/${tourId}/tags/${tagId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -418,7 +418,7 @@ export const useTags = (viewerRef, tourId) => {
 
     try {
       // 1. Get presigned URL and create document record
-      const urlRes = await fetch(`${API}/tours/${tourId}/tags/${tagId}/documents`, {
+      const urlRes = await fetch(`${API}/inspections/${tourId}/tags/${tagId}/documents`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -459,7 +459,7 @@ export const useTags = (viewerRef, tourId) => {
     if (!token || !tourId) return;
 
     try {
-      const res = await fetch(`${API}/tours/${tourId}/tags/${tagId}/documents/${docId}`, {
+      const res = await fetch(`${API}/inspections/${tourId}/tags/${tagId}/documents/${docId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -486,7 +486,7 @@ export const useTags = (viewerRef, tourId) => {
     if (!token || !tourId) return;
 
     try {
-      const res = await fetch(`${API}/tours/${tourId}/tags/${tagId}`, {
+      const res = await fetch(`${API}/inspections/${tourId}/tags/${tagId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });

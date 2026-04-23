@@ -1,8 +1,9 @@
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import './navbar.css';
 
 export default function Navbar() {
   const navigate = useNavigate();
+  const location = useLocation();
   
   let user = null;
   try {
@@ -13,6 +14,7 @@ export default function Navbar() {
   }
 
   const role = user?.role || 'VIEWER';
+  const enterpriseName = user?.enterpriseName || 'Enterprise';
 
   const handleSignOut = () => {
     localStorage.removeItem('access_token');
@@ -20,19 +22,25 @@ export default function Navbar() {
     navigate('/auth', { replace: true });
   };
 
+  const isActive = (path) => location.pathname === path || location.pathname.startsWith(path + '/');
+
   return (
     <nav className="glass-navbar">
       <div className="navbar-container">
-        <div className="navbar-logo">
+        <div className="navbar-logo" onClick={() => navigate('/projects')} style={{ cursor: 'pointer' }}>
           <span className="logo-icon">▲</span>
           <span className="logo-text">VirtualTwin</span>
         </div>
 
         <div className="navbar-links">
-          <button className="nav-btn" onClick={() => navigate('/')}>3D Tours</button>
-          
-          <button className="nav-btn nav-btn-admin">Studio Manager</button>
-          <button className="nav-btn nav-btn-admin">Permissions</button>
+          <button className={`nav-btn ${isActive('/projects') ? 'nav-btn-active' : ''}`} onClick={() => navigate('/projects')}>
+            Projects
+          </button>
+          {role === 'ADMIN' && (
+            <button className={`nav-btn ${isActive('/members') ? 'nav-btn-active' : ''}`} onClick={() => navigate('/members')}>
+              Team
+            </button>
+          )}
         </div>
 
         <div className="navbar-actions">

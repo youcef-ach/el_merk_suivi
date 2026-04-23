@@ -11,7 +11,9 @@ const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const prisma_module_1 = require("./modules/prisma/prisma.module");
 const auth_module_1 = require("./modules/auth/auth.module");
-const tours_module_1 = require("./modules/tours/tours.module");
+const enterprises_module_1 = require("./modules/enterprises/enterprises.module");
+const projects_module_1 = require("./modules/projects/projects.module");
+const inspections_module_1 = require("./modules/inspections/inspections.module");
 const storage_module_1 = require("./modules/storage/storage.module");
 let AppModule = class AppModule {
 };
@@ -25,8 +27,10 @@ exports.AppModule = AppModule = __decorate([
             }),
             prisma_module_1.PrismaModule,
             auth_module_1.AuthModule,
+            enterprises_module_1.EnterprisesModule,
+            projects_module_1.ProjectsModule,
             storage_module_1.StorageModule,
-            tours_module_1.ToursModule,
+            inspections_module_1.InspectionsModule,
         ],
     })
 ], AppModule);

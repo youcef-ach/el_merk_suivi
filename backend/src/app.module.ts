@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { ToursModule } from './modules/tours/tours.module';
+import { EnterprisesModule } from './modules/enterprises/enterprises.module';
+import { ProjectsModule } from './modules/projects/projects.module';
+import { InspectionsModule } from './modules/inspections/inspections.module';
 import { StorageModule } from './modules/storage/storage.module';
 
 @Module({
@@ -14,8 +16,10 @@ import { StorageModule } from './modules/storage/storage.module';
     }),
     PrismaModule,
     AuthModule,
+    EnterprisesModule,
+    ProjectsModule,
     StorageModule,
-    ToursModule,
+    InspectionsModule,
   ],
 })
 export class AppModule {}

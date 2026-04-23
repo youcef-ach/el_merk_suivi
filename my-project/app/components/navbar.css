@@ -75,6 +75,12 @@
   background: rgba(164, 106, 212, 0.1);
 }
 
+.nav-btn-active {
+  color: #fff;
+  background: rgba(45, 122, 238, 0.2);
+  border: 1px solid rgba(45, 122, 238, 0.3);
+}
+
 .navbar-actions {
   display: flex;
   align-items: center;

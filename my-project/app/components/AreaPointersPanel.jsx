@@ -15,6 +15,9 @@ export default function AreaPointersPanel({
   const [editHeight, setEditHeight] = useState(15.0);
   const [editThickness, setEditThickness] = useState(0.04);
   const [editLabelSize, setEditLabelSize] = useState(1.0);
+  const [editSizeX, setEditSizeX] = useState(3.0);
+  const [editSizeY, setEditSizeY] = useState(3.0);
+  const [editWallHeight, setEditWallHeight] = useState(3.0);
 
   // When selection changes, reset edit state
   if (selectedPointer && !isEditing) {
@@ -23,6 +26,9 @@ export default function AreaPointersPanel({
     setEditHeight(selectedPointer.height ?? 15.0);
     setEditThickness(selectedPointer.thickness ?? 0.04);
     setEditLabelSize(selectedPointer.labelSize ?? 1.0);
+    setEditSizeX(selectedPointer.sizeX ?? 3.0);
+    setEditSizeY(selectedPointer.sizeY ?? 3.0);
+    setEditWallHeight(selectedPointer.wallHeight ?? 3.0);
     setIsEditing(true);
   } else if (!selectedPointer && isEditing) {
     setIsEditing(false);
@@ -34,7 +40,10 @@ export default function AreaPointersPanel({
       color: editColor,
       height: parseFloat(editHeight),
       thickness: parseFloat(editThickness),
-      labelSize: parseFloat(editLabelSize)
+      labelSize: parseFloat(editLabelSize),
+      sizeX: parseFloat(editSizeX),
+      sizeY: parseFloat(editSizeY),
+      wallHeight: parseFloat(editWallHeight)
     });
   };
 
@@ -83,7 +92,13 @@ export default function AreaPointersPanel({
           <label className="tag-field-label">Laser Height</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
             <input type="range" min="1.0" max="50.0" step="0.5" value={editHeight} onChange={(e) => setEditHeight(e.target.value)} style={{ flex: 1 }} />
-            <span style={{ fontSize: '12px', width: '30px', color: '#ff4d6d' }}>{editHeight}m</span>
+            <span style={{ fontSize: '12px', width: '35px', color: '#ff4d6d' }}>{editHeight}m</span>
+          </div>
+
+          <label className="tag-field-label">Wall Height</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+            <input type="range" min="0.5" max="20.0" step="0.25" value={editWallHeight} onChange={(e) => setEditWallHeight(e.target.value)} style={{ flex: 1 }} />
+            <span style={{ fontSize: '12px', width: '35px', color: '#ff4d6d' }}>{editWallHeight}m</span>
           </div>
 
           <label className="tag-field-label">Laser Thickness</label>
@@ -93,9 +108,21 @@ export default function AreaPointersPanel({
           </div>
 
           <label className="tag-field-label">Label Size</label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
             <input type="range" min="0.5" max="6.0" step="0.1" value={editLabelSize} onChange={(e) => setEditLabelSize(e.target.value)} style={{ flex: 1 }} />
             <span style={{ fontSize: '12px', width: '30px', color: '#ff4d6d' }}>{editLabelSize}x</span>
+          </div>
+
+          <label className="tag-field-label">Area Width (X)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+            <input type="range" min="0.5" max="30.0" step="0.25" value={editSizeX} onChange={(e) => setEditSizeX(e.target.value)} style={{ flex: 1 }} />
+            <span style={{ fontSize: '12px', width: '35px', color: '#ff4d6d' }}>{editSizeX}m</span>
+          </div>
+
+          <label className="tag-field-label">Area Depth (Y)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+            <input type="range" min="0.5" max="30.0" step="0.25" value={editSizeY} onChange={(e) => setEditSizeY(e.target.value)} style={{ flex: 1 }} />
+            <span style={{ fontSize: '12px', width: '35px', color: '#ff4d6d' }}>{editSizeY}m</span>
           </div>
 
           <button className="tag-save-btn" onClick={handleSave} style={{ background: 'linear-gradient(135deg, #ff4d6d, #c9184a)', color: 'white' }}>

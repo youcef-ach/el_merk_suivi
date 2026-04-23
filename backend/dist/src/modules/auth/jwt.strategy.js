@@ -32,7 +32,7 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
         if (!user) {
             throw new common_1.UnauthorizedException('User no longer exists. Please log in again.');
         }
-        return { id: user.id, email: user.email, role: user.role };
+        return { id: user.id, email: user.email, role: user.role, enterpriseId: user.enterpriseId };
     }
 };
 exports.JwtStrategy = JwtStrategy;

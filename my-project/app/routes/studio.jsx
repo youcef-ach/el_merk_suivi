@@ -67,6 +67,10 @@ function StudioContent() {
     deletePointer,
     selectPointer,
     deselectPointer,
+    tryStartDrag,
+    handleDragMove,
+    handleDragEnd,
+    isDragging,
   } = useAreaPointers(viewerRef, id);
 
   // ─── Tool toggle (mutually exclusive) ───
@@ -161,6 +165,9 @@ function StudioContent() {
           pointersMode={pointersMode}
           onPointerClick={onPointerClickHandler}
           onPointerSelect={trySelectPointer}
+          onPointerDragStart={tryStartDrag}
+          onPointerDragMove={handleDragMove}
+          onPointerDragEnd={handleDragEnd}
         />
       </div>
 

@@ -37,10 +37,9 @@ services:
       sleep 5 &&
       /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin &&
       /usr/bin/mc mb myminio/virtual-tours --ignore-existing &&
+      /usr/bin/mc mb myminio/virtual-inspections --ignore-existing &&
       /usr/bin/mc anonymous set public myminio/virtual-tours &&
-      echo '{\"corsRule\": [{\"allowedOrigin\": [\"*\"], \"allowedHeader\": [\"*\"], \"allowedMethod\": [\"GET\", \"PUT\", \"POST\", \"DELETE\", \"HEAD\"], \"maxAgeSeconds\": 3600}]}' > cors.json &&
-      export MC_HOST_myminio=http://minioadmin:minioadmin@minio:9000 &&
-      curl -X PUT -H 'Content-Type: application/json' --data-binary @cors.json http://minio:9000/virtual-tours?cors &&
+      /usr/bin/mc anonymous set public myminio/virtual-inspections &&
       echo 'MinIO initialization completed!'
       "
 

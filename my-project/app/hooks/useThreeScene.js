@@ -7,7 +7,7 @@ import { disposeScene } from '../utils/threeCleanup';
  * Initializes the core Three.js components and manages the render loop.
  * 
  * @param {Array<THREE.Texture>} preserveTextures - Optional textures to not dispose on unmount.
- * @returns {Object} { mountRef, sceneRef, cameraRef, rendererRef, controlsRef }
+ * @returns {Object} { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef }
  */
 export const useThreeScene = (preserveTextures = []) => {
   const mountRef = useRef(null);
@@ -16,6 +16,7 @@ export const useThreeScene = (preserveTextures = []) => {
   const rendererRef = useRef(null);
   const controlsRef = useRef(null);
   const rafRef = useRef(null);
+  const keyboardEnabledRef = useRef(true);
   const [sceneReady, setSceneReady] = useState(false);
 
   useEffect(() => {
@@ -54,15 +55,73 @@ export const useThreeScene = (preserveTextures = []) => {
     controls.dampingFactor = 0.05;
     controlsRef.current = controls;
 
-    // 6. Animation Loop
+    // 6. Keyboard Free Movement
+    const keysPressed = new Set();
+    const MOVE_SPEED = 14.0;   // units per second
+    const FAST_MULT = 2.5;    // shift multiplier
+    let lastTime = performance.now();
+
+    const onKeyDown = (e) => {
+      if (!keyboardEnabledRef.current) return;
+      // Ignore if user is typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+      keysPressed.add(e.code);
+    };
+    const onKeyUp = (e) => {
+      keysPressed.delete(e.code);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+
+    // 7. Animation Loop
+    const _forward = new THREE.Vector3();
+    const _right = new THREE.Vector3();
+    const _moveDir = new THREE.Vector3();
+
     const animate = () => {
       rafRef.current = requestAnimationFrame(animate);
+
+      const now = performance.now();
+      const dt = Math.min((now - lastTime) / 1000, 0.1); // cap at 100ms
+      lastTime = now;
+
+      // Apply keyboard movement
+      if (keyboardEnabledRef.current && keysPressed.size > 0) {
+        const speed = MOVE_SPEED * (keysPressed.has('ShiftLeft') || keysPressed.has('ShiftRight') ? FAST_MULT : 1);
+
+        // Get camera's forward direction (projected onto XY plane for horizontal movement)
+        camera.getWorldDirection(_forward);
+        _forward.z = 0;
+        _forward.normalize();
+
+        // Right vector = forward × up
+        _right.crossVectors(_forward, camera.up).normalize();
+
+        _moveDir.set(0, 0, 0);
+
+        // WASD + Arrow keys
+        if (keysPressed.has('KeyW') || keysPressed.has('ArrowUp'))    _moveDir.add(_forward);
+        if (keysPressed.has('KeyS') || keysPressed.has('ArrowDown'))  _moveDir.sub(_forward);
+        if (keysPressed.has('KeyA') || keysPressed.has('ArrowLeft'))  _moveDir.sub(_right);
+        if (keysPressed.has('KeyD') || keysPressed.has('ArrowRight')) _moveDir.add(_right);
+
+        // Q/E or Space/Ctrl for vertical
+        if (keysPressed.has('KeyE') || keysPressed.has('Space'))      _moveDir.z += 1;
+        if (keysPressed.has('KeyQ') || keysPressed.has('ControlLeft') || keysPressed.has('ControlRight')) _moveDir.z -= 1;
+
+        if (_moveDir.lengthSq() > 0) {
+          _moveDir.normalize().multiplyScalar(speed * dt);
+          camera.position.add(_moveDir);
+          controls.target.add(_moveDir);
+        }
+      }
+
       controls.update();
       renderer.render(scene, camera);
     };
     animate();
 
-    // 7. Resize Handler
+    // 8. Resize Handler
     const handleResize = () => {
       if (!mountRef.current || !camera || !renderer) return;
       camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
@@ -71,9 +130,11 @@ export const useThreeScene = (preserveTextures = []) => {
     };
     window.addEventListener('resize', handleResize);
 
-    // 8. Cleanup on Unmount
+    // 9. Cleanup on Unmount
     return () => {
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
       }
@@ -98,5 +159,5 @@ export const useThreeScene = (preserveTextures = []) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // VERY IMPORTANT: Leave empty! preserveTextures inline array was causing re-renders!
 
-  return { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, sceneReady };
+  return { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, sceneReady };
 };
