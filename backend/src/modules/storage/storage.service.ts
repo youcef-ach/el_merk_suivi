@@ -65,4 +65,22 @@ export class StorageService implements OnModuleInit {
       throw new InternalServerErrorException(`Failed to verify bucket: ${error.message}`);
     }
   }
+
+  /**
+   * Uploads a buffer directly to MinIO.
+   * 
+   * @param bucket - The target bucket name.
+   * @param fileName - Target filename/path inside the bucket.
+   * @param buffer - The file buffer.
+   * @param contentType - The MIME type of the file.
+   */
+  async uploadBuffer(bucket: string, fileName: string, buffer: Buffer, contentType: string = 'application/octet-stream'): Promise<void> {
+    try {
+      await this.minioClient.putObject(bucket, fileName, buffer, buffer.length, {
+        'Content-Type': contentType,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(`Failed to upload buffer: ${error.message}`);
+    }
+  }
 }

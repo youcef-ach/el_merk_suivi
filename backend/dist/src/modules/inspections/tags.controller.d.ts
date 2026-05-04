@@ -14,14 +14,14 @@ export declare class TagsController {
         }[];
     } & {
         id: string;
-        color: string;
+        title: string;
+        description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
-        title: string;
-        description: string | null;
         icon: string;
+        color: string;
         size: number;
     }>;
     update(inspectionId: string, tagId: string, dto: UpdateTagDto, user: any): Promise<{
@@ -33,26 +33,26 @@ export declare class TagsController {
         }[];
     } & {
         id: string;
-        color: string;
+        title: string;
+        description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
-        title: string;
-        description: string | null;
         icon: string;
+        color: string;
         size: number;
     }>;
     remove(inspectionId: string, tagId: string, user: any): Promise<{
         id: string;
-        color: string;
+        title: string;
+        description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
-        title: string;
-        description: string | null;
         icon: string;
+        color: string;
         size: number;
     }>;
     addDocument(inspectionId: string, tagId: string, dto: CreateTagDocumentDto, user: any): Promise<{

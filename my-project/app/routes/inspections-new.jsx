@@ -30,6 +30,7 @@ function NewInspectionContent() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const glbInputRef = useRef(null);
   const jsonInputRef = useRef(null);
+  const rcJsonInputRef = useRef(null);
   const imagesInputRef = useRef(null);
   const thumbnailInputRef = useRef(null);
   const videoInputRef = useRef(null);
@@ -108,6 +109,7 @@ function NewInspectionContent() {
 
     const glbFile = glbInputRef.current?.files[0];
     const jsonFile = jsonInputRef.current?.files[0];
+    const rcJsonFile = rcJsonInputRef.current?.files[0];
     const imageFiles = imagesInputRef.current?.files;
     const thumbnailFile = thumbnailInputRef.current?.files[0];
     const videoFile = videoInputRef.current?.files[0];
@@ -137,7 +139,21 @@ function NewInspectionContent() {
          incrementProgress();
       }
       
-      if (jsonFile) {
+      if (jsonFile && rcJsonFile) {
+         const mpText = await jsonFile.text();
+         const rcText = await rcJsonFile.text();
+         const token = localStorage.getItem('access_token');
+         const processRes = await fetch(`http://localhost:3000/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
+            method: 'POST',
+            headers: {
+               'Content-Type': 'application/json',
+               'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ mpData: JSON.parse(mpText), rcData: JSON.parse(rcText) })
+         });
+         if (!processRes.ok) throw new Error("Failed to process and upload scans mapping");
+         incrementProgress();
+      } else if (jsonFile) {
          await uploadFileToMinio(inspectionId, jsonFile, 'scans.json');
          incrementProgress();
       }
@@ -260,8 +276,13 @@ function NewInspectionContent() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">scans.json Mapping</label>
+                <label className="form-label">scans.json Mapping (Matterport)</label>
                 <input type="file" ref={jsonInputRef} accept=".json" style={{ color: 'white', padding: '12px 0' }} />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">RealityCapture Mapping (csvjson.json)</label>
+                <input type="file" ref={rcJsonInputRef} accept=".json" style={{ color: 'white', padding: '12px 0' }} />
               </div>
 
               <div className="form-group">

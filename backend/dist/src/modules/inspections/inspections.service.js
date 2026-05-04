@@ -191,6 +191,25 @@ let InspectionsService = class InspectionsService {
         }
         return { presignedUrl, expectedPath: s3Path };
     }
+    async processAndUploadScans(id, mpData, rcData, userEnterpriseId, role) {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the creator or admin can upload files to this inspection');
+        }
+        const { processScans } = require('./utils/scan-processor.util');
+        const processedData = processScans(mpData, rcData);
+        const fileBuffer = Buffer.from(JSON.stringify(processedData, null, 2));
+        const bucket = 'virtual-inspections';
+        const s3Path = `inspections/${id}/scans.json`;
+        await this.storageService.uploadBuffer(bucket, s3Path, fileBuffer, 'application/json');
+        await this.prisma.inspection.update({
+            where: { id },
+            data: { scansJsonUrl: s3Path },
+        });
+        return { success: true, s3Path };
+    }
     async createTag(inspectionId, dto, userEnterpriseId, role) {
         const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
         if (!inspection)

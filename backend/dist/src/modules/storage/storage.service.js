@@ -59,6 +59,16 @@ let StorageService = class StorageService {
             throw new common_1.InternalServerErrorException(`Failed to verify bucket: ${error.message}`);
         }
     }
+    async uploadBuffer(bucket, fileName, buffer, contentType = 'application/octet-stream') {
+        try {
+            await this.minioClient.putObject(bucket, fileName, buffer, buffer.length, {
+                'Content-Type': contentType,
+            });
+        }
+        catch (error) {
+            throw new common_1.InternalServerErrorException(`Failed to upload buffer: ${error.message}`);
+        }
+    }
 };
 exports.StorageService = StorageService;
 exports.StorageService = StorageService = __decorate([

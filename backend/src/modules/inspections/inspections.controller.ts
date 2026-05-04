@@ -91,4 +91,13 @@ export class InspectionsController {
   ) {
     return this.inspectionsService.getUploadUrl(id, fileName, user.enterpriseId, user.role);
   }
+
+  @Post(':id/process-scans')
+  async processAndUploadScans(
+    @Param('id') id: string,
+    @Body() body: { mpData: any; rcData: any },
+    @GetUser() user: any,
+  ) {
+    return this.inspectionsService.processAndUploadScans(id, body.mpData, body.rcData, user.enterpriseId, user.role);
+  }
 }

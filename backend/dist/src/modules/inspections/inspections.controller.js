@@ -59,6 +59,9 @@ let InspectionsController = class InspectionsController {
     getUploadUrl(id, fileName, user) {
         return this.inspectionsService.getUploadUrl(id, fileName, user.enterpriseId, user.role);
     }
+    async processAndUploadScans(id, body, user) {
+        return this.inspectionsService.processAndUploadScans(id, body.mpData, body.rcData, user.enterpriseId, user.role);
+    }
 };
 exports.InspectionsController = InspectionsController;
 __decorate([
@@ -152,6 +155,15 @@ __decorate([
     __metadata("design:paramtypes", [String, String, Object]),
     __metadata("design:returntype", void 0)
 ], InspectionsController.prototype, "getUploadUrl", null);
+__decorate([
+    (0, common_1.Post)(':id/process-scans'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object, Object]),
+    __metadata("design:returntype", Promise)
+], InspectionsController.prototype, "processAndUploadScans", null);
 exports.InspectionsController = InspectionsController = __decorate([
     (0, common_1.Controller)('projects/:projectId/inspections'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, roles_guard_1.RolesGuard),

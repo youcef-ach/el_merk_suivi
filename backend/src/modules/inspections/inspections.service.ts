@@ -234,6 +234,33 @@ export class InspectionsService {
     return { presignedUrl, expectedPath: s3Path };
   }
 
+  async processAndUploadScans(id: string, mpData: any, rcData: any, userEnterpriseId: string, role: Role) {
+    const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+    if (!inspection) throw new NotFoundException('Inspection not found');
+
+    if (inspection.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
+      throw new ForbiddenException('Only the creator or admin can upload files to this inspection');
+    }
+
+    // Process using the utility function
+    const { processScans } = require('./utils/scan-processor.util');
+    const processedData = processScans(mpData, rcData);
+    const fileBuffer = Buffer.from(JSON.stringify(processedData, null, 2));
+
+    // Upload to Minio
+    const bucket = 'virtual-inspections';
+    const s3Path = `inspections/${id}/scans.json`;
+    await this.storageService.uploadBuffer(bucket, s3Path, fileBuffer, 'application/json');
+
+    // Update DB
+    await this.prisma.inspection.update({
+      where: { id },
+      data: { scansJsonUrl: s3Path },
+    });
+
+    return { success: true, s3Path };
+  }
+
   // ─── Tag CRUD ───────────────────────────────────────────────
 
   async createTag(inspectionId: string, dto: CreateTagDto, userEnterpriseId: string, role: Role) {
