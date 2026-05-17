@@ -37,7 +37,7 @@ function MembersContent() {
   const fetchMembers = async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch('http://localhost:3000/enterprises/members/list', {
+      const res = await fetch('http://app.alpha.openscaler.net:9251/enterprises/members/list', {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to fetch team members');
@@ -54,7 +54,7 @@ function MembersContent() {
     e.preventDefault();
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch('http://localhost:3000/enterprises/members/add', {
+      const res = await fetch('http://app.alpha.openscaler.net:9251/enterprises/members/add', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -80,7 +80,7 @@ function MembersContent() {
     if (!window.confirm('Remove this member from your enterprise?')) return;
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`http://localhost:3000/enterprises/members/${memberId}`, {
+      const res = await fetch(`http://app.alpha.openscaler.net:9251/enterprises/members/${memberId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });

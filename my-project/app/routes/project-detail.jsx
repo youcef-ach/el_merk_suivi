@@ -33,7 +33,7 @@ function ProjectDetailContent() {
   const fetchProject = async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://localhost:3000/projects/${projectId}`, {
+      const response = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -60,12 +60,29 @@ function ProjectDetailContent() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://localhost:3000/projects/${projectId}/inspections/${id}`, {
+      const response = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (!response.ok) throw new Error("Failed to purge inspection.");
+      fetchProject(); // refresh
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleCloneInspection = async (id) => {
+    if (!window.confirm("This will duplicate the inspection, preserving S3 files. Proceed?")) return;
+
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections/${id}/clone`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) throw new Error("Failed to clone inspection.");
       fetchProject(); // refresh
     } catch (err) {
       alert(err.message);
@@ -109,7 +126,7 @@ function ProjectDetailContent() {
               <div key={insp.id} className="tour-card" style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ position: 'relative', width: '100%', height: '180px', backgroundColor: '#111' }}>
                    {insp.thumbnailUrl ? (
-                      <img src={`http://localhost:9000/virtual-inspections/${insp.thumbnailUrl}`} alt={insp.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={`http://app.alpha.openscaler.net:9255/virtual-inspections/${insp.thumbnailUrl}`} alt={insp.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                    ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.2)' }}>
                          No Thumbnail
@@ -148,14 +165,19 @@ function ProjectDetailContent() {
                        </button>
                      )}
                      {insp.videoUrl && (
-                        <button className="btn-secondary" onClick={() => setSelectedVideo(`http://localhost:9000/virtual-inspections/${insp.videoUrl}`)} style={{ borderColor: '#3a82f6', color: '#3a82f6' }}>
+                        <button className="btn-secondary" onClick={() => setSelectedVideo(`http://app.alpha.openscaler.net:9255/virtual-inspections/${insp.videoUrl}`)} style={{ borderColor: '#3a82f6', color: '#3a82f6' }}>
                           Watch Video
                         </button>
                      )}
                      {role === 'ADMIN' && (
-                       <button className="btn-danger" onClick={() => handleDeleteInspection(insp.id)}>
-                         Purge
-                       </button>
+                       <>
+                         <button className="btn-secondary" onClick={() => handleCloneInspection(insp.id)}>
+                           Clone
+                         </button>
+                         <button className="btn-danger" onClick={() => handleDeleteInspection(insp.id)}>
+                           Purge
+                         </button>
+                       </>
                      )}
                    </div>
                 </div>

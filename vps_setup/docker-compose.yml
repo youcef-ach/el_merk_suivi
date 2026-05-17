@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: 3d_tour_db
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: virtual_tours
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio
+    container_name: 3d_tour_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_SERVER_URL: "http://app.alpha.openscaler.net:9255"
+      MINIO_BROWSER_REDIRECT_URL: "http://app.alpha.openscaler.net:9254"
+    command: server /data --console-address ":9001"
+    volumes:
+      - miniodata:/data
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for MinIO...' &&
+      sleep 5 &&
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin &&
+      /usr/bin/mc mb myminio/virtual-tours --ignore-existing &&
+      /usr/bin/mc mb myminio/virtual-inspections --ignore-existing &&
+      /usr/bin/mc anonymous set public myminio/virtual-tours &&
+      /usr/bin/mc anonymous set public myminio/virtual-inspections &&
+      echo 'MinIO initialization completed!'
+      "
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: 3d_tour_backend
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://root:password@db:5432/virtual_tours?schema=public
+      - MINIO_ENDPOINT=app.alpha.openscaler.net
+      - MINIO_PORT=9255
+      - MINIO_USE_SSL=false
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - JWT_SECRET=supersecret123
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+      - minio
+
+  frontend:
+    build:
+      context: ./my-project
+      dockerfile: Dockerfile
+    container_name: 3d_tour_frontend
+    restart: always
+    ports:
+      - "80:3000"
+    environment:
+      - VITE_API_URL=http://app.alpha.openscaler.net:9251
+      - PORT=3000
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  miniodata:

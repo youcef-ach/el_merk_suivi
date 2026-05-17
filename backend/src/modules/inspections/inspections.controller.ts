@@ -4,6 +4,7 @@ import { CreateInspectionDto } from './dto/create-inspection.dto';
 import { CreateScanDto } from './dto/create-scan.dto';
 import { CreatePanoramaDto } from './dto/create-panorama.dto';
 import { UpdateInspectionPermissionsDto } from './dto/update-inspection-permissions.dto';
+import { ProcessScansDto } from './dto/process-scans.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { IsPublic } from '../../decorators/public.decorator';
@@ -38,6 +39,14 @@ export class InspectionsController {
   getBundle(@Param('id') id: string, @GetUser() user: any) {
     // Highly optimized tree returned natively via Prisma relations
     return this.inspectionsService.getBundle(id, user);
+  }
+
+  @Post(':id/clone')
+  clone(
+    @Param('id') id: string,
+    @GetUser() user: any,
+  ) {
+    return this.inspectionsService.clone(id, user.enterpriseId, user.role);
   }
 
   @Post(':id/scans')
@@ -95,7 +104,7 @@ export class InspectionsController {
   @Post(':id/process-scans')
   async processAndUploadScans(
     @Param('id') id: string,
-    @Body() body: { mpData: any; rcData: any },
+    @Body() body: ProcessScansDto,
     @GetUser() user: any,
   ) {
     return this.inspectionsService.processAndUploadScans(id, body.mpData, body.rcData, user.enterpriseId, user.role);

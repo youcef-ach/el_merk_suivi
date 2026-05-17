@@ -104,6 +104,130 @@ export class InspectionsService {
     return inspection;
   }
 
+  async clone(id: string, userEnterpriseId: string, role: Role) {
+    const original = await this.prisma.inspection.findUnique({
+      where: { id },
+      include: {
+        project: true,
+        scans: true,
+        panoramas: true,
+        tags: { include: { documents: true } },
+        areaPointers: true,
+        authorizedViewers: true,
+      },
+    });
+
+    if (!original) throw new NotFoundException('Inspection not found');
+
+    if (original.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
+      throw new ForbiddenException('Only the enterprise admin can clone this inspection');
+    }
+
+    // Create the new inspection
+    const newInspection = await this.prisma.inspection.create({
+      data: {
+        title: `${original.title} (Copy)`,
+        description: original.description,
+        glbModelUrl: original.glbModelUrl,
+        scansJsonUrl: original.scansJsonUrl,
+        thumbnailUrl: original.thumbnailUrl,
+        videoUrl: original.videoUrl,
+        visibility: original.visibility,
+        projectId: original.projectId,
+        authorizedViewers: {
+          connect: original.authorizedViewers.map(v => ({ id: v.id }))
+        }
+      }
+    });
+
+    // 1. Clone Scans
+    const oldToNewScanId = new Map<string, string>();
+    for (const scan of original.scans) {
+      const newScan = await this.prisma.scan.create({
+        data: {
+          posX: scan.posX,
+          posY: scan.posY,
+          posZ: scan.posZ,
+          quatW: scan.quatW,
+          quatX: scan.quatX,
+          quatY: scan.quatY,
+          quatZ: scan.quatZ,
+          inspectionId: newInspection.id,
+        }
+      });
+      oldToNewScanId.set(scan.id, newScan.id);
+    }
+
+    for (const scan of original.scans) {
+      if (scan.targetScanId && oldToNewScanId.has(scan.targetScanId)) {
+        await this.prisma.scan.update({
+          where: { id: oldToNewScanId.get(scan.id) },
+          data: { targetScanId: oldToNewScanId.get(scan.targetScanId) }
+        });
+      }
+    }
+
+    // 2. Clone Panoramas
+    for (const pan of original.panoramas) {
+      await this.prisma.panorama.create({
+        data: {
+          imageUrl: pan.imageUrl,
+          status: pan.status,
+          inspectionId: newInspection.id,
+        }
+      });
+    }
+
+    // 3. Clone Area Pointers
+    for (const ptr of original.areaPointers) {
+      await this.prisma.areaPointer.create({
+        data: {
+          name: ptr.name,
+          color: ptr.color,
+          posX: ptr.posX,
+          posY: ptr.posY,
+          posZ: ptr.posZ,
+          height: ptr.height,
+          thickness: ptr.thickness,
+          labelSize: ptr.labelSize,
+          sizeX: ptr.sizeX,
+          sizeY: ptr.sizeY,
+          wallHeight: ptr.wallHeight,
+          inspectionId: newInspection.id,
+        }
+      });
+    }
+
+    // 4. Clone Tags and their Documents
+    for (const tag of original.tags) {
+      const newTag = await this.prisma.tag.create({
+        data: {
+          title: tag.title,
+          description: tag.description,
+          posX: tag.posX,
+          posY: tag.posY,
+          posZ: tag.posZ,
+          icon: tag.icon,
+          color: tag.color,
+          size: tag.size,
+          inspectionId: newInspection.id,
+        }
+      });
+      
+      for (const doc of tag.documents) {
+        await this.prisma.tagDocument.create({
+          data: {
+            title: doc.title,
+            fileUrl: doc.fileUrl,
+            tagId: newTag.id,
+          }
+        });
+      }
+    }
+
+    return newInspection;
+  }
+
   async createScan(inspectionId: string, dto: CreateScanDto, userEnterpriseId: string, role: Role) {
     const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
     if (!inspection) throw new NotFoundException('Inspection not found');

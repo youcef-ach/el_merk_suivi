@@ -1,0 +1,73 @@
+import { InspectionsService } from './inspections.service';
+import { CreateTagDto } from './dto/create-tag.dto';
+import { UpdateTagDto } from './dto/update-tag.dto';
+import { CreateTagDocumentDto } from './dto/create-tag-document.dto';
+export declare class TagsController {
+    private readonly inspectionsService;
+    constructor(inspectionsService: InspectionsService);
+    create(inspectionId: string, dto: CreateTagDto, user: any): Promise<{
+        documents: {
+            id: string;
+            title: string;
+            fileUrl: string;
+            tagId: string;
+        }[];
+    } & {
+        id: string;
+        description: string | null;
+        title: string;
+        posX: number;
+        posY: number;
+        posZ: number;
+        icon: string;
+        color: string;
+        size: number;
+        inspectionId: string;
+    }>;
+    update(inspectionId: string, tagId: string, dto: UpdateTagDto, user: any): Promise<{
+        documents: {
+            id: string;
+            title: string;
+            fileUrl: string;
+            tagId: string;
+        }[];
+    } & {
+        id: string;
+        description: string | null;
+        title: string;
+        posX: number;
+        posY: number;
+        posZ: number;
+        icon: string;
+        color: string;
+        size: number;
+        inspectionId: string;
+    }>;
+    remove(inspectionId: string, tagId: string, user: any): Promise<{
+        id: string;
+        description: string | null;
+        title: string;
+        posX: number;
+        posY: number;
+        posZ: number;
+        icon: string;
+        color: string;
+        size: number;
+        inspectionId: string;
+    }>;
+    addDocument(inspectionId: string, tagId: string, dto: CreateTagDocumentDto, user: any): Promise<{
+        presignedUrl: string;
+        document: {
+            id: string;
+            title: string;
+            fileUrl: string;
+            tagId: string;
+        };
+    }>;
+    removeDocument(inspectionId: string, tagId: string, docId: string, user: any): Promise<{
+        id: string;
+        title: string;
+        fileUrl: string;
+        tagId: string;
+    }>;
+}

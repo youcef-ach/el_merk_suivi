@@ -50,7 +50,7 @@ function NewInspectionContent() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://localhost:3000/projects/${projectId}/inspections`, {
+      const response = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -81,7 +81,7 @@ function NewInspectionContent() {
     const fileName = overrideFileName || file.name;
 
     // 1. Get Presigned URL
-    const presignRes = await fetch(`http://localhost:3000/projects/${projectId}/inspections/${inspectionId}/upload-url`, {
+    const presignRes = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections/${inspectionId}/upload-url`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -134,59 +134,72 @@ function NewInspectionContent() {
         setUploadProgress(Math.round((completed / totalFiles) * 100));
       };
 
+      // --- Run GLB, scans, thumbnail, and video uploads in PARALLEL ---
+      const parallelTasks = [];
+
       if (glbFile) {
-         await uploadFileToMinio(inspectionId, glbFile, 'ultimate_final.glb');
-         incrementProgress();
+        parallelTasks.push(
+          uploadFileToMinio(inspectionId, glbFile, 'ultimate_final.glb').then(incrementProgress)
+        );
       }
-      
+
       if (jsonFile && rcJsonFile) {
-         const mpText = await jsonFile.text();
-         const rcText = await rcJsonFile.text();
-         const token = localStorage.getItem('access_token');
-         const processRes = await fetch(`http://localhost:3000/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
+        parallelTasks.push((async () => {
+          const mpText = await jsonFile.text();
+          const rcText = await rcJsonFile.text();
+          const token = localStorage.getItem('access_token');
+          const processRes = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
             method: 'POST',
             headers: {
-               'Content-Type': 'application/json',
-               'Authorization': `Bearer ${token}`
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({ mpData: JSON.parse(mpText), rcData: JSON.parse(rcText) })
-         });
-         if (!processRes.ok) throw new Error("Failed to process and upload scans mapping");
-         incrementProgress();
+          });
+          if (!processRes.ok) {
+            const errBody = await processRes.json().catch(() => ({}));
+            throw new Error(errBody.message || `Failed to process and upload scans mapping (${processRes.status})`);
+          }
+          incrementProgress();
+        })());
       } else if (jsonFile) {
-         await uploadFileToMinio(inspectionId, jsonFile, 'scans.json');
-         incrementProgress();
+        parallelTasks.push(
+          uploadFileToMinio(inspectionId, jsonFile, 'scans.json').then(incrementProgress)
+        );
       }
 
       if (thumbnailFile) {
-         await uploadFileToMinio(inspectionId, thumbnailFile, `thumb_${thumbnailFile.name}`);
-         
-         // Update thumbnail db
-         const token = localStorage.getItem('access_token');
-         await fetch(`http://localhost:3000/projects/${projectId}/inspections/${inspectionId}`, {
-             method: 'PATCH',
-             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-             body: JSON.stringify({ thumbnailUrl: `inspections/${inspectionId}/thumb_${thumbnailFile.name}` })
-         });
-         incrementProgress();
+        parallelTasks.push((async () => {
+          await uploadFileToMinio(inspectionId, thumbnailFile, `thumb_${thumbnailFile.name}`);
+          const token = localStorage.getItem('access_token');
+          await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections/${inspectionId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ thumbnailUrl: `inspections/${inspectionId}/thumb_${thumbnailFile.name}` })
+          });
+          incrementProgress();
+        })());
       }
 
       if (videoFile) {
-         await uploadFileToMinio(inspectionId, videoFile, `video_${videoFile.name}`);
-         
-         // Update video db
-         const token = localStorage.getItem('access_token');
-         await fetch(`http://localhost:3000/projects/${projectId}/inspections/${inspectionId}`, {
-             method: 'PATCH',
-             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-             body: JSON.stringify({ videoUrl: `inspections/${inspectionId}/video_${videoFile.name}` })
-         });
-         incrementProgress();
+        parallelTasks.push((async () => {
+          await uploadFileToMinio(inspectionId, videoFile, `video_${videoFile.name}`);
+          const token = localStorage.getItem('access_token');
+          await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections/${inspectionId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ videoUrl: `inspections/${inspectionId}/video_${videoFile.name}` })
+          });
+          incrementProgress();
+        })());
       }
 
-      // Concurrency-limited batching approach for image uploads
+      // Fire all non-image uploads simultaneously
+      await Promise.all(parallelTasks);
+
+      // Concurrency-limited batching for image uploads (20 at a time)
       if (imageFiles && imageFiles.length > 0) {
-        const CONCURRENCY = 10;
+        const CONCURRENCY = 20;
         const filesArray = Array.from(imageFiles);
 
         for (let i = 0; i < filesArray.length; i += CONCURRENCY) {

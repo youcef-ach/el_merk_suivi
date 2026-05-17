@@ -76,7 +76,7 @@ export default function TagPanel({ tag, onUpdate, onUploadDocument, onDeleteDocu
   };
 
   const mediaPreviewUrl = tag.mediaUrl
-    ? `http://localhost:9000/virtual-tours/${tag.mediaUrl}`
+    ? `http://app.alpha.openscaler.net:9255/virtual-tours/${tag.mediaUrl}`
     : null;
 
   const isPdf = tag.mediaUrl?.endsWith('.pdf');

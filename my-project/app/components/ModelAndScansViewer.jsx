@@ -88,6 +88,54 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
     keyboardEnabledRef.current = !isInscan || isMeshView;
   }, [isInscan, isMeshView, sceneRef, keyboardEnabledRef]);
 
+  // Hotspot Distance Culling (Reduce visual clutter in panorama mode)
+  useEffect(() => {
+    if (!isDataLoaded || scanSpheres.length === 0 || !cameraRef.current) return;
+    const instancedMesh = scanSpheres[0];
+    if (!instancedMesh || !instancedMesh.isInstancedMesh) return;
+
+    let rafId;
+    const dummy = new THREE.Object3D();
+    
+    const updateVisibility = () => {
+      rafId = requestAnimationFrame(updateVisibility);
+      
+      const cameraPos = cameraRef.current.position;
+      let needsUpdate = false;
+      
+      // If we are in Dollhouse mode (!isInscan or isMeshView), show all rings
+      // If we are in Panorama mode, use 18m threshold to reduce visual clutter
+      const showAll = !isInscan || isMeshView;
+      const threshold = 18.0; 
+      
+      instancedMesh.userData.metadata.forEach((data) => {
+        if (data.id === activeSphereRef.current) return; // Always hidden when active
+        
+        let shouldBeVisible = true;
+        if (!showAll) {
+           const dist = cameraPos.distanceTo(data.realPosition);
+           shouldBeVisible = dist < threshold;
+        }
+        
+        if (data.isVisible !== shouldBeVisible) {
+           data.isVisible = shouldBeVisible;
+           dummy.position.copy(data.snappedPosition || data.realPosition);
+           dummy.scale.setScalar(shouldBeVisible ? 1 : 0);
+           dummy.updateMatrix();
+           instancedMesh.setMatrixAt(data.instanceId, dummy.matrix);
+           needsUpdate = true;
+        }
+      });
+      
+      if (needsUpdate) {
+        instancedMesh.instanceMatrix.needsUpdate = true;
+      }
+    };
+    
+    updateVisibility();
+    return () => cancelAnimationFrame(rafId);
+  }, [isDataLoaded, scanSpheres, cameraRef, isInscan, isMeshView]);
+
   // --- Click Event & Raycasting ---
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -98,6 +146,121 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
 
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
+
+    const transitionToScan = (clickedData, instancedMesh) => {
+      if (activeSphereRef.current === clickedData.id) return;
+
+      const targetPos = clickedData.realPosition;
+      const targetQuat = clickedData.rotation_quaternion;
+      const scanId = clickedData.id;
+
+      document.body.style.cursor = 'wait';
+
+      loadPanoramaTextures(scanId, renderer).then((loadedTextures) => {
+        document.body.style.cursor = 'default';
+        controls.enabled = false;
+
+        const lookAtDirection = new THREE.Vector3();
+        camera.getWorldDirection(lookAtDirection);
+
+        // Identify box roles
+        const currentBox = activeBoxIndexRef.current === 1 ? box1Ref.current : box2Ref.current;
+        const nextBox = activeBoxIndexRef.current === 1 ? box2Ref.current : box1Ref.current;
+        const nextGroup = activeBoxIndexRef.current === 1 ? panoramaGroup2Ref.current : panoramaGroup1Ref.current;
+
+        const isFirstClick = activeSphereRef.current === null;
+
+        // Prepare the NEXT box with new textures immediately
+        nextBox.material.forEach((mat, i) => {
+          if (mat.map && mat.map !== dummyTex) mat.map.dispose();
+          mat.map = loadedTextures[i];
+          mat.needsUpdate = true;
+        });
+
+        // Teleport NEXT group to destination
+        nextGroup.position.copy(targetPos);
+        if (targetQuat) {
+          const q = new THREE.Quaternion(targetQuat[1], targetQuat[2], targetQuat[3], targetQuat[0]);
+          nextGroup.setRotationFromQuaternion(q);
+          nextGroup.rotateZ(Math.PI / 2);
+        }
+
+        // Force renderer to acknowledge new textures before animating
+        renderer.compile(sceneRef.current, camera);
+
+        // Wrap in RAF to prevent GSAP/WebGL start-of-frame lag
+        requestAnimationFrame(() => {
+          executeFlightAnimation({
+            camera,
+            controls,
+            targetPos,
+            lookAtDirection,
+            currentBox,
+            nextBox,
+            model: modelRef.current,
+            isFirstClick,
+            onComplete: () => {
+              // Final State cleanup
+              if (modelRef.current) {
+                modelRef.current.visible = true;
+                modelRef.current.traverse((child) => {
+                  if (child.isMesh && child.material) {
+                    const mats = Array.isArray(child.material) ? child.material : [child.material];
+                    mats.forEach(mat => {
+                      mat.colorWrite = false;
+                      mat.depthWrite = true;
+                      mat.transparent = true;
+                      mat.side = THREE.DoubleSide;
+                      mat.needsUpdate = true;
+                    });
+                  }
+                });
+              }
+              if (!isFirstClick && currentBox) {
+                currentBox.visible = false;
+                // Immediately free GPU memory from the old panorama
+                currentBox.material.forEach((mat) => {
+                  if (mat.map && mat.map !== dummyTex) {
+                    mat.map.dispose();
+                    mat.map = dummyTex;
+                    mat.needsUpdate = true;
+                  }
+                });
+              }
+
+              // Swap Active Box index
+              activeBoxIndexRef.current = activeBoxIndexRef.current === 1 ? 2 : 1;
+
+              setIsInscan(true);
+              setIsMeshView(false);
+
+              controls.enabled = true;
+              controls.update();
+
+              if (activeSphereRef.current) {
+                const oldData = instancedMesh.userData.metadata.find(m => m.id === activeSphereRef.current);
+                if (oldData) {
+                  const dummy = new THREE.Object3D();
+                  dummy.position.copy(oldData.snappedPosition || oldData.realPosition);
+                  dummy.scale.set(1, 1, 1);
+                  dummy.updateMatrix();
+                  instancedMesh.setMatrixAt(oldData.instanceId, dummy.matrix);
+                }
+              }
+              
+              const dummy = new THREE.Object3D();
+              dummy.position.copy(clickedData.snappedPosition || clickedData.realPosition);
+              dummy.scale.set(0, 0, 0);
+              dummy.updateMatrix();
+              instancedMesh.setMatrixAt(clickedData.instanceId, dummy.matrix);
+              instancedMesh.instanceMatrix.needsUpdate = true;
+
+              activeSphereRef.current = clickedData.id;
+            }
+          });
+        });
+      });
+    };
 
     const onClick = (event) => {
       // Suppress click if it's the tail-end of a handle drag
@@ -140,7 +303,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
             const tagId = hitSprite.userData.tagId;
             // Fetch tag info from backend
             const token = localStorage.getItem('access_token');
-            fetch(`http://localhost:3000/inspections/${tourId}`, {
+            fetch(`http://app.alpha.openscaler.net:9251/inspections/${tourId}`, {
               headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             })
               .then(r => r.json())
@@ -184,106 +347,85 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
       const intersects = raycaster.intersectObjects(scanSpheres);
 
       if (intersects.length > 0) {
-        const clickedSphere = intersects[0].object;
-        if (activeSphereRef.current === clickedSphere) return;
-
-        const targetPos = clickedSphere.userData.realPosition;
-        const targetQuat = clickedSphere.userData.rotation_quaternion;
-        const scanId = clickedSphere.userData.id;
-
-        document.body.style.cursor = 'wait';
-
-        loadPanoramaTextures(scanId, renderer).then((loadedTextures) => {
-          document.body.style.cursor = 'default';
-          controls.enabled = false;
-
-          const lookAtDirection = new THREE.Vector3();
-          camera.getWorldDirection(lookAtDirection);
-
-          // Identify box roles
-          const currentBox = activeBoxIndexRef.current === 1 ? box1Ref.current : box2Ref.current;
-          const nextBox = activeBoxIndexRef.current === 1 ? box2Ref.current : box1Ref.current;
-          const nextGroup = activeBoxIndexRef.current === 1 ? panoramaGroup2Ref.current : panoramaGroup1Ref.current;
-
-          const isFirstClick = activeSphereRef.current === null;
-
-          // Prepare the NEXT box with new textures immediately
-          nextBox.material.forEach((mat, i) => {
-            if (mat.map && mat.map !== dummyTex) mat.map.dispose();
-            mat.map = loadedTextures[i];
-            mat.needsUpdate = true;
-          });
-
-          // Teleport NEXT group to destination
-          nextGroup.position.copy(targetPos);
-          if (targetQuat) {
-            const q = new THREE.Quaternion(targetQuat[1], targetQuat[2], targetQuat[3], targetQuat[0]);
-            nextGroup.setRotationFromQuaternion(q);
-            nextGroup.rotateZ(Math.PI / 2);
-          }
-
-          // Force renderer to acknowledge new textures before animating
-          renderer.compile(sceneRef.current, camera);
-
-          // Wrap in RAF to prevent GSAP/WebGL start-of-frame lag
-          requestAnimationFrame(() => {
-            executeFlightAnimation({
-              camera,
-              controls,
-              targetPos,
-              lookAtDirection,
-              currentBox,
-              nextBox,
-              model: modelRef.current,
-              isFirstClick,
-              onComplete: () => {
-                // Final State cleanup
-                if (modelRef.current) {
-                  modelRef.current.visible = true;
-                  modelRef.current.traverse((child) => {
-                    if (child.isMesh && child.material) {
-                      const mats = Array.isArray(child.material) ? child.material : [child.material];
-                      mats.forEach(mat => {
-                        mat.colorWrite = false;
-                        mat.depthWrite = true;
-                        mat.transparent = true;
-                        mat.side = THREE.DoubleSide;
-                        mat.needsUpdate = true;
-                      });
-                    }
-                  });
-                }
-                if (!isFirstClick && currentBox) {
-                  currentBox.visible = false;
-                  // Immediately free GPU memory from the old panorama
-                  currentBox.material.forEach((mat) => {
-                    if (mat.map && mat.map !== dummyTex) {
-                      mat.map.dispose();
-                      mat.map = dummyTex;
-                      mat.needsUpdate = true;
-                    }
-                  });
-                }
-
-                // Swap Active Box index
-                activeBoxIndexRef.current = activeBoxIndexRef.current === 1 ? 2 : 1;
-
-                setIsInscan(true);
-                setIsMeshView(false);
-
-                controls.enabled = true;
-                controls.update();
-
-                if (activeSphereRef.current) activeSphereRef.current.visible = true;
-                clickedSphere.visible = false;
-                activeSphereRef.current = clickedSphere;
-              }
-            });
-          });
-        });
+        const instancedMesh = intersects[0].object;
+        if (instancedMesh.isInstancedMesh && intersects[0].instanceId !== undefined) {
+          const instanceId = intersects[0].instanceId;
+          const clickedData = instancedMesh.userData.metadata[instanceId];
+          transitionToScan(clickedData, instancedMesh);
+        }
       }
     };
 
+    const onKeyDown = (e) => {
+      // Only navigate hotspots when keyboard movement is disabled (pure panorama mode)
+      if (keyboardEnabledRef.current) return;
+      if (!activeSphereRef.current) return;
+      
+      const instancedMesh = scanSpheres[0];
+      if (!instancedMesh || !instancedMesh.isInstancedMesh) return;
+
+      const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'];
+      if (!keys.includes(e.code)) return;
+
+      // Prevent spamming
+      if (document.body.style.cursor === 'wait') return;
+
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      forward.z = 0;
+      forward.normalize();
+
+      const right = new THREE.Vector3();
+      right.crossVectors(forward, camera.up).normalize();
+
+      const moveDir = new THREE.Vector3();
+
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') moveDir.copy(forward);
+      else if (e.code === 'ArrowDown' || e.code === 'KeyS') moveDir.copy(forward).negate();
+      else if (e.code === 'ArrowLeft' || e.code === 'KeyA') moveDir.copy(right).negate();
+      else if (e.code === 'ArrowRight' || e.code === 'KeyD') moveDir.copy(right);
+
+      moveDir.normalize();
+
+      const currentData = instancedMesh.userData.metadata.find(m => m.id === activeSphereRef.current);
+      if (!currentData) return;
+      const currentPos = currentData.realPosition;
+
+      let bestMatch = null;
+      let bestScore = -Infinity;
+
+      instancedMesh.userData.metadata.forEach(data => {
+        if (data.id === activeSphereRef.current) return;
+
+        const spherePos = data.realPosition;
+        const dirToSphere = new THREE.Vector3().subVectors(spherePos, currentPos);
+        
+        dirToSphere.z = 0;
+        const dist = dirToSphere.length();
+        
+        if (dist < 0.1 || dist > 15.0) return;
+        
+        dirToSphere.normalize();
+        
+        const dot = moveDir.dot(dirToSphere);
+        
+        // Tolerance: dot > 0.6 is ~53 degrees
+        if (dot > 0.6) { 
+           // score based heavily on alignment, penalize by distance to prefer closer rings
+           const score = dot - (dist * 0.15); 
+           if (score > bestScore) {
+              bestScore = score;
+              bestMatch = data;
+           }
+        }
+      });
+
+      if (bestMatch) {
+        transitionToScan(bestMatch, instancedMesh);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
     renderer.domElement.addEventListener('click', onClick);
 
     // Drag events for area pointer wall resizing
@@ -314,6 +456,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
     renderer.domElement.addEventListener('pointerup', onUp);
 
     return () => {
+      window.removeEventListener('keydown', onKeyDown);
       renderer.domElement.removeEventListener('click', onClick);
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointermove', onMove);
@@ -469,7 +612,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
                 {activeTagInfo.documents.map(doc => (
                   <a
                     key={doc.id}
-                    href={`http://localhost:9000/virtual-tours/${doc.fileUrl}`}
+                    href={`http://app.alpha.openscaler.net:9255/virtual-tours/${doc.fileUrl}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{

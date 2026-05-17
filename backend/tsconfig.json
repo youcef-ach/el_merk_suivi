@@ -15,7 +15,7 @@
     "strictNullChecks": false,
     "noImplicitAny": false,
     "strictBindCallApply": false,
-    "forceConsistentCasingInFileNames": false,
-    "fallbackPolling": "dynamicPriority"
-  }
+    "forceConsistentCasingInFileNames": false
+  },
+  "include": ["src/**/*"]
 }

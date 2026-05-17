@@ -1,4 +1,5 @@
 export const RC_DUPLICATE_TOLERANCE = 0.05;
+const K_NEIGHBORS = 40; // Number of nearest neighbors to use for local signature
 
 interface Point3D {
   x: number;
@@ -14,16 +15,33 @@ const getDistance = (p1: Point3D, p2: Point3D): number => {
   );
 };
 
+/**
+ * Generates a local geometric signature for a point based on its K-nearest neighbors.
+ * Local signatures are much more robust than global ones for large point clouds
+ * because they are not affected by distant points or missing data in other areas.
+ */
 const getSignature = (pointIndex: number, allPoints: any[]): number[] => {
   let distances: number[] = [];
+  const pTarget = allPoints[pointIndex].pos;
+
   for (let i = 0; i < allPoints.length; i++) {
     if (i !== pointIndex) {
-      distances.push(getDistance(allPoints[pointIndex].pos, allPoints[i].pos));
+      distances.push(getDistance(pTarget, allPoints[i].pos));
     }
   }
+
+  // Sort distances to find nearest neighbors
   distances.sort((a, b) => a - b);
-  const maxDist = distances[distances.length - 1] || 1;
-  return distances.map((d) => d / maxDist);
+
+  // Take the K nearest neighbors
+  const k = Math.min(K_NEIGHBORS, distances.length);
+  const neighbors = distances.slice(0, k);
+
+  if (neighbors.length === 0) return [];
+
+  // Normalize by the distance of the k-th neighbor to make it scale-invariant
+  const normalizationFactor = neighbors[neighbors.length - 1] || 1;
+  return neighbors.map(d => d / normalizationFactor);
 };
 
 export const processScans = (mpRawData: any, rcRawData: any[]): any[] => {
@@ -48,7 +66,7 @@ export const processScans = (mpRawData: any, rcRawData: any[]): any[] => {
     }
   });
 
-  // --- 3. CALCULATE GEOMETRIC SIGNATURES ---
+  // --- 3. CALCULATE LOCAL GEOMETRIC SIGNATURES ---
   mpPoints.forEach((mp, i) => (mp.signature = getSignature(i, mpPoints)));
   uniqueRcData.forEach((rc, i) => (rc.signature = getSignature(i, uniqueRcData)));
 
@@ -56,14 +74,27 @@ export const processScans = (mpRawData: any, rcRawData: any[]): any[] => {
   const matchPairs: any[] = [];
 
   for (let i = 0; i < uniqueRcData.length; i++) {
-    for (let j = 0; j < mpPoints.length; j++) {
-      let score = 0;
-      const rcSig = uniqueRcData[i].signature;
-      const mpSig = mpPoints[j].signature;
+    const rcSig = uniqueRcData[i].signature;
 
-      for (let k = 0; k < Math.min(rcSig.length, mpSig.length); k++) {
-        score += Math.abs(rcSig[k] - mpSig[k]);
+    for (let j = 0; j < mpPoints.length; j++) {
+      const mpSig = mpPoints[j].signature;
+      let score = 0;
+      const len = Math.min(rcSig.length, mpSig.length);
+
+      if (len === 0) {
+        score = 1000; // High penalty for no neighbors
+      } else {
+        for (let k = 0; k < len; k++) {
+          score += Math.abs(rcSig[k] - mpSig[k]);
+        }
+        // Average the score by length to make it comparable if k varies
+        score = score / len;
+
+        // Penalty for significant length difference in signatures
+        // (e.g. one point is at the edge of the cloud, the other is in the middle)
+        score += Math.abs(rcSig.length - mpSig.length) * 0.1;
       }
+
       matchPairs.push({ rcIndex: i, mpIndex: j, score: score });
     }
   }
@@ -72,7 +103,6 @@ export const processScans = (mpRawData: any, rcRawData: any[]): any[] => {
 
   const matchedRc = new Set<number>();
   const matchedMp = new Set<number>();
-
   const finalOutput: any[] = [];
 
   matchPairs.forEach((pair) => {

@@ -24,6 +24,7 @@
     "react-hook-form": "^7.72.1",
     "react-router": "7.14.0",
     "three": "^0.183.2",
+    "three-mesh-bvh": "^0.9.9",
     "zod": "^4.3.6"
   },
   "devDependencies": {

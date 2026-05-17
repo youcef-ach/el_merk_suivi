@@ -2,7 +2,7 @@ import { useRef, useCallback, useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { createAreaPointerGroup, updateAreaWalls } from '../utils/createAreaPointerGraphics';
 
-const API = 'http://localhost:3000';
+const API = 'http://app.alpha.openscaler.net:9251';
 
 export const useAreaPointers = (viewerRef, tourId) => {
   const [areaPointers, setAreaPointers] = useState([]);
@@ -383,7 +383,8 @@ export const useAreaPointers = (viewerRef, tourId) => {
   const trySelectPointer = useCallback((event) => {
     const renderer = viewerRef.current?.rendererRef?.current;
     const camera = viewerRef.current?.cameraRef?.current;
-    if (!renderer || !camera) return false;
+    const scene = viewerRef.current?.sceneRef?.current;
+    if (!renderer || !camera || !scene) return false;
 
     const group = ensurePointersGroup();
     if (group && group.children.length > 0) {
@@ -395,9 +396,29 @@ export const useAreaPointers = (viewerRef, tourId) => {
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(mouse, camera);
 
-      const intersects = raycaster.intersectObjects(group.children, true);
-      if (intersects.length > 0) {
-        let clickedObj = intersects[0].object;
+      const pointerHits = raycaster.intersectObjects(group.children, true);
+      if (pointerHits.length > 0) {
+        const pointerHit = pointerHits[0];
+
+        // 1. Check if model is closer
+        const model = viewerRef.current?.modelRef?.current;
+        if (model) {
+          const modelHits = raycaster.intersectObject(model, true);
+          if (modelHits.length > 0 && modelHits[0].distance < pointerHit.distance) {
+            return false; // Model is in front
+          }
+        }
+
+        // 2. Check if a tag is closer
+        const tagGroup = scene.getObjectByName('tagMarkers');
+        if (tagGroup && tagGroup.children.length > 0) {
+          const tagHits = raycaster.intersectObjects(tagGroup.children, true);
+          if (tagHits.length > 0 && tagHits[0].distance < pointerHit.distance) {
+            return false; // Tag is in front
+          }
+        }
+
+        let clickedObj = pointerHit.object;
         while (clickedObj.parent && !clickedObj.userData.pointerId) {
           clickedObj = clickedObj.parent;
         }

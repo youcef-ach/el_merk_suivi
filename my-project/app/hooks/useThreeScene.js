@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { disposeScene } from '../utils/threeCleanup';
 
 /**
@@ -41,7 +41,7 @@ export const useThreeScene = (preserveTextures = []) => {
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMapping = THREE.NoToneMapping; // Prevents LDR panoramas from becoming washed out or overly bright
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 

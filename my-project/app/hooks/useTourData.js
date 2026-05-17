@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
 import { createTagSpriteMaterial } from './useTags';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+
+// Inject BVH methods into Three.js prototypes
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+// DO NOT globally override THREE.Mesh.prototype.raycast as it breaks InstancedMesh.
+// Instead, we will assign it directly to the GLB child meshes.
 
 /**
  * Handles loading GLB models, scan coordinates, and initializing Dual Panorama boxes.
@@ -11,6 +18,7 @@ import { createTagSpriteMaterial } from './useTags';
  * @param {React.MutableRefObject<THREE.Scene>} sceneRef 
  * @param {THREE.Texture} dummyTex 
  */
+
 export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
 
   const modelRef = useRef(null);
@@ -44,7 +52,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
         const token = localStorage.getItem('access_token');
         if (!token || token === 'undefined') throw new Error("Missing authentication token in browser");
 
-        const res = await fetch(`http://localhost:3000/inspections/${tourId}`, {
+        const res = await fetch(`http://app.alpha.openscaler.net:9251/inspections/${tourId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -55,13 +63,13 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
 
         const tour = await res.json();
         if (tour.glbModelUrl) {
-          glbUrl = `http://localhost:9000/virtual-inspections/${tour.glbModelUrl}`;
+          glbUrl = `http://app.alpha.openscaler.net:9255/virtual-inspections/${tour.glbModelUrl}`;
         } else {
           throw new Error('This tour has no GLB architecture model attached to it.');
         }
 
         if (tour.scansJsonUrl) {
-          jsonUrl = `http://localhost:9000/virtual-inspections/${tour.scansJsonUrl}`;
+          jsonUrl = `http://app.alpha.openscaler.net:9255/virtual-inspections/${tour.scansJsonUrl}`;
         } else {
           throw new Error('This tour has no Scan telemetry mapping attached to it.');
         }
@@ -110,6 +118,12 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
                 return basic;
               });
               child.material = newMats.length === 1 ? newMats[0] : newMats;
+
+              // Generate BVH spatial index for ultra-fast raycasting
+              if (child.geometry) {
+                child.geometry.computeBoundsTree();
+                child.raycast = acceleratedRaycast; // Only apply to GLB meshes
+              }
             }
           });
           scene.add(gltf.scene);
@@ -128,30 +142,39 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
           const ringGeo = new THREE.RingGeometry(0.1, 0.15, 32);
           const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true });
 
-          const spheres = [];
+          const instancedMesh = new THREE.InstancedMesh(ringGeo, markerMat, scanData.length);
+          instancedMesh.renderOrder = 10;
+          
+          const dummy = new THREE.Object3D();
+          const scanMetadata = [];
 
           // scanData is an array of { #name, x, y, alt, rotation_quaternion }
-          scanData.forEach((data) => {
+          scanData.forEach((data, i) => {
             const scanKey = data['#name'];
-            const marker = new THREE.Mesh(ringGeo, markerMat.clone());
-            marker.renderOrder = 10;
-
-            // x, y, alt map directly to the scene coordinates
             const posX = data.x;
             const posY = data.y;
             const posZ = data.alt;
 
-            marker.position.set(posX, posY, posZ);
-            marker.userData = {
+            dummy.position.set(posX, posY, posZ);
+            dummy.updateMatrix();
+            instancedMesh.setMatrixAt(i, dummy.matrix);
+
+            scanMetadata.push({
               id: scanKey,
               realPosition: new THREE.Vector3(posX, posY, posZ),
-              rotation_quaternion: data.rotation_quaternion
-            };
-            scene.add(marker);
-            spheres.push(marker);
+              snappedPosition: new THREE.Vector3(posX, posY, posZ), // Will be updated by raycaster
+              rotation_quaternion: data.rotation_quaternion,
+              instanceId: i,
+              isVisible: true // Track visibility state for distance thresholding
+            });
           });
 
-          setScanSpheres(spheres);
+          instancedMesh.instanceMatrix.needsUpdate = true;
+          instancedMesh.computeBoundingSphere(); // CRITICAL FIX: required for raycaster to hit instances!
+          instancedMesh.userData = { isScanRings: true, metadata: scanMetadata };
+          scene.add(instancedMesh);
+
+          setScanSpheres([instancedMesh]);
 
           // --- Render Tag Sprites ---
           // Only create base tag sprites if useTags (studio) hasn't already created the group.
@@ -169,10 +192,10 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
               const sprite = new THREE.Sprite(mat);
               sprite.position.set(tag.posX, tag.posY, tag.posZ);
               sprite.center.set(0.5, 0.0);
-              
+
               const sizeMult = tag.size ?? 1.0;
               sprite.scale.set(0.4 * sizeMult, 0.6 * sizeMult, 1);
-              
+
               sprite.renderOrder = 1000;
               sprite.userData.tagId = tag.id;
               tagGroup.add(sprite);
@@ -187,13 +210,13 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
             const areaPointersGroup = new THREE.Group();
             areaPointersGroup.name = 'areaPointers';
             areaPointersGroup.renderOrder = 997; // Just below tags
-            
+
             tourAreaPointers.forEach(ap => {
               const ptr = createAreaPointerGroup(
-                ap.name, 
-                ap.color || '#ff0000', 
-                ap.posX, 
-                ap.posY, 
+                ap.name,
+                ap.color || '#ff0000',
+                ap.posX,
+                ap.posY,
                 ap.posZ,
                 ap.height ?? 15.0,
                 ap.thickness ?? 0.04,
@@ -275,28 +298,40 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
       }
     });
 
-    const raycaster = new THREE.Raycaster();
-    const downVector = new THREE.Vector3(0, 0, -1);
+    const instancedMesh = scanSpheres[0];
+    if (!instancedMesh || !instancedMesh.isInstancedMesh) {
+      originalSides.forEach(({ mat, side }) => { mat.side = side; });
+      return;
+    }
 
-    scanSpheres.forEach(marker => {
-      // 1. Clone original pos (DO NOT mutate userData.realPosition)
-      const startPos = marker.userData.realPosition.clone();
+    const raycaster = new THREE.Raycaster();
+    raycaster.firstHitOnly = true; // BVH optimization flag: stops searching after the first hit
+    const downVector = new THREE.Vector3(0, 0, -1);
+    const dummy = new THREE.Object3D();
+
+    instancedMesh.userData.metadata.forEach((data) => {
+      const startPos = data.realPosition.clone();
       
-      // Start exactly at the optical center (data.alt) to guarantee we are in 
-      // the empty air of the room, avoiding clipping into low ceilings.
-      
-      // 3. Cast ray straight down
       raycaster.set(startPos, downVector);
       const intersects = raycaster.intersectObject(modelRef.current, true);
 
+      let floorZ = startPos.z - 1.6;
       if (intersects.length > 0) {
-        const floorZ = intersects[0].point.z + 0.05;
-        marker.position.z = floorZ;
-      } else {
-        // Fallback: Drop manually if the floor mesh is completely missing here
-        marker.position.z -= 1.6;
+        floorZ = intersects[0].point.z + 0.05;
       }
+      
+      data.snappedPosition = new THREE.Vector3(startPos.x, startPos.y, floorZ);
+      dummy.position.copy(data.snappedPosition);
+      
+      // If this scan is currently active, hide it (scale 0), otherwise scale 1
+      // However, at initial load, no sphere is active yet, so just scale 1
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      instancedMesh.setMatrixAt(data.instanceId, dummy.matrix);
     });
+    
+    instancedMesh.instanceMatrix.needsUpdate = true;
+    instancedMesh.computeBoundingSphere(); // Update bounding sphere again
 
     // Restore original material sides
     originalSides.forEach(({ mat, side }) => { mat.side = side; });
@@ -309,12 +344,13 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
       const faces = ['py', 'pz', 'px', 'nz', 'nx', 'ny'];
 
       const baseUrl = tourId
-        ? `http://localhost:9000/virtual-inspections/inspections/${tourId}/`
+        ? `http://app.alpha.openscaler.net:9255/virtual-inspections/inspections/${tourId}/`
         : `/`;
 
       const loadPromises = faces.map((face) => {
         return new Promise((resFace) => {
           textureLoader.load(`${baseUrl}images/${scanId}_${face}.jpg`, (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace; // CRITICAL: Treat JPEG as sRGB to prevent washed-out colors
             if (renderer) renderer.initTexture(tex);
             resFace(tex);
           });
