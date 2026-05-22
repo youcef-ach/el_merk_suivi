@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
+import gsap from 'gsap';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { disposeScene } from '../utils/threeCleanup';
 
@@ -32,15 +33,21 @@ export const useThreeScene = (preserveTextures = []) => {
     const height = mountRef.current.clientHeight || window.innerHeight;
 
     // 2. Camera Setup
-    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+    // Tightened near (0.15) and far (300) planes drastically improve GPU depth buffer precision 
+    // to eliminate Z-fighting on overlapping meshes and increase raycast depth accuracy.
+    const camera = new THREE.PerspectiveCamera(75, width / height, 0.15, 300);
     camera.up.set(0, 0, 1);
     camera.position.set(5, 5, 5);
     cameraRef.current = camera;
 
     // 3. Renderer Setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: false,
+      powerPreference: "high-performance"
+    });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.NoToneMapping; // Prevents LDR panoramas from becoming washed out or overly bright
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
@@ -77,6 +84,10 @@ export const useThreeScene = (preserveTextures = []) => {
     const _forward = new THREE.Vector3();
     const _right = new THREE.Vector3();
     const _moveDir = new THREE.Vector3();
+    
+    const lastPos = new THREE.Vector3();
+    const lastQuat = new THREE.Quaternion();
+    let framesToRender = 30; // Force first ~0.5s to render to ensure loading states show up
 
     const animate = () => {
       rafRef.current = requestAnimationFrame(animate);
@@ -117,7 +128,32 @@ export const useThreeScene = (preserveTextures = []) => {
       }
 
       controls.update();
-      renderer.render(scene, camera);
+
+      // Smart Render Loop: Only render if something changed
+      let needsRender = false;
+
+      if (framesToRender > 0) {
+        needsRender = true;
+        framesToRender--;
+      }
+
+      if (keysPressed.size > 0) {
+        needsRender = true;
+      }
+
+      if (!camera.position.equals(lastPos) || !camera.quaternion.equals(lastQuat)) {
+        needsRender = true;
+        lastPos.copy(camera.position);
+        lastQuat.copy(camera.quaternion);
+      }
+
+      if (gsap.globalTimeline && gsap.globalTimeline.isActive()) {
+        needsRender = true;
+      }
+
+      if (needsRender) {
+        renderer.render(scene, camera);
+      }
     };
     animate();
 

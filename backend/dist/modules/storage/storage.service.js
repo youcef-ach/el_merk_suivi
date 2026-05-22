@@ -69,6 +69,24 @@ let StorageService = class StorageService {
             throw new common_1.InternalServerErrorException(`Failed to upload buffer: ${error.message}`);
         }
     }
+    async downloadFile(bucket, fileName, localFilePath) {
+        try {
+            await this.minioClient.fGetObject(bucket, fileName, localFilePath);
+        }
+        catch (error) {
+            throw new common_1.InternalServerErrorException(`Failed to download file from MinIO: ${error.message}`);
+        }
+    }
+    async uploadFile(bucket, fileName, localFilePath, contentType = 'application/octet-stream') {
+        try {
+            await this.minioClient.fPutObject(bucket, fileName, localFilePath, {
+                'Content-Type': contentType,
+            });
+        }
+        catch (error) {
+            throw new common_1.InternalServerErrorException(`Failed to upload file to MinIO: ${error.message}`);
+        }
+    }
 };
 exports.StorageService = StorageService;
 exports.StorageService = StorageService = __decorate([

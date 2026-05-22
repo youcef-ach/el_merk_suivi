@@ -48,7 +48,7 @@ export default function AuthPage() {
     setApiError('');
     setIsLoading(true);
     try {
-      const response = await fetch('http://app.alpha.openscaler.net:9251/auth/login', {
+      const response = await fetch('http://localhost:3000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: data.email, password: data.password }),
@@ -70,7 +70,7 @@ export default function AuthPage() {
     setApiError('');
     setIsLoading(true);
     try {
-      const response = await fetch('http://app.alpha.openscaler.net:9251/auth/register-enterprise', {
+      const response = await fetch('http://localhost:3000/auth/register-enterprise', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

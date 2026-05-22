@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
 import { createTagSpriteMaterial } from './useTags';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
@@ -19,7 +21,7 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
  * @param {THREE.Texture} dummyTex 
  */
 
-export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
+export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef) => {
 
   const modelRef = useRef(null);
 
@@ -52,7 +54,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
         const token = localStorage.getItem('access_token');
         if (!token || token === 'undefined') throw new Error("Missing authentication token in browser");
 
-        const res = await fetch(`http://app.alpha.openscaler.net:9251/inspections/${tourId}`, {
+        const res = await fetch(`http://localhost:3000/inspections/${tourId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -63,13 +65,13 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
 
         const tour = await res.json();
         if (tour.glbModelUrl) {
-          glbUrl = `http://app.alpha.openscaler.net:9255/virtual-inspections/${tour.glbModelUrl}`;
+          glbUrl = `http://localhost:9000/virtual-inspections/${tour.glbModelUrl}`;
         } else {
           throw new Error('This tour has no GLB architecture model attached to it.');
         }
 
         if (tour.scansJsonUrl) {
-          jsonUrl = `http://app.alpha.openscaler.net:9255/virtual-inspections/${tour.scansJsonUrl}`;
+          jsonUrl = `http://localhost:9000/virtual-inspections/${tour.scansJsonUrl}`;
         } else {
           throw new Error('This tour has no Scan telemetry mapping attached to it.');
         }
@@ -90,9 +92,21 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
       // Load GLB model and scan JSON in parallel
       const glbPromise = new Promise((resolve, reject) => {
         const gltfLoader = new GLTFLoader();
+        
         const dracoLoader = new DRACOLoader();
         dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
         gltfLoader.setDRACOLoader(dracoLoader);
+
+        if (rendererRef && rendererRef.current) {
+          const ktx2Loader = new KTX2Loader()
+            .setTranscoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/')
+            .detectSupport(rendererRef.current)
+            .setWorkerLimit(Math.max(1, (navigator.hardwareConcurrency || 4) - 1)); // Use background workers
+          gltfLoader.setKTX2Loader(ktx2Loader);
+        }
+        
+        gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+
         gltfLoader.load(glbUrl, resolve, undefined, reject);
       });
 
@@ -111,7 +125,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
                 const basic = new THREE.MeshBasicMaterial({
                   map: m.map || null,
                   color: m.color || 0xffffff,
-                  transparent: true,
+                  transparent: false, // Prevents GPU depth-sorting lag
                   side: m.side,
                 });
                 m.dispose();
@@ -119,8 +133,18 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
               });
               child.material = newMats.length === 1 ? newMats[0] : newMats;
 
-              // Generate BVH spatial index for ultra-fast raycasting
+              // 2. Freeze Transformation Matrices (Massive CPU saver)
+              child.matrixAutoUpdate = false;
+              child.updateMatrix();
+
               if (child.geometry) {
+                // 3. Ensure Frustum Culling is Accurate
+                // Sometimes compressed GLBs have corrupted bounding boxes.
+                // We must force recalculate them so they don't render when behind the camera.
+                child.geometry.computeBoundingBox();
+                child.geometry.computeBoundingSphere();
+
+                // Generate BVH spatial index for ultra-fast raycasting
                 child.geometry.computeBoundsTree();
                 child.raycast = acceleratedRaycast; // Only apply to GLB meshes
               }
@@ -128,6 +152,12 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
           });
           scene.add(gltf.scene);
           modelRef.current = gltf.scene;
+
+          // Pre-compile shaders to prevent massive GPU stutter on first frame render
+          if (rendererRef && rendererRef.current && cameraRef && cameraRef.current) {
+            rendererRef.current.compile(scene, cameraRef.current);
+          }
+
           setIsModelLoaded(true);
 
           // Compute the floor level: bbox.min.z is the absolute bottom of the model
@@ -340,17 +370,20 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady) => {
 
   const loadPanoramaTextures = (scanId, renderer) => {
     return new Promise((resolve) => {
-      const textureLoader = new THREE.TextureLoader();
+      const bitmapLoader = new THREE.ImageBitmapLoader();
+      bitmapLoader.setOptions({ imageOrientation: 'flipY' });
       const faces = ['py', 'pz', 'px', 'nz', 'nx', 'ny'];
 
       const baseUrl = tourId
-        ? `http://app.alpha.openscaler.net:9255/virtual-inspections/inspections/${tourId}/`
+        ? `http://localhost:9000/virtual-inspections/inspections/${tourId}/`
         : `/`;
 
       const loadPromises = faces.map((face) => {
         return new Promise((resFace) => {
-          textureLoader.load(`${baseUrl}images/${scanId}_${face}.jpg`, (tex) => {
+          bitmapLoader.load(`${baseUrl}images/${scanId}_${face}.jpg`, (imageBitmap) => {
+            const tex = new THREE.Texture(imageBitmap);
             tex.colorSpace = THREE.SRGBColorSpace; // CRITICAL: Treat JPEG as sRGB to prevent washed-out colors
+            tex.needsUpdate = true;
             if (renderer) renderer.initTexture(tex);
             resFace(tex);
           });

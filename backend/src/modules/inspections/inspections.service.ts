@@ -1,6 +1,11 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { CreateInspectionDto } from './dto/create-inspection.dto';
 import { CreateScanDto } from './dto/create-scan.dto';
 import { CreatePanoramaDto } from './dto/create-panorama.dto';
@@ -396,6 +401,69 @@ export class InspectionsService {
     });
 
     return { success: true, s3Path, rawScansS3Path, rawCsvS3Path };
+  }
+
+  async processGlb(id: string, userEnterpriseId: string, role: Role) {
+    const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+    if (!inspection) throw new NotFoundException('Inspection not found');
+
+    if (inspection.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
+      throw new ForbiddenException('Only the creator or admin can process this inspection');
+    }
+
+    if (!inspection.glbModelUrl) {
+      throw new NotFoundException('No GLB model found to process');
+    }
+
+    const execAsync = promisify(exec);
+    const tmpDir = os.tmpdir();
+    const inputPath = path.join(tmpDir, `${id}_input.glb`);
+    const outputPath = path.join(tmpDir, `${id}_opt.glb`);
+
+    // Ensure toktx is found even if terminal wasn't restarted after installation
+    process.env.PATH = process.env.PATH + ';C:\\Program Files\\KTX-Software\\bin';
+
+    try {
+      // 1. Download raw GLB from Minio
+      await this.storageService.downloadFile('virtual-inspections', inspection.glbModelUrl, inputPath);
+
+      // 2. Run gltfpack optimization
+      // -cc: Meshopt geometry compression
+      // -mm: Merge instances / draw calls
+      // Skipping -tc (KTX2) since toktx is not guaranteed to be installed on the system right now, 
+      // but we will add it to the command and if it fails, fallback without it.
+      
+      const gltfpackPath = path.join(process.cwd(), 'gltfpack.exe');
+      let command = `"${gltfpackPath}" -i "${inputPath}" -o "${outputPath}" -cc -mm`;
+      
+      // Attempt to run with texture compression first
+      try {
+        await execAsync(`"${gltfpackPath}" -i "${inputPath}" -o "${outputPath}" -cc -tc -mm`);
+      } catch (err) {
+        console.warn('gltfpack -tc failed (likely missing toktx). Falling back to geometry-only compression:', err.message);
+        // Fallback to geometry compression only
+        await execAsync(command);
+      }
+
+      // 3. Upload optimized GLB back to Minio
+      const newS3Path = `inspections/${id}/optimized_final.glb`;
+      await this.storageService.uploadFile('virtual-inspections', newS3Path, outputPath, 'model/gltf-binary');
+
+      // 4. Update Database
+      await this.prisma.inspection.update({
+        where: { id },
+        data: { glbModelUrl: newS3Path },
+      });
+
+      return { success: true, optimizedUrl: newS3Path };
+    } catch (error) {
+      console.error('Failed to process GLB:', error);
+      throw new InternalServerErrorException('Failed to optimize GLB model');
+    } finally {
+      // Cleanup temp files
+      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    }
   }
 
   // ─── Tag CRUD ───────────────────────────────────────────────

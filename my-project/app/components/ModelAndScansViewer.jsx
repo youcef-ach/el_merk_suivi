@@ -1,5 +1,6 @@
 import { useRef, useState, useMemo, useEffect, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
+import gsap from 'gsap';
 import { useThreeScene } from '../hooks/useThreeScene';
 import { useTourData } from '../hooks/useTourData';
 import { executeFlightAnimation, toggleBoxFading, toggleModelFading } from '../utils/tourAnimations';
@@ -16,7 +17,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
   const { 
     modelRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
     scanSpheres, loadPanoramaTextures, isDataLoaded 
-  } = useTourData(sceneRef, dummyTex, tourId, sceneReady);
+  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef);
 
   // Expose Three.js internals to parent via ref (for measurement tool)
   useImperativeHandle(ref, () => ({
@@ -75,6 +76,47 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
     toggleModelFading(modelRef.current, isMeshView);
     
     setIsMeshView(!isMeshView);
+  };
+
+  const handleFloorPlanView = () => {
+    if (!modelRef.current || !cameraRef.current || !controlsRef.current) return;
+
+    // Force Mesh View if inside a panorama
+    if (isInscan && !isMeshView) {
+      handleToggleMeshView();
+    }
+
+    const bbox = new THREE.Box3().setFromObject(modelRef.current);
+    const center = new THREE.Vector3();
+    bbox.getCenter(center);
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+
+    const maxDim = Math.max(size.x, size.y);
+    const topZ = bbox.max.z + maxDim * 1.2;
+
+    // Kill any existing Tweens
+    gsap.killTweensOf(cameraRef.current.position);
+    gsap.killTweensOf(controlsRef.current.target);
+
+    // Offset camera slightly to prevent OrbitControls gimbal lock when looking straight down Z axis
+    gsap.to(cameraRef.current.position, {
+      x: center.x + 0.1,
+      y: center.y + 0.1,
+      z: topZ,
+      duration: 1.5,
+      ease: "power3.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+
+    gsap.to(controlsRef.current.target, {
+      x: center.x,
+      y: center.y,
+      z: bbox.min.z,
+      duration: 1.5,
+      ease: "power3.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
   };
 
   // Synchronize Area Pointers visibility (Only display in Dollhouse mode)
@@ -303,7 +345,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
             const tagId = hitSprite.userData.tagId;
             // Fetch tag info from backend
             const token = localStorage.getItem('access_token');
-            fetch(`http://app.alpha.openscaler.net:9251/inspections/${tourId}`, {
+            fetch(`http://localhost:3000/inspections/${tourId}`, {
               headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             })
               .then(r => r.json())
@@ -498,6 +540,40 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
         </>
       )}
 
+      {/* Floor Plan Button */}
+      <button 
+        onClick={(e) => { e.stopPropagation(); handleFloorPlanView(); }}
+        style={{
+          position: 'absolute',
+          top: 30,
+          right: 30,
+          zIndex: 1000,
+          padding: '12px 24px',
+          background: 'rgba(15, 15, 15, 0.85)',
+          color: '#fff',
+          border: '1px solid rgba(255,255,255,0.2)',
+          borderRadius: '30px',
+          cursor: 'pointer',
+          backdropFilter: 'blur(8px)',
+          fontWeight: 'bold',
+          fontSize: '14px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          transition: 'background 0.2s ease',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(40, 40, 40, 0.95)'}
+        onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(15, 15, 15, 0.85)'}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="3" y1="9" x2="21" y2="9"></line>
+          <line x1="9" y1="21" x2="9" y2="9"></line>
+        </svg>
+        Floor Plan View
+      </button>
+
       {/* Tag Info Popup (Engine/Read-only mode) */}
       {activeTagInfo && (
         <div
@@ -612,7 +688,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
                 {activeTagInfo.documents.map(doc => (
                   <a
                     key={doc.id}
-                    href={`http://app.alpha.openscaler.net:9255/virtual-tours/${doc.fileUrl}`}
+                    href={`http://localhost:9000/virtual-tours/${doc.fileUrl}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{

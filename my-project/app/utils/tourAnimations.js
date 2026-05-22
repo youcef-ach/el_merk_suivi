@@ -82,6 +82,7 @@ export const toggleModelFading = (model, isCurrentlyVisible, setVisibleState) =>
   });
 
   if (isCurrentlyVisible) {
+    // Model is fading OUT to invisible depth occlusion
     gsap.delayedCall(2.5, () => { 
       if (model) {
         model.visible = true; // Always visible for depth occlusion
@@ -90,6 +91,18 @@ export const toggleModelFading = (model, isCurrentlyVisible, setVisibleState) =>
           mat.depthWrite = true;
           mat.transparent = true;
           mat.side = THREE.DoubleSide;
+          mat.needsUpdate = true;
+        });
+      }
+    });
+  } else {
+    // Model is fading IN to solid Dollhouse
+    gsap.delayedCall(2.5, () => { 
+      if (model) {
+        getModelMaterials(model).forEach(mat => {
+          mat.transparent = false; // Turn OFF transparency once solid to save GPU!
+          mat.depthWrite = true;
+          mat.colorWrite = true;
           mat.needsUpdate = true;
         });
       }
@@ -190,6 +203,8 @@ export const executeFlightAnimation = ({
     if (model) {
       getModelMaterials(model).forEach(mat => {
         mat.colorWrite = true;
+        mat.transparent = true; // Enable transparency specifically for this fade
+        mat.needsUpdate = true;
         tl.to(mat, { opacity: 0, duration: 1.0, ease: "power2.in" }, 0.1);
       });
     }
@@ -247,6 +262,9 @@ export const executeFlightAnimation = ({
     // ── Phase 2: Model OUT + Next pano IN ──
     if (model) {
       getModelMaterials(model).forEach(mat => {
+        // Needs transparency to fade out again
+        mat.transparent = true;
+        mat.needsUpdate = true;
         tl.to(mat, { opacity: 0, duration: PHASE, ease: "power2.inOut" }, PHASE);
       });
     }

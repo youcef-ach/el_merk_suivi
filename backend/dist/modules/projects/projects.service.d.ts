@@ -6,8 +6,8 @@ export declare class ProjectsService {
     create(createProjectDto: CreateProjectDto, userId: string, enterpriseId: string): Promise<{
         enterpriseId: string;
         id: string;
-        createdAt: Date;
         name: string;
+        createdAt: Date;
         description: string | null;
         updatedAt: Date;
     }>;
@@ -18,8 +18,8 @@ export declare class ProjectsService {
     } & {
         enterpriseId: string;
         id: string;
-        createdAt: Date;
         name: string;
+        createdAt: Date;
         description: string | null;
         updatedAt: Date;
     })[]>;
@@ -32,6 +32,8 @@ export declare class ProjectsService {
             title: string;
             glbModelUrl: string | null;
             scansJsonUrl: string | null;
+            rawScansJsonUrl: string | null;
+            rawCsvJsonUrl: string | null;
             thumbnailUrl: string | null;
             videoUrl: string | null;
             visibility: import(".prisma/client").$Enums.Visibility;
@@ -40,16 +42,16 @@ export declare class ProjectsService {
     } & {
         enterpriseId: string;
         id: string;
-        createdAt: Date;
         name: string;
+        createdAt: Date;
         description: string | null;
         updatedAt: Date;
     }>;
     remove(id: string, enterpriseId: string): Promise<{
         enterpriseId: string;
         id: string;
-        createdAt: Date;
         name: string;
+        createdAt: Date;
         description: string | null;
         updatedAt: Date;
     }>;

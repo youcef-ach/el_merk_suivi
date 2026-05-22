@@ -15,6 +15,9 @@ export const disposeScene = (scene, preserveTextures = []) => {
 
     // Dispose Geometry
     if (object.geometry) {
+      if (typeof object.geometry.disposeBoundsTree === 'function') {
+        object.geometry.disposeBoundsTree();
+      }
       object.geometry.dispose();
     }
 

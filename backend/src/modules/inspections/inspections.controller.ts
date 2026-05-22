@@ -109,4 +109,12 @@ export class InspectionsController {
   ) {
     return this.inspectionsService.processAndUploadScans(id, body.mpData, body.rcData, user.enterpriseId, user.role);
   }
+
+  @Post(':id/process-glb')
+  async processGlb(
+    @Param('id') id: string,
+    @GetUser() user: any,
+  ) {
+    return this.inspectionsService.processGlb(id, user.enterpriseId, user.role);
+  }
 }

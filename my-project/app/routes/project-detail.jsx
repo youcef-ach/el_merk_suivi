@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import ProtectedRoute from '../components/ProtectedRoute';
 import Navbar from '../components/Navbar';
@@ -18,6 +18,13 @@ function ProjectDetailContent() {
   const [error, setError] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
 
+  // Reprocess Scans Modal State
+  const [reprocessInspection, setReprocessInspection] = useState(null);
+  const [isReprocessing, setIsReprocessing] = useState(false);
+  const [reprocessError, setReprocessError] = useState('');
+  const mpFileRef = useRef(null);
+  const rcFileRef = useRef(null);
+
   let user = null;
   try {
     const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
@@ -33,7 +40,7 @@ function ProjectDetailContent() {
   const fetchProject = async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}`, {
+      const response = await fetch(`http://localhost:3000/projects/${projectId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -60,7 +67,7 @@ function ProjectDetailContent() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections/${id}`, {
+      const response = await fetch(`http://localhost:3000/projects/${projectId}/inspections/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -77,7 +84,7 @@ function ProjectDetailContent() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://app.alpha.openscaler.net:9251/projects/${projectId}/inspections/${id}/clone`, {
+      const response = await fetch(`http://localhost:3000/projects/${projectId}/inspections/${id}/clone`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -86,6 +93,48 @@ function ProjectDetailContent() {
       fetchProject(); // refresh
     } catch (err) {
       alert(err.message);
+    }
+  };
+
+  const handleReprocessSubmit = async () => {
+    if (!reprocessInspection) return;
+    const mpFile = mpFileRef.current?.files[0];
+    const rcFile = rcFileRef.current?.files[0];
+
+    if (!mpFile || !rcFile) {
+      setReprocessError("You must provide both the Matterport JSON and the RealityCapture JSON to reprocess.");
+      return;
+    }
+
+    setReprocessError('');
+    setIsReprocessing(true);
+
+    try {
+      const mpText = await mpFile.text();
+      const rcText = await rcFile.text();
+      const token = localStorage.getItem('access_token');
+
+      const processRes = await fetch(`http://localhost:3000/projects/${projectId}/inspections/${reprocessInspection.id}/process-scans`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ mpData: JSON.parse(mpText), rcData: JSON.parse(rcText) })
+      });
+
+      if (!processRes.ok) {
+        const errBody = await processRes.json().catch(() => ({}));
+        throw new Error(errBody.message || `Failed to process scans (${processRes.status})`);
+      }
+
+      setReprocessInspection(null);
+      alert("Scans successfully reprocessed! Changes will reflect when reloading the 3D Engine.");
+      fetchProject();
+    } catch (err) {
+      setReprocessError(err.message);
+    } finally {
+      setIsReprocessing(false);
     }
   };
 
@@ -126,7 +175,7 @@ function ProjectDetailContent() {
               <div key={insp.id} className="tour-card" style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ position: 'relative', width: '100%', height: '180px', backgroundColor: '#111' }}>
                    {insp.thumbnailUrl ? (
-                      <img src={`http://app.alpha.openscaler.net:9255/virtual-inspections/${insp.thumbnailUrl}`} alt={insp.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={`http://localhost:9000/virtual-inspections/${insp.thumbnailUrl}`} alt={insp.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                    ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.2)' }}>
                          No Thumbnail
@@ -165,7 +214,7 @@ function ProjectDetailContent() {
                        </button>
                      )}
                      {insp.videoUrl && (
-                        <button className="btn-secondary" onClick={() => setSelectedVideo(`http://app.alpha.openscaler.net:9255/virtual-inspections/${insp.videoUrl}`)} style={{ borderColor: '#3a82f6', color: '#3a82f6' }}>
+                        <button className="btn-secondary" onClick={() => setSelectedVideo(`http://localhost:9000/virtual-inspections/${insp.videoUrl}`)} style={{ borderColor: '#3a82f6', color: '#3a82f6' }}>
                           Watch Video
                         </button>
                      )}
@@ -173,6 +222,9 @@ function ProjectDetailContent() {
                        <>
                          <button className="btn-secondary" onClick={() => handleCloneInspection(insp.id)}>
                            Clone
+                         </button>
+                         <button className="btn-secondary" onClick={() => setReprocessInspection(insp)}>
+                           Reprocess Scans
                          </button>
                          <button className="btn-danger" onClick={() => handleDeleteInspection(insp.id)}>
                            Purge
@@ -191,6 +243,42 @@ function ProjectDetailContent() {
               <button onClick={() => setSelectedVideo(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'transparent', border: 'none', color: 'white', fontSize: '32px', cursor: 'pointer' }}>×</button>
               <video src={selectedVideo} controls autoPlay style={{ maxWidth: '90%', maxHeight: '80%' }} />
            </div>
+        )}
+
+        {reprocessInspection && (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: '#1e1e1e', padding: '32px', borderRadius: '12px', width: '500px', maxWidth: '90%', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h2 style={{ color: 'white', marginBottom: '8px' }}>Reprocess Scans</h2>
+              <p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: '24px', fontSize: '14px' }}>
+                Re-upload the raw Matterport and RealityCapture JSON files to recalculate the coordinates for <strong>{reprocessInspection.title}</strong>. This will instantly update the 3D Engine for all users.
+              </p>
+
+              {reprocessError && (
+                <div style={{ color: '#ff4a5a', padding: '12px', background: 'rgba(238, 45, 61, 0.1)', borderRadius: '6px', marginBottom: '20px', fontSize: '13px' }}>
+                  {reprocessError}
+                </div>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">Matterport Mapping (scans.json / raw_scans.json) *</label>
+                <input type="file" ref={mpFileRef} accept=".json" style={{ color: 'white', padding: '12px 0', display: 'block' }} />
+              </div>
+
+              <div className="form-group" style={{ marginTop: '16px' }}>
+                <label className="form-label">RealityCapture Mapping (csvjson.json) *</label>
+                <input type="file" ref={rcFileRef} accept=".json" style={{ color: 'white', padding: '12px 0', display: 'block' }} />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', marginTop: '32px' }}>
+                <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setReprocessInspection(null)} disabled={isReprocessing}>
+                  Cancel
+                </button>
+                <button className="btn-primary" style={{ flex: 1 }} onClick={handleReprocessSubmit} disabled={isReprocessing}>
+                  {isReprocessing ? 'Processing...' : 'Upload & Reprocess'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

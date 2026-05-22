@@ -83,4 +83,28 @@ export class StorageService implements OnModuleInit {
       throw new InternalServerErrorException(`Failed to upload buffer: ${error.message}`);
     }
   }
+
+  /**
+   * Downloads an object from MinIO directly to the local filesystem.
+   */
+  async downloadFile(bucket: string, fileName: string, localFilePath: string): Promise<void> {
+    try {
+      await this.minioClient.fGetObject(bucket, fileName, localFilePath);
+    } catch (error) {
+      throw new InternalServerErrorException(`Failed to download file from MinIO: ${error.message}`);
+    }
+  }
+
+  /**
+   * Uploads a local file directly to MinIO.
+   */
+  async uploadFile(bucket: string, fileName: string, localFilePath: string, contentType: string = 'application/octet-stream'): Promise<void> {
+    try {
+      await this.minioClient.fPutObject(bucket, fileName, localFilePath, {
+        'Content-Type': contentType,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(`Failed to upload file to MinIO: ${error.message}`);
+    }
+  }
 }

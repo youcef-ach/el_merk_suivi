@@ -8,4 +8,6 @@ export declare class StorageService implements OnModuleInit {
     getPresignedPutUrl(bucket: string, fileName: string): Promise<string>;
     ensureBucketExists(bucket: string): Promise<void>;
     uploadBuffer(bucket: string, fileName: string, buffer: Buffer, contentType?: string): Promise<void>;
+    downloadFile(bucket: string, fileName: string, localFilePath: string): Promise<void>;
+    uploadFile(bucket: string, fileName: string, localFilePath: string, contentType?: string): Promise<void>;
 }

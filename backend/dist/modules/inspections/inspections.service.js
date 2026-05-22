@@ -13,6 +13,11 @@ exports.InspectionsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const storage_service_1 = require("../storage/storage.service");
+const os = require("os");
+const path = require("path");
+const fs = require("fs");
+const child_process_1 = require("child_process");
+const util_1 = require("util");
 const client_1 = require("@prisma/client");
 let InspectionsService = class InspectionsService {
     constructor(prisma, storageService) {
@@ -79,6 +84,115 @@ let InspectionsService = class InspectionsService {
     async getBundle(id, user) {
         const inspection = await this.findOne(id, user);
         return inspection;
+    }
+    async clone(id, userEnterpriseId, role) {
+        const original = await this.prisma.inspection.findUnique({
+            where: { id },
+            include: {
+                project: true,
+                scans: true,
+                panoramas: true,
+                tags: { include: { documents: true } },
+                areaPointers: true,
+                authorizedViewers: true,
+            },
+        });
+        if (!original)
+            throw new common_1.NotFoundException('Inspection not found');
+        if (original.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the enterprise admin can clone this inspection');
+        }
+        const newInspection = await this.prisma.inspection.create({
+            data: {
+                title: `${original.title} (Copy)`,
+                description: original.description,
+                glbModelUrl: original.glbModelUrl,
+                scansJsonUrl: original.scansJsonUrl,
+                thumbnailUrl: original.thumbnailUrl,
+                videoUrl: original.videoUrl,
+                visibility: original.visibility,
+                projectId: original.projectId,
+                authorizedViewers: {
+                    connect: original.authorizedViewers.map(v => ({ id: v.id }))
+                }
+            }
+        });
+        const oldToNewScanId = new Map();
+        for (const scan of original.scans) {
+            const newScan = await this.prisma.scan.create({
+                data: {
+                    posX: scan.posX,
+                    posY: scan.posY,
+                    posZ: scan.posZ,
+                    quatW: scan.quatW,
+                    quatX: scan.quatX,
+                    quatY: scan.quatY,
+                    quatZ: scan.quatZ,
+                    inspectionId: newInspection.id,
+                }
+            });
+            oldToNewScanId.set(scan.id, newScan.id);
+        }
+        for (const scan of original.scans) {
+            if (scan.targetScanId && oldToNewScanId.has(scan.targetScanId)) {
+                await this.prisma.scan.update({
+                    where: { id: oldToNewScanId.get(scan.id) },
+                    data: { targetScanId: oldToNewScanId.get(scan.targetScanId) }
+                });
+            }
+        }
+        for (const pan of original.panoramas) {
+            await this.prisma.panorama.create({
+                data: {
+                    imageUrl: pan.imageUrl,
+                    status: pan.status,
+                    inspectionId: newInspection.id,
+                }
+            });
+        }
+        for (const ptr of original.areaPointers) {
+            await this.prisma.areaPointer.create({
+                data: {
+                    name: ptr.name,
+                    color: ptr.color,
+                    posX: ptr.posX,
+                    posY: ptr.posY,
+                    posZ: ptr.posZ,
+                    height: ptr.height,
+                    thickness: ptr.thickness,
+                    labelSize: ptr.labelSize,
+                    sizeX: ptr.sizeX,
+                    sizeY: ptr.sizeY,
+                    wallHeight: ptr.wallHeight,
+                    inspectionId: newInspection.id,
+                }
+            });
+        }
+        for (const tag of original.tags) {
+            const newTag = await this.prisma.tag.create({
+                data: {
+                    title: tag.title,
+                    description: tag.description,
+                    posX: tag.posX,
+                    posY: tag.posY,
+                    posZ: tag.posZ,
+                    icon: tag.icon,
+                    color: tag.color,
+                    size: tag.size,
+                    inspectionId: newInspection.id,
+                }
+            });
+            for (const doc of tag.documents) {
+                await this.prisma.tagDocument.create({
+                    data: {
+                        title: doc.title,
+                        fileUrl: doc.fileUrl,
+                        tagId: newTag.id,
+                    }
+                });
+            }
+        }
+        return newInspection;
     }
     async createScan(inspectionId, dto, userEnterpriseId, role) {
         const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
@@ -201,14 +315,69 @@ let InspectionsService = class InspectionsService {
         const { processScans } = require('./utils/scan-processor.util');
         const processedData = processScans(mpData, rcData);
         const fileBuffer = Buffer.from(JSON.stringify(processedData, null, 2));
+        const mpBuffer = Buffer.from(JSON.stringify(mpData, null, 2));
+        const rcBuffer = Buffer.from(JSON.stringify(rcData, null, 2));
         const bucket = 'virtual-inspections';
         const s3Path = `inspections/${id}/scans.json`;
+        const rawScansS3Path = `inspections/${id}/raw_scans.json`;
+        const rawCsvS3Path = `inspections/${id}/raw_csvjson.json`;
         await this.storageService.uploadBuffer(bucket, s3Path, fileBuffer, 'application/json');
+        await this.storageService.uploadBuffer(bucket, rawScansS3Path, mpBuffer, 'application/json');
+        await this.storageService.uploadBuffer(bucket, rawCsvS3Path, rcBuffer, 'application/json');
         await this.prisma.inspection.update({
             where: { id },
-            data: { scansJsonUrl: s3Path },
+            data: {
+                scansJsonUrl: s3Path,
+                rawScansJsonUrl: rawScansS3Path,
+                rawCsvJsonUrl: rawCsvS3Path
+            },
         });
-        return { success: true, s3Path };
+        return { success: true, s3Path, rawScansS3Path, rawCsvS3Path };
+    }
+    async processGlb(id, userEnterpriseId, role) {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the creator or admin can process this inspection');
+        }
+        if (!inspection.glbModelUrl) {
+            throw new common_1.NotFoundException('No GLB model found to process');
+        }
+        const execAsync = (0, util_1.promisify)(child_process_1.exec);
+        const tmpDir = os.tmpdir();
+        const inputPath = path.join(tmpDir, `${id}_input.glb`);
+        const outputPath = path.join(tmpDir, `${id}_opt.glb`);
+        process.env.PATH = process.env.PATH + ';C:\\Program Files\\KTX-Software\\bin';
+        try {
+            await this.storageService.downloadFile('virtual-inspections', inspection.glbModelUrl, inputPath);
+            const gltfpackPath = path.join(process.cwd(), 'gltfpack.exe');
+            let command = `"${gltfpackPath}" -i "${inputPath}" -o "${outputPath}" -cc -mm`;
+            try {
+                await execAsync(`"${gltfpackPath}" -i "${inputPath}" -o "${outputPath}" -cc -tc -mm`);
+            }
+            catch (err) {
+                console.warn('gltfpack -tc failed (likely missing toktx). Falling back to geometry-only compression:', err.message);
+                await execAsync(command);
+            }
+            const newS3Path = `inspections/${id}/optimized_final.glb`;
+            await this.storageService.uploadFile('virtual-inspections', newS3Path, outputPath, 'model/gltf-binary');
+            await this.prisma.inspection.update({
+                where: { id },
+                data: { glbModelUrl: newS3Path },
+            });
+            return { success: true, optimizedUrl: newS3Path };
+        }
+        catch (error) {
+            console.error('Failed to process GLB:', error);
+            throw new common_1.InternalServerErrorException('Failed to optimize GLB model');
+        }
+        finally {
+            if (fs.existsSync(inputPath))
+                fs.unlinkSync(inputPath);
+            if (fs.existsSync(outputPath))
+                fs.unlinkSync(outputPath);
+        }
     }
     async createTag(inspectionId, dto, userEnterpriseId, role) {
         const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });

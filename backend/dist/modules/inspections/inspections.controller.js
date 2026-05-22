@@ -42,6 +42,9 @@ let InspectionsController = class InspectionsController {
     getBundle(id, user) {
         return this.inspectionsService.getBundle(id, user);
     }
+    clone(id, user) {
+        return this.inspectionsService.clone(id, user.enterpriseId, user.role);
+    }
     createScan(id, dto, user) {
         return this.inspectionsService.createScan(id, dto, user.enterpriseId, user.role);
     }
@@ -62,6 +65,9 @@ let InspectionsController = class InspectionsController {
     }
     async processAndUploadScans(id, body, user) {
         return this.inspectionsService.processAndUploadScans(id, body.mpData, body.rcData, user.enterpriseId, user.role);
+    }
+    async processGlb(id, user) {
+        return this.inspectionsService.processGlb(id, user.enterpriseId, user.role);
     }
 };
 exports.InspectionsController = InspectionsController;
@@ -101,6 +107,14 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", void 0)
 ], InspectionsController.prototype, "getBundle", null);
+__decorate([
+    (0, common_1.Post)(':id/clone'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], InspectionsController.prototype, "clone", null);
 __decorate([
     (0, common_1.Post)(':id/scans'),
     __param(0, (0, common_1.Param)('id')),
@@ -165,6 +179,14 @@ __decorate([
     __metadata("design:paramtypes", [String, process_scans_dto_1.ProcessScansDto, Object]),
     __metadata("design:returntype", Promise)
 ], InspectionsController.prototype, "processAndUploadScans", null);
+__decorate([
+    (0, common_1.Post)(':id/process-glb'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], InspectionsController.prototype, "processGlb", null);
 exports.InspectionsController = InspectionsController = __decorate([
     (0, common_1.Controller)('projects/:projectId/inspections'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, roles_guard_1.RolesGuard),

@@ -4,20 +4,20 @@ export declare class InspectionsDirectController {
     constructor(inspectionsService: InspectionsService);
     findOne(id: string, user: any): Promise<{
         project: {
-            enterpriseId: string;
             id: string;
-            createdAt: Date;
-            name: string;
             description: string | null;
+            createdAt: Date;
             updatedAt: Date;
+            name: string;
+            enterpriseId: string;
         };
         authorizedViewers: {
+            id: string;
+            createdAt: Date;
+            enterpriseId: string | null;
             email: string;
             password: string;
-            enterpriseId: string | null;
-            id: string;
             role: import(".prisma/client").$Enums.Role;
-            createdAt: Date;
         }[];
         panoramas: {
             id: string;
@@ -34,18 +34,19 @@ export declare class InspectionsDirectController {
             }[];
         } & {
             id: string;
-            description: string | null;
             title: string;
+            description: string | null;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
             icon: string;
             color: string;
             size: number;
-            inspectionId: string;
         })[];
         scans: {
             id: string;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
@@ -54,13 +55,13 @@ export declare class InspectionsDirectController {
             quatY: number;
             quatZ: number;
             targetScanId: string | null;
-            inspectionId: string;
         }[];
         areaPointers: {
             id: string;
             createdAt: Date;
-            name: string;
             updatedAt: Date;
+            name: string;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
@@ -71,37 +72,38 @@ export declare class InspectionsDirectController {
             sizeX: number;
             sizeY: number;
             wallHeight: number;
-            inspectionId: string;
         }[];
     } & {
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
+        rawScansJsonUrl: string | null;
+        rawCsvJsonUrl: string | null;
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
     getBundle(id: string, user: any): Promise<{
         project: {
-            enterpriseId: string;
             id: string;
-            createdAt: Date;
-            name: string;
             description: string | null;
+            createdAt: Date;
             updatedAt: Date;
+            name: string;
+            enterpriseId: string;
         };
         authorizedViewers: {
+            id: string;
+            createdAt: Date;
+            enterpriseId: string | null;
             email: string;
             password: string;
-            enterpriseId: string | null;
-            id: string;
             role: import(".prisma/client").$Enums.Role;
-            createdAt: Date;
         }[];
         panoramas: {
             id: string;
@@ -118,18 +120,19 @@ export declare class InspectionsDirectController {
             }[];
         } & {
             id: string;
-            description: string | null;
             title: string;
+            description: string | null;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
             icon: string;
             color: string;
             size: number;
-            inspectionId: string;
         })[];
         scans: {
             id: string;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
@@ -138,13 +141,13 @@ export declare class InspectionsDirectController {
             quatY: number;
             quatZ: number;
             targetScanId: string | null;
-            inspectionId: string;
         }[];
         areaPointers: {
             id: string;
             createdAt: Date;
-            name: string;
             updatedAt: Date;
+            name: string;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
@@ -155,19 +158,20 @@ export declare class InspectionsDirectController {
             sizeX: number;
             sizeY: number;
             wallHeight: number;
-            inspectionId: string;
         }[];
     } & {
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
+        rawScansJsonUrl: string | null;
+        rawCsvJsonUrl: string | null;
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
 }
