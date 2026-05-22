@@ -59,6 +59,8 @@ model Inspection {
   description       String?
   glbModelUrl       String?
   scansJsonUrl      String?
+  rawScansJsonUrl   String?
+  rawCsvJsonUrl     String?
   thumbnailUrl      String?
   videoUrl          String?
   visibility        Visibility   @default(PRIVATE)

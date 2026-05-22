@@ -370,19 +370,32 @@ export class InspectionsService {
     const { processScans } = require('./utils/scan-processor.util');
     const processedData = processScans(mpData, rcData);
     const fileBuffer = Buffer.from(JSON.stringify(processedData, null, 2));
+    
+    // Also buffer the raw inputs for later reprocessing
+    const mpBuffer = Buffer.from(JSON.stringify(mpData, null, 2));
+    const rcBuffer = Buffer.from(JSON.stringify(rcData, null, 2));
 
     // Upload to Minio
     const bucket = 'virtual-inspections';
     const s3Path = `inspections/${id}/scans.json`;
+    const rawScansS3Path = `inspections/${id}/raw_scans.json`;
+    const rawCsvS3Path = `inspections/${id}/raw_csvjson.json`;
+    
     await this.storageService.uploadBuffer(bucket, s3Path, fileBuffer, 'application/json');
+    await this.storageService.uploadBuffer(bucket, rawScansS3Path, mpBuffer, 'application/json');
+    await this.storageService.uploadBuffer(bucket, rawCsvS3Path, rcBuffer, 'application/json');
 
     // Update DB
     await this.prisma.inspection.update({
       where: { id },
-      data: { scansJsonUrl: s3Path },
+      data: { 
+        scansJsonUrl: s3Path,
+        rawScansJsonUrl: rawScansS3Path,
+        rawCsvJsonUrl: rawCsvS3Path
+      },
     });
 
-    return { success: true, s3Path };
+    return { success: true, s3Path, rawScansS3Path, rawCsvS3Path };
   }
 
   // ─── Tag CRUD ───────────────────────────────────────────────
