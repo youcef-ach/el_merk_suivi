@@ -14,15 +14,15 @@ export declare class TagsController {
         }[];
     } & {
         id: string;
-        title: string;
         description: string | null;
-        inspectionId: string;
+        title: string;
         posX: number;
         posY: number;
         posZ: number;
         icon: string;
         color: string;
         size: number;
+        inspectionId: string;
     }>;
     update(inspectionId: string, tagId: string, dto: UpdateTagDto, user: any): Promise<{
         documents: {
@@ -33,27 +33,27 @@ export declare class TagsController {
         }[];
     } & {
         id: string;
-        title: string;
         description: string | null;
-        inspectionId: string;
+        title: string;
         posX: number;
         posY: number;
         posZ: number;
         icon: string;
         color: string;
         size: number;
+        inspectionId: string;
     }>;
     remove(inspectionId: string, tagId: string, user: any): Promise<{
         id: string;
-        title: string;
         description: string | null;
-        inspectionId: string;
+        title: string;
         posX: number;
         posY: number;
         posZ: number;
         icon: string;
         color: string;
         size: number;
+        inspectionId: string;
     }>;
     addDocument(inspectionId: string, tagId: string, dto: CreateTagDocumentDto, user: any): Promise<{
         presignedUrl: string;
