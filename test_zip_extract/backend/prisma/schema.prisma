@@ -1,0 +1,149 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  VIEWER
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum ProcessingStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+model Enterprise {
+  id        String    @id @default(uuid())
+  name      String
+  users     User[]
+  projects  Project[]
+  createdAt DateTime  @default(now())
+}
+
+model Project {
+  id           String       @id @default(uuid())
+  name         String
+  description  String?
+  enterpriseId String
+  enterprise   Enterprise   @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+  inspections  Inspection[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model User {
+  id                String       @id @default(uuid())
+  email             String       @unique
+  password          String
+  role              Role         @default(VIEWER)
+  enterpriseId      String?
+  enterprise        Enterprise?  @relation(fields: [enterpriseId], references: [id])
+  createdAt         DateTime     @default(now())
+  authorizedInspections Inspection[] @relation("AuthorizedViewers")
+}
+
+model Inspection {
+  id                String       @id @default(uuid())
+  title             String
+  description       String?
+  glbModelUrl       String?
+  scansJsonUrl      String?
+  thumbnailUrl      String?
+  videoUrl          String?
+  visibility        Visibility   @default(PRIVATE)
+  
+  projectId         String
+  project           Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  authorizedViewers User[]       @relation("AuthorizedViewers")
+  
+  panoramas         Panorama[]
+  tags              Tag[]
+  scans             Scan[]
+  areaPointers      AreaPointer[]
+  
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+model Panorama {
+  id           String           @id @default(uuid())
+  imageUrl     String
+  status       ProcessingStatus @default(PENDING)
+  inspectionId String
+  inspection   Inspection       @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+}
+
+model Tag {
+  id           String        @id @default(uuid())
+  title        String
+  description  String?
+  posX         Float
+  posY         Float
+  posZ         Float
+  icon         String        @default("info")
+  color        String        @default("#00e5ff")
+  size         Float         @default(1.0)
+  inspectionId String
+  inspection   Inspection    @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  documents    TagDocument[]
+}
+
+model TagDocument {
+  id      String @id @default(uuid())
+  title   String
+  fileUrl String
+  tagId   String
+  tag     Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+}
+
+model Scan {
+  id         String @id @default(uuid())
+  posX       Float
+  posY       Float
+  posZ       Float
+  quatW      Float
+  quatX      Float
+  quatY      Float
+  quatZ      Float
+  
+  // Teleport Graph
+  targetScanId String?
+  targetScan   Scan?   @relation("ScanTeleports", fields: [targetScanId], references: [id])
+  incomingTeleports Scan[] @relation("ScanTeleports")
+
+  inspectionId String
+  inspection   Inspection   @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+}
+
+model AreaPointer {
+  id           String   @id @default(uuid())
+  name         String
+  color        String   @default("#ff0000")
+  posX         Float
+  posY         Float
+  posZ         Float
+  height       Float    @default(15.0)
+  thickness    Float    @default(0.04)
+  labelSize    Float    @default(1.0)
+  sizeX        Float    @default(3.0)
+  sizeY        Float    @default(3.0)
+  wallHeight   Float    @default(3.0)
+  
+  inspectionId String
+  inspection   Inspection     @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

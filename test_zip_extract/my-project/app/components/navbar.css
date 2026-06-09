@@ -1,0 +1,125 @@
+.glass-navbar {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 1200px;
+  height: 64px;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 32px;
+  z-index: 1000;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  font-family: 'Outfit', sans-serif;
+  color: white;
+}
+
+.navbar-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 0 24px;
+}
+
+.navbar-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.logo-icon {
+  color: #2D7AEE;
+  font-size: 20px;
+}
+
+.logo-text {
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+}
+
+.navbar-links {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.nav-btn-admin {
+  color: #a46ad4;
+}
+
+.nav-btn-admin:hover {
+  color: #d1aff0;
+  background: rgba(164, 106, 212, 0.1);
+}
+
+.nav-btn-active {
+  color: #fff;
+  background: rgba(45, 122, 238, 0.2);
+  border: 1px solid rgba(45, 122, 238, 0.3);
+}
+
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.user-badge {
+  background: rgba(45, 122, 238, 0.2);
+  color: #7ab3ff;
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(45, 122, 238, 0.3);
+}
+
+.signout-btn {
+  background: rgba(238, 45, 61, 0.1);
+  border: 1px solid rgba(238, 45, 61, 0.2);
+  color: #ff4a5a;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.signout-btn:hover {
+  background: rgba(238, 45, 61, 0.3);
+  color: #fff;
+}
+
+/* Responsiveness */
+@media (max-width: 768px) {
+  .navbar-links {
+    display: none; /* Hide standard links on mobile */
+  }
+}

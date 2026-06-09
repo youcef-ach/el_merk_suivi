@@ -54,7 +54,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
         const token = localStorage.getItem('access_token');
         if (!token || token === 'undefined') throw new Error("Missing authentication token in browser");
 
-        const res = await fetch(`http://localhost:3000/inspections/${tourId}`, {
+        const res = await fetch(`http://197.140.9.103/api/inspections/${tourId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -65,13 +65,13 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
         const tour = await res.json();
         if (tour.glbModelUrl) {
-          glbUrl = `http://localhost:9000/virtual-inspections/${tour.glbModelUrl}`;
+          glbUrl = `http://197.140.9.103/virtual-inspections/${tour.glbModelUrl}`;
         } else {
           throw new Error('This tour has no GLB architecture model attached to it.');
         }
 
         if (tour.scansJsonUrl) {
-          jsonUrl = `http://localhost:9000/virtual-inspections/${tour.scansJsonUrl}`;
+          jsonUrl = `http://197.140.9.103/virtual-inspections/${tour.scansJsonUrl}`;
         } else {
           throw new Error('This tour has no Scan telemetry mapping attached to it.');
         }
@@ -375,7 +375,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
       const faces = ['py', 'pz', 'px', 'nz', 'nx', 'ny'];
 
       const baseUrl = tourId
-        ? `http://localhost:9000/virtual-inspections/inspections/${tourId}/`
+        ? `http://197.140.9.103/virtual-inspections/inspections/${tourId}/`
         : `/`;
 
       const loadPromises = faces.map((face) => {

@@ -6,8 +6,8 @@ app_dir = r"c:\Users\achou\Documents\GitHub\el_merk_suivi\my-project\app"
 
 # Replacement map
 replacements = {
-    "http://localhost:3000": "http://app.alpha.openscaler.net:9251",
-    "http://localhost:9000": "http://app.alpha.openscaler.net:9255"
+    "http://197.140.9.103:3000": "http://197.140.9.103/api",
+    "http://197.140.9.103:9000": "http://197.140.9.103"
 }
 
 # Recursively find all js, jsx, ts, tsx files

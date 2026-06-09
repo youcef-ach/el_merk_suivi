@@ -6,7 +6,7 @@ import {
   faWheelchair, faBolt, faLock, faTint, faFire 
 } from '@fortawesome/free-solid-svg-icons';
 
-const API = 'http://localhost:3000';
+const API = 'http://197.140.9.103/api';
 
 /**
  * Converts a hex color string to rgba format.

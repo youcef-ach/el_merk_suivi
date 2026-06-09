@@ -345,7 +345,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
             const tagId = hitSprite.userData.tagId;
             // Fetch tag info from backend
             const token = localStorage.getItem('access_token');
-            fetch(`http://localhost:3000/inspections/${tourId}`, {
+            fetch(`http://197.140.9.103/api/inspections/${tourId}`, {
               headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             })
               .then(r => r.json())
@@ -688,7 +688,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
                 {activeTagInfo.documents.map(doc => (
                   <a
                     key={doc.id}
-                    href={`http://localhost:9000/virtual-tours/${doc.fileUrl}`}
+                    href={`http://197.140.9.103/virtual-tours/${doc.fileUrl}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
