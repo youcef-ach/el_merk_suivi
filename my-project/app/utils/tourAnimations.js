@@ -121,6 +121,7 @@ export const toggleModelFading = (model, isCurrentlyVisible, setVisibleState) =>
  * @property {THREE.Mesh} currentBox - The panorama box currently displaying the scene (if any).
  * @property {THREE.Mesh} nextBox - The panorama box loading the upcoming scene.
  * @property {THREE.Group} model - The 3D Dollhouse model.
+ * @property {THREE.Group} [stagedGroup] - The 3D staged furniture group.
  * @property {boolean} isFirstClick - Flag indicating transitioning from dollhouse (true) or pano-to-pano (false).
  * @property {Function} onComplete - Callback executed safely when animation timeline finishes.
  */
@@ -144,17 +145,22 @@ export const executeFlightAnimation = ({
   currentBox,
   nextBox,
   model,
+  stagedGroup,
   isFirstClick,
   onComplete
 }) => {
+  const modelsToFade = [];
+  if (model) modelsToFade.push(model);
+  if (stagedGroup) modelsToFade.push(stagedGroup);
+
   // 1. Kill all competing GSAP tweens
   nextBox.material.forEach(mat => gsap.killTweensOf(mat));
   if (!isFirstClick && currentBox) {
     currentBox.material.forEach(mat => gsap.killTweensOf(mat));
   }
-  if (model) {
-    getModelMaterials(model).forEach(mat => gsap.killTweensOf(mat));
-  }
+  modelsToFade.forEach(m => {
+    getModelMaterials(m).forEach(mat => gsap.killTweensOf(mat));
+  });
 
   // 2. Lock starting states
   nextBox.visible = true;
@@ -164,15 +170,15 @@ export const executeFlightAnimation = ({
     currentBox.visible = true;
     currentBox.material.forEach(mat => { mat.opacity = 1; });
 
-    if (model) {
-      model.visible = true;
-      getModelMaterials(model).forEach(mat => {
+    modelsToFade.forEach(m => {
+      m.visible = true;
+      getModelMaterials(m).forEach(mat => {
         mat.opacity = 0;
         mat.colorWrite = true;
         mat.transparent = true;
         mat.needsUpdate = true;
       });
-    }
+    });
   }
 
   // 3. Build the Master Timeline
@@ -200,14 +206,14 @@ export const executeFlightAnimation = ({
     }, 0);
 
     // Model dissolves out while panorama materializes — synchronized
-    if (model) {
-      getModelMaterials(model).forEach(mat => {
+    modelsToFade.forEach(m => {
+      getModelMaterials(m).forEach(mat => {
         mat.colorWrite = true;
         mat.transparent = true; // Enable transparency specifically for this fade
         mat.needsUpdate = true;
         tl.to(mat, { opacity: 0, duration: 1.0, ease: "power2.in" }, 0.1);
       });
-    }
+    });
     nextBox.material.forEach(mat => {
       tl.to(mat, { opacity: 1, duration: 1.0, ease: "power2.out" }, 0.1);
     });
@@ -250,24 +256,24 @@ export const executeFlightAnimation = ({
         tl.to(mat, { opacity: 0, duration: PHASE, ease: "power2.inOut" }, 0);
       });
     }
-    if (model) {
-      getModelMaterials(model).forEach(mat => {
+    modelsToFade.forEach(m => {
+      getModelMaterials(m).forEach(mat => {
         mat.colorWrite = true;
         mat.transparent = true;
         mat.needsUpdate = true;
         tl.to(mat, { opacity: 1, duration: PHASE, ease: "power2.inOut" }, 0);
       });
-    }
+    });
 
     // ── Phase 2: Model OUT + Next pano IN ──
-    if (model) {
-      getModelMaterials(model).forEach(mat => {
+    modelsToFade.forEach(m => {
+      getModelMaterials(m).forEach(mat => {
         // Needs transparency to fade out again
         mat.transparent = true;
         mat.needsUpdate = true;
         tl.to(mat, { opacity: 0, duration: PHASE, ease: "power2.inOut" }, PHASE);
       });
-    }
+    });
     nextBox.material.forEach(mat => {
       tl.to(mat, { opacity: 1, duration: PHASE, ease: "power2.inOut" }, PHASE);
     });

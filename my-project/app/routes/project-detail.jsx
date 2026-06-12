@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, Link } from 'react-router';
 import ProtectedRoute from '../components/ProtectedRoute';
 import Navbar from '../components/Navbar';
 import './dashboard.css';
@@ -40,7 +40,7 @@ function ProjectDetailContent() {
   const fetchProject = async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://197.140.9.103/api/projects/${projectId}`, {
+      const response = await fetch(`http://localhost:3000/api/projects/${projectId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -67,7 +67,7 @@ function ProjectDetailContent() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections/${id}`, {
+      const response = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -84,7 +84,7 @@ function ProjectDetailContent() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections/${id}/clone`, {
+      const response = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${id}/clone`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -114,7 +114,7 @@ function ProjectDetailContent() {
       const rcText = await rcFile.text();
       const token = localStorage.getItem('access_token');
 
-      const processRes = await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections/${reprocessInspection.id}/process-scans`, {
+      const processRes = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${reprocessInspection.id}/process-scans`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -175,7 +175,7 @@ function ProjectDetailContent() {
               <div key={insp.id} className="tour-card" style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ position: 'relative', width: '100%', height: '180px', backgroundColor: '#111' }}>
                    {insp.thumbnailUrl ? (
-                      <img src={`http://197.140.9.103/virtual-inspections/${insp.thumbnailUrl}`} alt={insp.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={`http://localhost:9000/virtual-inspections/${insp.thumbnailUrl}`} alt={insp.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                    ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.2)' }}>
                          No Thumbnail
@@ -205,16 +205,16 @@ function ProjectDetailContent() {
                    </p>
    
                    <div className="tour-actions" style={{ flexWrap: 'wrap' }}>
-                     <button className="btn-secondary" onClick={() => navigate(`/engine/${insp.id}`)}>
+                     <Link to={`/engine/${insp.id}`} className="btn-secondary" style={{textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexGrow: 1}}>
                        3D Engine
-                     </button>
+                     </Link>
                      {role === 'ADMIN' && (
-                       <button className="btn-secondary" onClick={() => navigate(`/studio/${insp.id}`)}>
+                       <Link to={`/studio/${insp.id}`} className="btn-secondary" style={{textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexGrow: 1}}>
                          Studio
-                       </button>
+                       </Link>
                      )}
                      {insp.videoUrl && (
-                        <button className="btn-secondary" onClick={() => setSelectedVideo(`http://197.140.9.103/virtual-inspections/${insp.videoUrl}`)} style={{ borderColor: '#3a82f6', color: '#3a82f6' }}>
+                        <button className="btn-secondary" onClick={() => setSelectedVideo(`http://localhost:9000/virtual-inspections/${insp.videoUrl}`)} style={{ borderColor: '#3a82f6', color: '#3a82f6' }}>
                           Watch Video
                         </button>
                      )}

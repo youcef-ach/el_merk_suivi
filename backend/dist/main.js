@@ -6,6 +6,7 @@ const app_module_1 = require("./app.module");
 const express_1 = require("express");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
+    app.setGlobalPrefix('api');
     app.use((0, express_1.json)({ limit: '50mb' }));
     app.use((0, express_1.urlencoded)({ extended: true, limit: '50mb' }));
     app.enableCors({

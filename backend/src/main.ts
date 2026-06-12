@@ -5,6 +5,7 @@ import { json, urlencoded } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.setGlobalPrefix('api');
 
   // Increase body parser limits for large JSON payloads (e.g. scan processing)
   app.use(json({ limit: '50mb' }));

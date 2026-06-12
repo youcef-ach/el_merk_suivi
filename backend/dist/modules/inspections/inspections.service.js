@@ -61,6 +61,7 @@ let InspectionsService = class InspectionsService {
                 panoramas: true,
                 areaPointers: true,
                 authorizedViewers: true,
+                stagingProfiles: true,
             },
         });
         if (!inspection) {
@@ -504,6 +505,92 @@ let InspectionsService = class InspectionsService {
         if (!pointer || pointer.inspectionId !== inspectionId)
             throw new common_1.NotFoundException('Area pointer not found in this inspection');
         return this.prisma.areaPointer.delete({ where: { id: pointerId } });
+    }
+    async createStagingProfile(inspectionId, name, userEnterpriseId, role) {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the creator or admin can add staging profiles');
+        }
+        return this.prisma.stagingProfile.create({
+            data: {
+                name,
+                inspectionId,
+            },
+        });
+    }
+    async getStagingProfile(inspectionId, profileId) {
+        const profile = await this.prisma.stagingProfile.findUnique({
+            where: { id: profileId },
+            include: {
+                stagedItems: true,
+                bakedPanoramas: true,
+            },
+        });
+        if (!profile || profile.inspectionId !== inspectionId) {
+            throw new common_1.NotFoundException('Staging profile not found in this inspection');
+        }
+        return profile;
+    }
+    async saveStagedItems(inspectionId, profileId, items, userEnterpriseId, role) {
+        const profile = await this.getStagingProfile(inspectionId, profileId);
+        const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
+        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the creator or admin can modify staging profiles');
+        }
+        await this.prisma.stagedItem.deleteMany({
+            where: { stagingProfileId: profileId },
+        });
+        if (items.length > 0) {
+            await this.prisma.stagedItem.createMany({
+                data: items.map(item => ({
+                    stagingProfileId: profileId,
+                    isPolyHaven: item.isPolyHaven,
+                    isSketchfab: item.isSketchfab,
+                    polyHavenId: item.polyHavenId,
+                    sketchfabId: item.sketchfabId,
+                    type: item.type,
+                    color: item.color,
+                    dimensions: item.dimensions,
+                    positionX: item.position[0],
+                    positionY: item.position[1],
+                    positionZ: item.position[2],
+                    rotationX: item.rotation[0],
+                    rotationY: item.rotation[1],
+                    rotationZ: item.rotation[2],
+                    scaleX: item.scale[0],
+                    scaleY: item.scale[1],
+                    scaleZ: item.scale[2],
+                })),
+            });
+        }
+        return this.getStagingProfile(inspectionId, profileId);
+    }
+    async saveBakedPanoramas(inspectionId, profileId, panoramas, userEnterpriseId, role) {
+        const profile = await this.getStagingProfile(inspectionId, profileId);
+        const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
+        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the creator or admin can modify staging profiles');
+        }
+        for (const p of panoramas) {
+            await this.prisma.bakedPanorama.deleteMany({
+                where: {
+                    stagingProfileId: profileId,
+                    scanId: p.scanId,
+                    face: p.face,
+                },
+            });
+            await this.prisma.bakedPanorama.create({
+                data: {
+                    stagingProfileId: profileId,
+                    scanId: p.scanId,
+                    face: p.face,
+                    imageUrl: p.imageUrl,
+                },
+            });
+        }
+        return this.getStagingProfile(inspectionId, profileId);
     }
 };
 exports.InspectionsService = InspectionsService;

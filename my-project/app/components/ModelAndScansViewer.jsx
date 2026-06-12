@@ -4,8 +4,9 @@ import gsap from 'gsap';
 import { useThreeScene } from '../hooks/useThreeScene';
 import { useTourData } from '../hooks/useTourData';
 import { executeFlightAnimation, toggleBoxFading, toggleModelFading } from '../utils/tourAnimations';
+import { useStaging } from '../hooks/useStaging';
 
-const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect, onPointerDragStart, onPointerDragMove, onPointerDragEnd }, ref) => {
+const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect, onPointerDragStart, onPointerDragMove, onPointerDragEnd }, ref) => {
   // --- Persistent dummy texture to prevent shader recompilation lag ---
   const dummyTex = useMemo(() => {
     const tex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat);
@@ -16,17 +17,25 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
   const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, sceneReady } = useThreeScene([dummyTex]);
   const { 
     modelRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
-    scanSpheres, loadPanoramaTextures, isDataLoaded 
-  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef);
+    scanSpheres, loadPanoramaTextures, isDataLoaded, scansData 
+  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId);
 
-  // Expose Three.js internals to parent via ref (for measurement tool)
+  // ─── Staging Hook ───
+  const staging = useStaging(
+    sceneRef, cameraRef, rendererRef, controlsRef, modelRef, isDataLoaded, tourId, activeProfileId
+  );
+
+  // Expose Three.js internals and staging methods to parent
   useImperativeHandle(ref, () => ({
     sceneRef,
     cameraRef,
     rendererRef,
     modelRef,
     controlsRef,
-  }), [sceneRef, cameraRef, rendererRef, modelRef, controlsRef]);
+    scansData,
+    scanSpheres,
+    staging, // expose the entire staging object
+  }), [sceneRef, cameraRef, rendererRef, modelRef, controlsRef, scansData, scanSpheres, staging]);
 
   // Track measurement mode state in a ref for the click handler
   const measurementModeRef = useRef(false);
@@ -74,6 +83,9 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
     
     toggleBoxFading(currentBox, !isMeshView);
     toggleModelFading(modelRef.current, isMeshView);
+    if (staging?.stagedGroupRef?.current) {
+      toggleModelFading(staging.stagedGroupRef.current, isMeshView);
+    }
     
     setIsMeshView(!isMeshView);
   };
@@ -198,7 +210,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
 
       document.body.style.cursor = 'wait';
 
-      loadPanoramaTextures(scanId, renderer).then((loadedTextures) => {
+      loadPanoramaTextures(scanId, renderer, staging.bakedTexturesMap).then((loadedTextures) => {
         document.body.style.cursor = 'default';
         controls.enabled = false;
 
@@ -240,12 +252,28 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
             currentBox,
             nextBox,
             model: modelRef.current,
+            stagedGroup: staging?.stagedGroupRef?.current,
             isFirstClick,
             onComplete: () => {
               // Final State cleanup
               if (modelRef.current) {
                 modelRef.current.visible = true;
                 modelRef.current.traverse((child) => {
+                  if (child.isMesh && child.material) {
+                    const mats = Array.isArray(child.material) ? child.material : [child.material];
+                    mats.forEach(mat => {
+                      mat.colorWrite = false;
+                      mat.depthWrite = true;
+                      mat.transparent = true;
+                      mat.side = THREE.DoubleSide;
+                      mat.needsUpdate = true;
+                    });
+                  }
+                });
+              }
+              if (staging?.stagedGroupRef?.current) {
+                staging.stagedGroupRef.current.visible = true;
+                staging.stagedGroupRef.current.traverse((child) => {
                   if (child.isMesh && child.material) {
                     const mats = Array.isArray(child.material) ? child.material : [child.material];
                     mats.forEach(mat => {
@@ -345,7 +373,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
             const tagId = hitSprite.userData.tagId;
             // Fetch tag info from backend
             const token = localStorage.getItem('access_token');
-            fetch(`http://197.140.9.103/api/inspections/${tourId}`, {
+            fetch(`http://localhost:3000/api/inspections/${tourId}`, {
               headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             })
               .then(r => r.json())
@@ -361,6 +389,12 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
         }
         // Clicking empty space dismisses the popup
         setActiveTagInfo(null);
+      }
+
+      // If staging mode is active, check if staging handles the click (placement/selection)
+      if (stagingMode && staging.handleCanvasClick) {
+        const handled = staging.handleCanvasClick(event);
+        if (handled) return;
       }
 
       // If measurement mode is active, delegate to measurement handler
@@ -504,7 +538,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
       renderer.domElement.removeEventListener('pointermove', onMove);
       renderer.domElement.removeEventListener('pointerup', onUp);
     };
-  }, [isDataLoaded, scanSpheres, cameraRef, rendererRef, controlsRef, sceneRef, modelRef, box1Ref, box2Ref, panoramaGroup1Ref, panoramaGroup2Ref, loadPanoramaTextures, dummyTex]);
+  }, [isDataLoaded, scanSpheres, cameraRef, rendererRef, controlsRef, sceneRef, modelRef, box1Ref, box2Ref, panoramaGroup1Ref, panoramaGroup2Ref, loadPanoramaTextures, dummyTex, staging]);
 
 
   return (
@@ -688,7 +722,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, measurementMode, onMeasurement
                 {activeTagInfo.documents.map(doc => (
                   <a
                     key={doc.id}
-                    href={`http://197.140.9.103/virtual-tours/${doc.fileUrl}`}
+                    href={`http://localhost:9000/virtual-tours/${doc.fileUrl}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{

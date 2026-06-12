@@ -4,32 +4,30 @@ export declare class ProjectsController {
     private readonly projectsService;
     constructor(projectsService: ProjectsService);
     create(createProjectDto: CreateProjectDto, user: any): Promise<{
-        enterpriseId: string;
         id: string;
-        name: string;
-        createdAt: Date;
         description: string | null;
+        createdAt: Date;
         updatedAt: Date;
+        name: string;
+        enterpriseId: string;
     }>;
     findAll(user: any): Promise<({
         _count: {
             inspections: number;
         };
     } & {
-        enterpriseId: string;
         id: string;
-        name: string;
-        createdAt: Date;
         description: string | null;
+        createdAt: Date;
         updatedAt: Date;
+        name: string;
+        enterpriseId: string;
     })[]>;
     findOne(id: string, user: any): Promise<{
         inspections: {
             id: string;
-            createdAt: Date;
-            description: string | null;
-            updatedAt: Date;
             title: string;
+            description: string | null;
             glbModelUrl: string | null;
             scansJsonUrl: string | null;
             rawScansJsonUrl: string | null;
@@ -37,22 +35,24 @@ export declare class ProjectsController {
             thumbnailUrl: string | null;
             videoUrl: string | null;
             visibility: import(".prisma/client").$Enums.Visibility;
+            createdAt: Date;
+            updatedAt: Date;
             projectId: string;
         }[];
     } & {
-        enterpriseId: string;
         id: string;
-        name: string;
-        createdAt: Date;
         description: string | null;
+        createdAt: Date;
         updatedAt: Date;
+        name: string;
+        enterpriseId: string;
     }>;
     remove(id: string, user: any): Promise<{
-        enterpriseId: string;
         id: string;
-        name: string;
-        createdAt: Date;
         description: string | null;
+        createdAt: Date;
         updatedAt: Date;
+        name: string;
+        enterpriseId: string;
     }>;
 }

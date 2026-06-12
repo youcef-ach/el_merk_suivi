@@ -50,7 +50,7 @@ function NewInspectionContent() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections`, {
+      const response = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -81,7 +81,7 @@ function NewInspectionContent() {
     const fileName = overrideFileName || file.name;
 
     // 1. Get Presigned URL
-    const presignRes = await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections/${inspectionId}/upload-url`, {
+    const presignRes = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}/upload-url`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -141,7 +141,7 @@ function NewInspectionContent() {
         parallelTasks.push((async () => {
           await uploadFileToMinio(inspectionId, glbFile, 'ultimate_final.glb');
           const token = localStorage.getItem('access_token');
-          const processRes = await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
+          const processRes = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`
@@ -159,7 +159,7 @@ function NewInspectionContent() {
           const mpText = await jsonFile.text();
           const rcText = await rcJsonFile.text();
           const token = localStorage.getItem('access_token');
-          const processRes = await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
+          const processRes = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -183,7 +183,7 @@ function NewInspectionContent() {
         parallelTasks.push((async () => {
           await uploadFileToMinio(inspectionId, thumbnailFile, `thumb_${thumbnailFile.name}`);
           const token = localStorage.getItem('access_token');
-          await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections/${inspectionId}`, {
+          await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ thumbnailUrl: `inspections/${inspectionId}/thumb_${thumbnailFile.name}` })
@@ -196,7 +196,7 @@ function NewInspectionContent() {
         parallelTasks.push((async () => {
           await uploadFileToMinio(inspectionId, videoFile, `video_${videoFile.name}`);
           const token = localStorage.getItem('access_token');
-          await fetch(`http://197.140.9.103/api/projects/${projectId}/inspections/${inspectionId}`, {
+          await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ videoUrl: `inspections/${inspectionId}/video_${videoFile.name}` })

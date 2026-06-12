@@ -70,6 +70,7 @@ export class InspectionsService {
         panoramas: true,
         areaPointers: true,
         authorizedViewers: true,
+        stagingProfiles: true,
       },
     });
 
@@ -613,4 +614,112 @@ export class InspectionsService {
 
     return this.prisma.areaPointer.delete({ where: { id: pointerId } });
   }
+
+  // ─── Staging Profiles CRUD ────────────────────────────────────────
+
+  async createStagingProfile(inspectionId: string, name: string, userEnterpriseId: string, role: Role) {
+    const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
+    if (!inspection) throw new NotFoundException('Inspection not found');
+
+    if (inspection.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
+      throw new ForbiddenException('Only the creator or admin can add staging profiles');
+    }
+
+    return this.prisma.stagingProfile.create({
+      data: {
+        name,
+        inspectionId,
+      },
+    });
+  }
+
+  async getStagingProfile(inspectionId: string, profileId: string) {
+    const profile = await this.prisma.stagingProfile.findUnique({
+      where: { id: profileId },
+      include: {
+        stagedItems: true,
+        bakedPanoramas: true,
+      },
+    });
+
+    if (!profile || profile.inspectionId !== inspectionId) {
+      throw new NotFoundException('Staging profile not found in this inspection');
+    }
+
+    return profile;
+  }
+
+  async saveStagedItems(inspectionId: string, profileId: string, items: any[], userEnterpriseId: string, role: Role) {
+    const profile = await this.getStagingProfile(inspectionId, profileId);
+    const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
+
+    if (inspection.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
+      throw new ForbiddenException('Only the creator or admin can modify staging profiles');
+    }
+
+    // Replace all items in the profile (simple approach for bulk update)
+    await this.prisma.stagedItem.deleteMany({
+      where: { stagingProfileId: profileId },
+    });
+
+    if (items.length > 0) {
+      await this.prisma.stagedItem.createMany({
+        data: items.map(item => ({
+          stagingProfileId: profileId,
+          isPolyHaven: item.isPolyHaven,
+          isSketchfab: item.isSketchfab,
+          polyHavenId: item.polyHavenId,
+          sketchfabId: item.sketchfabId,
+          type: item.type,
+          color: item.color,
+          dimensions: item.dimensions,
+          positionX: item.position[0],
+          positionY: item.position[1],
+          positionZ: item.position[2],
+          rotationX: item.rotation[0],
+          rotationY: item.rotation[1],
+          rotationZ: item.rotation[2],
+          scaleX: item.scale[0],
+          scaleY: item.scale[1],
+          scaleZ: item.scale[2],
+        })),
+      });
+    }
+
+    return this.getStagingProfile(inspectionId, profileId);
+  }
+
+  async saveBakedPanoramas(inspectionId: string, profileId: string, panoramas: any[], userEnterpriseId: string, role: Role) {
+    const profile = await this.getStagingProfile(inspectionId, profileId);
+    const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
+
+    if (inspection.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
+      throw new ForbiddenException('Only the creator or admin can modify staging profiles');
+    }
+
+    // Panoramas array is expected to be { scanId: string, face: string, imageUrl: string }
+    for (const p of panoramas) {
+      // Upsert based on scanId + face + profileId is best, but Prisma needs a unique constraint for upsert.
+      // So we'll just delete existing and insert.
+      await this.prisma.bakedPanorama.deleteMany({
+        where: {
+          stagingProfileId: profileId,
+          scanId: p.scanId,
+          face: p.face,
+        },
+      });
+
+      await this.prisma.bakedPanorama.create({
+        data: {
+          stagingProfileId: profileId,
+          scanId: p.scanId,
+          face: p.face,
+          imageUrl: p.imageUrl,
+        },
+      });
+    }
+
+    return this.getStagingProfile(inspectionId, profileId);
+  }
+
 }

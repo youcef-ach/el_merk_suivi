@@ -77,6 +77,8 @@ model Inspection {
   
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
+  
+  stagingProfiles   StagingProfile[]
 }
 
 model Panorama {
@@ -148,4 +150,52 @@ model AreaPointer {
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+model StagingProfile {
+  id           String       @id @default(uuid())
+  name         String       @default("Staged Scene")
+  inspectionId String
+  inspection   Inspection   @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  
+  stagedItems    StagedItem[]
+  bakedPanoramas BakedPanorama[]
+  
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model StagedItem {
+  id               String         @id @default(uuid())
+  
+  isPolyHaven      Boolean        @default(false)
+  isSketchfab      Boolean        @default(false)
+  polyHavenId      String?
+  sketchfabId      String?
+  type             String?
+  color            String?
+  dimensions       Json?
+  
+  positionX        Float
+  positionY        Float
+  positionZ        Float
+  rotationX        Float
+  rotationY        Float
+  rotationZ        Float
+  scaleX           Float          @default(1.0)
+  scaleY           Float          @default(1.0)
+  scaleZ           Float          @default(1.0)
+  
+  stagingProfileId String
+  stagingProfile   StagingProfile @relation(fields: [stagingProfileId], references: [id], onDelete: Cascade)
+}
+
+model BakedPanorama {
+  id               String         @id @default(uuid())
+  scanId           String
+  face             String
+  imageUrl         String
+  
+  stagingProfileId String
+  stagingProfile   StagingProfile @relation(fields: [stagingProfileId], references: [id], onDelete: Cascade)
 }

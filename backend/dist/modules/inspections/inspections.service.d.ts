@@ -17,10 +17,8 @@ export declare class InspectionsService {
     constructor(prisma: PrismaService, storageService: StorageService);
     create(projectId: string, createInspectionDto: CreateInspectionDto, userEnterpriseId: string): Promise<{
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
         rawScansJsonUrl: string | null;
@@ -28,6 +26,8 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
     findAll(projectId: string, user?: {
@@ -35,10 +35,8 @@ export declare class InspectionsService {
         role: Role;
     }): Promise<{
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
         rawScansJsonUrl: string | null;
@@ -46,6 +44,8 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }[]>;
     findOne(id: string, user?: {
@@ -54,19 +54,19 @@ export declare class InspectionsService {
         enterpriseId?: string;
     }): Promise<{
         project: {
-            enterpriseId: string;
             id: string;
-            name: string;
-            createdAt: Date;
             description: string | null;
+            createdAt: Date;
             updatedAt: Date;
+            name: string;
+            enterpriseId: string;
         };
         authorizedViewers: {
-            email: string;
-            password: string;
-            enterpriseId: string | null;
             id: string;
             createdAt: Date;
+            enterpriseId: string | null;
+            email: string;
+            password: string;
             role: import(".prisma/client").$Enums.Role;
         }[];
         panoramas: {
@@ -84,18 +84,19 @@ export declare class InspectionsService {
             }[];
         } & {
             id: string;
-            description: string | null;
             title: string;
+            description: string | null;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
             icon: string;
             color: string;
             size: number;
-            inspectionId: string;
         })[];
         scans: {
             id: string;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
@@ -104,13 +105,13 @@ export declare class InspectionsService {
             quatY: number;
             quatZ: number;
             targetScanId: string | null;
-            inspectionId: string;
         }[];
         areaPointers: {
             id: string;
-            name: string;
             createdAt: Date;
             updatedAt: Date;
+            name: string;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
@@ -121,14 +122,18 @@ export declare class InspectionsService {
             sizeX: number;
             sizeY: number;
             wallHeight: number;
+        }[];
+        stagingProfiles: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            name: string;
             inspectionId: string;
         }[];
     } & {
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
         rawScansJsonUrl: string | null;
@@ -136,6 +141,8 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
     getBundle(id: string, user?: {
@@ -143,19 +150,19 @@ export declare class InspectionsService {
         role: Role;
     }): Promise<{
         project: {
-            enterpriseId: string;
             id: string;
-            name: string;
-            createdAt: Date;
             description: string | null;
+            createdAt: Date;
             updatedAt: Date;
+            name: string;
+            enterpriseId: string;
         };
         authorizedViewers: {
-            email: string;
-            password: string;
-            enterpriseId: string | null;
             id: string;
             createdAt: Date;
+            enterpriseId: string | null;
+            email: string;
+            password: string;
             role: import(".prisma/client").$Enums.Role;
         }[];
         panoramas: {
@@ -173,18 +180,19 @@ export declare class InspectionsService {
             }[];
         } & {
             id: string;
-            description: string | null;
             title: string;
+            description: string | null;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
             icon: string;
             color: string;
             size: number;
-            inspectionId: string;
         })[];
         scans: {
             id: string;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
@@ -193,13 +201,13 @@ export declare class InspectionsService {
             quatY: number;
             quatZ: number;
             targetScanId: string | null;
-            inspectionId: string;
         }[];
         areaPointers: {
             id: string;
-            name: string;
             createdAt: Date;
             updatedAt: Date;
+            name: string;
+            inspectionId: string;
             posX: number;
             posY: number;
             posZ: number;
@@ -210,14 +218,18 @@ export declare class InspectionsService {
             sizeX: number;
             sizeY: number;
             wallHeight: number;
+        }[];
+        stagingProfiles: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            name: string;
             inspectionId: string;
         }[];
     } & {
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
         rawScansJsonUrl: string | null;
@@ -225,14 +237,14 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
     clone(id: string, userEnterpriseId: string, role: Role): Promise<{
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
         rawScansJsonUrl: string | null;
@@ -240,10 +252,13 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
     createScan(inspectionId: string, dto: CreateScanDto, userEnterpriseId: string, role: Role): Promise<{
         id: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
@@ -252,7 +267,6 @@ export declare class InspectionsService {
         quatY: number;
         quatZ: number;
         targetScanId: string | null;
-        inspectionId: string;
     }>;
     createPanorama(inspectionId: string, dto: CreatePanoramaDto, userEnterpriseId: string, role: Role): Promise<{
         id: string;
@@ -268,19 +282,17 @@ export declare class InspectionsService {
     }>;
     setPermissions(id: string, dto: UpdateInspectionPermissionsDto, userEnterpriseId: string, role: Role): Promise<{
         authorizedViewers: {
-            email: string;
-            password: string;
-            enterpriseId: string | null;
             id: string;
             createdAt: Date;
+            enterpriseId: string | null;
+            email: string;
+            password: string;
             role: import(".prisma/client").$Enums.Role;
         }[];
     } & {
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
         rawScansJsonUrl: string | null;
@@ -288,14 +300,14 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
     remove(id: string, userEnterpriseId: string, role: Role): Promise<{
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
         rawScansJsonUrl: string | null;
@@ -303,14 +315,14 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
     update(id: string, dto: any, enterpriseId: string, role: Role): Promise<{
         id: string;
-        createdAt: Date;
-        description: string | null;
-        updatedAt: Date;
         title: string;
+        description: string | null;
         glbModelUrl: string | null;
         scansJsonUrl: string | null;
         rawScansJsonUrl: string | null;
@@ -318,6 +330,8 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        createdAt: Date;
+        updatedAt: Date;
         projectId: string;
     }>;
     getUploadUrl(id: string, fileName: string, userEnterpriseId: string, role: Role): Promise<{
@@ -343,15 +357,15 @@ export declare class InspectionsService {
         }[];
     } & {
         id: string;
-        description: string | null;
         title: string;
+        description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
         icon: string;
         color: string;
         size: number;
-        inspectionId: string;
     }>;
     updateTag(inspectionId: string, tagId: string, dto: UpdateTagDto, userEnterpriseId: string, role: Role): Promise<{
         documents: {
@@ -362,27 +376,27 @@ export declare class InspectionsService {
         }[];
     } & {
         id: string;
-        description: string | null;
         title: string;
+        description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
         icon: string;
         color: string;
         size: number;
-        inspectionId: string;
     }>;
     deleteTag(inspectionId: string, tagId: string, userEnterpriseId: string, role: Role): Promise<{
         id: string;
-        description: string | null;
         title: string;
+        description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
         icon: string;
         color: string;
         size: number;
-        inspectionId: string;
     }>;
     addTagDocument(inspectionId: string, tagId: string, dto: CreateTagDocumentDto, userEnterpriseId: string, role: Role): Promise<{
         presignedUrl: string;
@@ -401,9 +415,10 @@ export declare class InspectionsService {
     }>;
     createAreaPointer(inspectionId: string, dto: CreateAreaPointerDto, userEnterpriseId: string, role: Role): Promise<{
         id: string;
-        name: string;
         createdAt: Date;
         updatedAt: Date;
+        name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
@@ -414,13 +429,13 @@ export declare class InspectionsService {
         sizeX: number;
         sizeY: number;
         wallHeight: number;
-        inspectionId: string;
     }>;
     updateAreaPointer(inspectionId: string, pointerId: string, dto: UpdateAreaPointerDto, userEnterpriseId: string, role: Role): Promise<{
         id: string;
-        name: string;
         createdAt: Date;
         updatedAt: Date;
+        name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
@@ -431,13 +446,13 @@ export declare class InspectionsService {
         sizeX: number;
         sizeY: number;
         wallHeight: number;
-        inspectionId: string;
     }>;
     deleteAreaPointer(inspectionId: string, pointerId: string, userEnterpriseId: string, role: Role): Promise<{
         id: string;
-        name: string;
         createdAt: Date;
         updatedAt: Date;
+        name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
@@ -448,6 +463,117 @@ export declare class InspectionsService {
         sizeX: number;
         sizeY: number;
         wallHeight: number;
+    }>;
+    createStagingProfile(inspectionId: string, name: string, userEnterpriseId: string, role: Role): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        name: string;
+        inspectionId: string;
+    }>;
+    getStagingProfile(inspectionId: string, profileId: string): Promise<{
+        stagedItems: {
+            id: string;
+            color: string | null;
+            isPolyHaven: boolean;
+            isSketchfab: boolean;
+            polyHavenId: string | null;
+            sketchfabId: string | null;
+            type: string | null;
+            dimensions: import("@prisma/client/runtime/library").JsonValue | null;
+            positionX: number;
+            positionY: number;
+            positionZ: number;
+            rotationX: number;
+            rotationY: number;
+            rotationZ: number;
+            scaleX: number;
+            scaleY: number;
+            scaleZ: number;
+            stagingProfileId: string;
+        }[];
+        bakedPanoramas: {
+            id: string;
+            imageUrl: string;
+            stagingProfileId: string;
+            scanId: string;
+            face: string;
+        }[];
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        name: string;
+        inspectionId: string;
+    }>;
+    saveStagedItems(inspectionId: string, profileId: string, items: any[], userEnterpriseId: string, role: Role): Promise<{
+        stagedItems: {
+            id: string;
+            color: string | null;
+            isPolyHaven: boolean;
+            isSketchfab: boolean;
+            polyHavenId: string | null;
+            sketchfabId: string | null;
+            type: string | null;
+            dimensions: import("@prisma/client/runtime/library").JsonValue | null;
+            positionX: number;
+            positionY: number;
+            positionZ: number;
+            rotationX: number;
+            rotationY: number;
+            rotationZ: number;
+            scaleX: number;
+            scaleY: number;
+            scaleZ: number;
+            stagingProfileId: string;
+        }[];
+        bakedPanoramas: {
+            id: string;
+            imageUrl: string;
+            stagingProfileId: string;
+            scanId: string;
+            face: string;
+        }[];
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        name: string;
+        inspectionId: string;
+    }>;
+    saveBakedPanoramas(inspectionId: string, profileId: string, panoramas: any[], userEnterpriseId: string, role: Role): Promise<{
+        stagedItems: {
+            id: string;
+            color: string | null;
+            isPolyHaven: boolean;
+            isSketchfab: boolean;
+            polyHavenId: string | null;
+            sketchfabId: string | null;
+            type: string | null;
+            dimensions: import("@prisma/client/runtime/library").JsonValue | null;
+            positionX: number;
+            positionY: number;
+            positionZ: number;
+            rotationX: number;
+            rotationY: number;
+            rotationZ: number;
+            scaleX: number;
+            scaleY: number;
+            scaleZ: number;
+            stagingProfileId: string;
+        }[];
+        bakedPanoramas: {
+            id: string;
+            imageUrl: string;
+            stagingProfileId: string;
+            scanId: string;
+            face: string;
+        }[];
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        name: string;
         inspectionId: string;
     }>;
 }

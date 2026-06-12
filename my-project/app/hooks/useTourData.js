@@ -21,7 +21,7 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
  * @param {THREE.Texture} dummyTex 
  */
 
-export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef) => {
+export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId) => {
 
   const modelRef = useRef(null);
 
@@ -35,6 +35,8 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
   const [scanSpheres, setScanSpheres] = useState([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
+  const [scansData, setScansData] = useState([]);
+  const stagingProfilesRef = useRef([]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -54,7 +56,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
         const token = localStorage.getItem('access_token');
         if (!token || token === 'undefined') throw new Error("Missing authentication token in browser");
 
-        const res = await fetch(`http://197.140.9.103/api/inspections/${tourId}`, {
+        const res = await fetch(`http://localhost:3000/api/inspections/${tourId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -65,13 +67,13 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
         const tour = await res.json();
         if (tour.glbModelUrl) {
-          glbUrl = `http://197.140.9.103/virtual-inspections/${tour.glbModelUrl}`;
+          glbUrl = `http://localhost:9000/virtual-inspections/${tour.glbModelUrl}`;
         } else {
           throw new Error('This tour has no GLB architecture model attached to it.');
         }
 
         if (tour.scansJsonUrl) {
-          jsonUrl = `http://197.140.9.103/virtual-inspections/${tour.scansJsonUrl}`;
+          jsonUrl = `http://localhost:9000/virtual-inspections/${tour.scansJsonUrl}`;
         } else {
           throw new Error('This tour has no Scan telemetry mapping attached to it.');
         }
@@ -82,6 +84,9 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
         }
         if (tour.areaPointers && tour.areaPointers.length > 0) {
           tourAreaPointers = tour.areaPointers;
+        }
+        if (tour.stagingProfiles) {
+          stagingProfilesRef.current = tour.stagingProfiles;
         }
       } catch (err) {
         console.error("CRITICAL ENGINE ERROR:", err.message);
@@ -177,6 +182,8 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
           
           const dummy = new THREE.Object3D();
           const scanMetadata = [];
+          
+          setScansData(scanData);
 
           // scanData is an array of { #name, x, y, alt, rotation_quaternion }
           scanData.forEach((data, i) => {
@@ -368,19 +375,45 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
   }, [isModelLoaded, isDataLoaded, scanSpheres]);
 
-  const loadPanoramaTextures = (scanId, renderer) => {
+  const loadPanoramaTextures = (scanId, renderer, bakedTexturesMap = null) => {
     return new Promise((resolve) => {
       const bitmapLoader = new THREE.ImageBitmapLoader();
       bitmapLoader.setOptions({ imageOrientation: 'flipY' });
       const faces = ['py', 'pz', 'px', 'nz', 'nx', 'ny'];
 
       const baseUrl = tourId
-        ? `http://197.140.9.103/virtual-inspections/inspections/${tourId}/`
+        ? `http://localhost:9000/virtual-inspections/inspections/${tourId}/`
         : `/`;
 
       const loadPromises = faces.map((face) => {
         return new Promise((resFace) => {
-          bitmapLoader.load(`${baseUrl}images/${scanId}_${face}.jpg`, (imageBitmap) => {
+          // 1. Check if we have a locally generated Blob URL from the baker
+          if (bakedTexturesMap && bakedTexturesMap[`${scanId}_${face}`]) {
+            bitmapLoader.load(bakedTexturesMap[`${scanId}_${face}`], (imageBitmap) => {
+              const tex = new THREE.Texture(imageBitmap);
+              tex.colorSpace = THREE.SRGBColorSpace;
+              tex.needsUpdate = true;
+              if (renderer) renderer.initTexture(tex);
+              resFace(tex);
+            });
+            return;
+          }
+
+          let imageUrl = `${baseUrl}images/${scanId}_${face}.jpg`;
+          
+          // 2. Check for backend-saved baked panoramas
+          if (activeProfileId && stagingProfilesRef.current) {
+            const profile = stagingProfilesRef.current.find(p => p.id === activeProfileId);
+            if (profile && profile.bakedPanoramas) {
+              const baked = profile.bakedPanoramas.find(bp => bp.scanId === scanId && bp.face === face);
+              if (baked && baked.imageUrl) {
+                // Determine if absolute or relative
+                imageUrl = baked.imageUrl.startsWith('http') ? baked.imageUrl : `http://localhost:3000${baked.imageUrl}`;
+              }
+            }
+          }
+
+          bitmapLoader.load(imageUrl, (imageBitmap) => {
             const tex = new THREE.Texture(imageBitmap);
             tex.colorSpace = THREE.SRGBColorSpace; // CRITICAL: Treat JPEG as sRGB to prevent washed-out colors
             tex.needsUpdate = true;
@@ -402,6 +435,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
     panoramaGroup2Ref,
     scanSpheres,
     isDataLoaded,
-    loadPanoramaTextures
+    loadPanoramaTextures,
+    scansData
   };
 };

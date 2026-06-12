@@ -6,9 +6,10 @@ export declare class AreaPointersController {
     constructor(inspectionsService: InspectionsService);
     create(inspectionId: string, dto: CreateAreaPointerDto, user: any): Promise<{
         id: string;
-        name: string;
         createdAt: Date;
         updatedAt: Date;
+        name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
@@ -19,13 +20,13 @@ export declare class AreaPointersController {
         sizeX: number;
         sizeY: number;
         wallHeight: number;
-        inspectionId: string;
     }>;
     update(inspectionId: string, pointerId: string, dto: UpdateAreaPointerDto, user: any): Promise<{
         id: string;
-        name: string;
         createdAt: Date;
         updatedAt: Date;
+        name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
@@ -36,13 +37,13 @@ export declare class AreaPointersController {
         sizeX: number;
         sizeY: number;
         wallHeight: number;
-        inspectionId: string;
     }>;
     remove(inspectionId: string, pointerId: string, user: any): Promise<{
         id: string;
-        name: string;
         createdAt: Date;
         updatedAt: Date;
+        name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
@@ -53,6 +54,5 @@ export declare class AreaPointersController {
         sizeX: number;
         sizeY: number;
         wallHeight: number;
-        inspectionId: string;
     }>;
 }

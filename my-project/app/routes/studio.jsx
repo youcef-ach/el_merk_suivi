@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import ProtectedRoute from '../components/ProtectedRoute';
 import ModelAndScansViewer from '../components/ModelAndScansViewer';
@@ -7,6 +7,8 @@ import { useMeasurement } from '../hooks/useMeasurement';
 import { useTags } from '../hooks/useTags';
 import { useAreaPointers } from '../hooks/useAreaPointers';
 import AreaPointersPanel from '../components/AreaPointersPanel';
+import FurnitureCatalog from '../components/FurnitureCatalog';
+import { bakeStaging } from '../utils/stagingRenderer';
 import './studio.css';
 
 export function meta() {
@@ -20,6 +22,14 @@ function StudioContent() {
   const [measurementMode, setMeasurementMode] = useState(false);
   const [tagMode, setTagMode] = useState(false);
   const [pointersMode, setPointersMode] = useState(false);
+  const [stagingMode, setStagingMode] = useState(false);
+
+  // ─── Staging Profiles State ───
+  const [stagingProfiles, setStagingProfiles] = useState([]);
+  const [activeProfileId, setActiveProfileId] = useState('');
+  const [isBaking, setIsBaking] = useState(false);
+  const [bakeProgress, setBakeProgress] = useState(0);
+  const [debugBakedImages, setDebugBakedImages] = useState([]);
 
   // ─── Tag title prompt state ───
   const [titlePrompt, setTitlePrompt] = useState(null); // { position: Vector3 } or null
@@ -81,6 +91,7 @@ function StudioContent() {
     });
     setTagMode(false);
     setPointersMode(false);
+    setStagingMode(false);
   }, [cancelPending]);
 
   const toggleTagMode = useCallback(() => {
@@ -90,11 +101,23 @@ function StudioContent() {
       return false;
     });
     setPointersMode(false);
+    setStagingMode(false);
   }, [cancelPending]);
 
   const togglePointerMode = useCallback(() => {
     setPointersMode(prev => !prev);
     setTagMode(false);
+    setMeasurementMode(prev => {
+      if (prev) cancelPending();
+      return false;
+    });
+    setStagingMode(false);
+  }, [cancelPending]);
+
+  const toggleStagingMode = useCallback(() => {
+    setStagingMode(prev => !prev);
+    setTagMode(false);
+    setPointersMode(false);
     setMeasurementMode(prev => {
       if (prev) cancelPending();
       return false;
@@ -147,6 +170,109 @@ function StudioContent() {
     setPromptPointerName('');
   }, []);
 
+  // ─── Staging API interactions ───
+  const loadStagingProfiles = useCallback(async () => {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+    try {
+      // The API doesn't have a direct get profiles endpoint yet, wait, we can just fetch the inspection and get it
+      const res = await fetch(`http://localhost:3000/api/inspections/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.stagingProfiles) {
+        setStagingProfiles(data.stagingProfiles);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadStagingProfiles();
+  }, [loadStagingProfiles]);
+
+  const createStagingProfile = async () => {
+    const name = prompt("Enter a name for the new staging profile:");
+    if (!name) return;
+    const token = localStorage.getItem('access_token');
+    try {
+      const res = await fetch(`http://localhost:3000/api/inspections/${id}/staging-profiles`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        loadStagingProfiles();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSaveStaging = async () => {
+    if (!viewerRef.current?.staging) return;
+    const success = await viewerRef.current.staging.saveStagedItems();
+    if (success) alert("Staging items saved!");
+  };
+
+  const handleBakePanoramas = async () => {
+    if (!viewerRef.current || !activeProfileId) return;
+    const { sceneRef, rendererRef, modelRef, scanSpheres, staging } = viewerRef.current;
+    if (!staging || !staging.stagedGroupRef.current || !scanSpheres || scanSpheres.length === 0) return;
+
+    setIsBaking(true);
+    setBakeProgress(0);
+
+    try {
+      const enrichedScansData = scanSpheres[0].userData.metadata;
+
+      // 5 meter radius filter is implemented inside bakeStaging
+      const bakedTexturesMap = await bakeStaging(
+        sceneRef.current,
+        rendererRef.current,
+        enrichedScansData,
+        staging.stagedGroupRef.current,
+        modelRef.current,
+        (progress) => setBakeProgress(progress),
+        id,
+        5.0
+      );
+
+      if (!bakedTexturesMap) {
+        setIsBaking(false);
+        return;
+      }
+
+      staging.setBakedTexturesMap(Object.fromEntries(bakedTexturesMap));
+
+      // Convert baked map to array to send to backend
+      const panoramasToSave = [];
+      const debugImages = [];
+      for (const [key, blobUrl] of bakedTexturesMap.entries()) {
+        const [scanId, face] = key.split('_');
+        
+        // Fetch the Blob from the URL
+        const blobRes = await fetch(blobUrl);
+        const blob = await blobRes.blob();
+        
+        debugImages.push({ key, url: blobUrl });
+      }
+      
+      setDebugBakedImages(debugImages);
+      alert(`Baked ${bakedTexturesMap.size} faces successfully! Check the debug view.`);
+      
+      setIsBaking(false);
+    } catch (e) {
+      console.error(e);
+      setIsBaking(false);
+      alert("Error baking panoramas.");
+    }
+  };
+
   return (
     <div className="studio-layout">
       {/* 3D Viewport */}
@@ -157,6 +283,8 @@ function StudioContent() {
         <ModelAndScansViewer 
           ref={viewerRef}
           tourId={id} 
+          activeProfileId={activeProfileId}
+          stagingMode={stagingMode}
           measurementMode={measurementMode}
           onMeasurementClick={handleMeasurementClick}
           tagMode={tagMode}
@@ -169,6 +297,16 @@ function StudioContent() {
           onPointerDragMove={handleDragMove}
           onPointerDragEnd={handleDragEnd}
         />
+
+        {/* ─── Staging Tools Overlay ─── */}
+        {stagingMode && activeProfileId && (
+          <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: '350px', zIndex: 10 }}>
+            <FurnitureCatalog 
+              isPlacementMode={false} 
+              onSelectFurniture={(item) => viewerRef.current?.staging?.setPlacementModeItem(item)} 
+            />
+          </div>
+        )}
       </div>
 
       {/* Right Sidebar */}
@@ -372,6 +510,54 @@ function StudioContent() {
             </div>
           )}
         </div>
+
+        {/* ─── Virtual Staging Section ─── */}
+        <div className="tool-section">
+          <h3 className="tool-section-title">Virtual Staging</h3>
+          
+          <div style={{ marginBottom: '15px' }}>
+            <select 
+              value={activeProfileId} 
+              onChange={(e) => {
+                setActiveProfileId(e.target.value);
+                if (!e.target.value) setStagingMode(false);
+              }}
+              style={{ width: '100%', padding: '8px', background: '#222', color: 'white', border: '1px solid #444', borderRadius: '4px' }}
+            >
+              <option value="">-- No Staging Profile --</option>
+              {stagingProfiles.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <button onClick={createStagingProfile} style={{ width: '100%', marginTop: '5px', padding: '6px', background: '#333', color: 'white', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer' }}>
+              + Create New Profile
+            </button>
+          </div>
+
+          {activeProfileId && (
+            <>
+              <button
+                className={`measure-toggle ${stagingMode ? 'active' : ''}`}
+                onClick={toggleStagingMode}
+              >
+                <span className="measure-toggle-icon">🛋️</span>
+                {stagingMode ? 'Editing Staging...' : 'Edit Staging'}
+                <span className="status-dot" />
+              </button>
+
+              {stagingMode && (
+                <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <button onClick={handleSaveStaging} style={{ padding: '8px', background: '#2196F3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                    Save Furniture Layout
+                  </button>
+                  <button onClick={handleBakePanoramas} disabled={isBaking} style={{ padding: '8px', background: isBaking ? '#555' : '#FF9800', color: 'white', border: 'none', borderRadius: '4px', cursor: isBaking ? 'wait' : 'pointer' }}>
+                    {isBaking ? `Baking... ${Math.round(bakeProgress * 100)}%` : 'Bake Staging to Scans (5m radius)'}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* ─── Tag Panel (edit overlay) ─── */}
@@ -457,6 +643,43 @@ function StudioContent() {
                 Place Pointer
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Debug Modal for Baked Panoramas ─── */}
+      {debugBakedImages.length > 0 && (
+        <div style={{
+          position: 'fixed', top: 40, left: 40, right: 40, bottom: 40,
+          background: 'rgba(15, 15, 20, 0.95)', zIndex: 9999, overflow: 'auto',
+          padding: '24px', borderRadius: '12px', color: 'white',
+          border: '1px solid #333', boxShadow: '0 10px 40px rgba(0,0,0,0.8)'
+        }}>
+          <h2 style={{ marginTop: 0, borderBottom: '1px solid #444', paddingBottom: '10px' }}>
+            Debug: Baked Panoramas ({debugBakedImages.length})
+          </h2>
+          <button 
+            onClick={() => setDebugBakedImages([])} 
+            style={{ 
+              position: 'absolute', top: 20, right: 20, 
+              padding: '8px 16px', background: '#ff4d4d', color: 'white', 
+              border: 'none', borderRadius: '4px', cursor: 'pointer' 
+            }}
+          >
+            Close
+          </button>
+          <div style={{ 
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', 
+            gap: '15px', marginTop: '20px' 
+          }}>
+            {debugBakedImages.map(img => (
+              <div key={img.key} style={{ background: '#000', border: '1px solid #333', padding: '5px' }}>
+                <a href={img.url} target="_blank" rel="noopener noreferrer">
+                  <img src={img.url} style={{ width: '100%', height: 'auto', display: 'block' }} alt={img.key} />
+                </a>
+                <p style={{ textAlign: 'center', fontSize: '12px', margin: '8px 0 4px', color: '#ccc' }}>{img.key}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}

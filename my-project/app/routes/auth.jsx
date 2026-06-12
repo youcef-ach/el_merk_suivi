@@ -48,7 +48,7 @@ export default function AuthPage() {
     setApiError('');
     setIsLoading(true);
     try {
-      const response = await fetch('http://197.140.9.103/api/auth/login', {
+      const response = await fetch('http://localhost:3000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: data.email, password: data.password }),
@@ -70,7 +70,7 @@ export default function AuthPage() {
     setApiError('');
     setIsLoading(true);
     try {
-      const response = await fetch('http://197.140.9.103/api/auth/register-enterprise', {
+      const response = await fetch('http://localhost:3000/api/auth/register-enterprise', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
