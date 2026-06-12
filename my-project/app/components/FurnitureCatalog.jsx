@@ -153,7 +153,7 @@ const FurnitureCatalog = ({ onSelectFurniture, isPlacementMode }) => {
 
             {(!isLoading || sfCursor) && filteredCatalog.map(item => (
               <div key={item.id} className="catalog-card">
-                {(item.isPolyHaven || item.isSketchfab) ? (
+                {(item.isPolyHaven || item.isSketchfab || item.isLocalModel) ? (
                   <div className="catalog-card-preview">
                     <img
                       src={item.thumbnail}

@@ -151,7 +151,6 @@ export const executeFlightAnimation = ({
 }) => {
   const modelsToFade = [];
   if (model) modelsToFade.push(model);
-  if (stagedGroup) modelsToFade.push(stagedGroup);
 
   // 1. Kill all competing GSAP tweens
   nextBox.material.forEach(mat => gsap.killTweensOf(mat));

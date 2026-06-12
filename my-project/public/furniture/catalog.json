@@ -1,0 +1,65 @@
+[
+  {
+    "id": "chemical_tank",
+    "name": "Chemical Tank",
+    "category": "industrial",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/chemical_tank.glb",
+    "thumbnail": "/furniture/thumbnails/chemical_tank.png"
+  },
+  {
+    "id": "crane_machine",
+    "name": "Crane Machine",
+    "category": "industrial",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/crane_machine.glb",
+    "thumbnail": "/furniture/thumbnails/crane_machine.png"
+  },
+  {
+    "id": "fire_extinguisher",
+    "name": "Fire Extinguisher",
+    "category": "safety",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/fire_extinguisher.glb",
+    "thumbnail": "/furniture/thumbnails/fire_extinguisher.png"
+  },
+  {
+    "id": "industrial_storage_tank",
+    "name": "Industrial Storage Tank",
+    "category": "industrial",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/industrial_storage_tank.glb",
+    "thumbnail": "/furniture/thumbnails/industrial_storage_tank.png"
+  },
+  {
+    "id": "telescopic_boom_lift",
+    "name": "Telescopic Boom Lift",
+    "category": "industrial",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/telescopic_boom_lift_high_resolution_texture_fbx.glb",
+    "thumbnail": "/furniture/thumbnails/telescopic_boom_lift.png"
+  },
+  {
+    "id": "pipe_structure",
+    "name": "Pipe Structure",
+    "category": "industrial",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/pipe_structure.glb",
+    "thumbnail": "/furniture/thumbnails/pipe_structure.png"
+  },
+  {
+    "id": "flame_pipe",
+    "name": "Flame Pipe",
+    "category": "industrial",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/flame_pipe.glb",
+    "thumbnail": "/furniture/thumbnails/flame_pipe.png"
+  }
+]

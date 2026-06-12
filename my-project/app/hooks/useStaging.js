@@ -13,7 +13,9 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
   const [placementModeItem, setPlacementModeItem] = useState(null);
   const [bakedTexturesMap, setBakedTexturesMap] = useState(null);
   const [selectedItemId, setSelectedItemId] = useState(null);
+  const [selectedDimensions, setSelectedDimensions] = useState(null);
   const [transformMode, setTransformMode] = useState('translate');
+  const [uniformScale, setUniformScale] = useState(false);
   const [loadingModelId, setLoadingModelId] = useState(null);
 
   const stagedGroupRef = useRef(null);
@@ -21,6 +23,58 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
   const ghostRef = useRef(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const lastValidTransformRef = useRef(null);
+  const envRaycasterRef = useRef(new THREE.Raycaster());
+
+  const checkEnvironmentCollision = useCallback((box) => {
+    if (!modelRef.current) return false;
+    
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const extents = size.clone().multiplyScalar(0.5);
+
+    const rayOrigin = center.clone();
+    rayOrigin.y = box.min.y + Math.min(extents.y, 0.2);
+
+    const directions = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, -1),
+      new THREE.Vector3(1, 0, 1).normalize(),
+      new THREE.Vector3(-1, 0, 1).normalize(),
+      new THREE.Vector3(1, 0, -1).normalize(),
+      new THREE.Vector3(-1, 0, -1).normalize(),
+    ];
+
+    for (const dir of directions) {
+      envRaycasterRef.current.set(rayOrigin, dir);
+      const hits = envRaycasterRef.current.intersectObject(modelRef.current, true);
+      
+      const validHits = hits.filter(hit => {
+        if (hit.face && hit.face.normal && hit.object) {
+          const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+          const worldNormal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+          // If the normal is mostly pointing up or down, it's a floor or ceiling.
+          // We only care about walls (where the normal is mostly horizontal).
+          return Math.abs(worldNormal.y) < 0.7;
+        }
+        return true;
+      });
+
+      if (validHits.length > 0) {
+        let tx = dir.x !== 0 ? extents.x / Math.abs(dir.x) : Infinity;
+        let tz = dir.z !== 0 ? extents.z / Math.abs(dir.z) : Infinity;
+        const maxDist = Math.min(tx, tz);
+        
+        if (validHits[0].distance < maxDist * 0.95) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [modelRef]);
 
   // Initialize group and transform controls
   useEffect(() => {
@@ -30,6 +84,13 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
       stagedGroupRef.current = new THREE.Group();
       stagedGroupRef.current.name = 'staged_furniture_group';
       sceneRef.current.add(stagedGroupRef.current);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+      stagedGroupRef.current.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(5, 10, 5);
+      stagedGroupRef.current.add(dirLight);
     }
 
     if (!transformControlRef.current) {
@@ -97,10 +158,19 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
   useEffect(() => {
     if (transformControlRef.current) {
       transformControlRef.current.setMode(transformMode);
+      if (transformMode === 'scale' && uniformScale) {
+        transformControlRef.current.showX = false;
+        transformControlRef.current.showY = false;
+        transformControlRef.current.showZ = false;
+      } else {
+        transformControlRef.current.showX = true;
+        transformControlRef.current.showY = true;
+        transformControlRef.current.showZ = true;
+      }
       // For floor items, translating on Y (up/down) is often bad, but let's allow 3D movement for now
       // Or restrict to XZ plane if desired.
     }
-  }, [transformMode]);
+  }, [transformMode, uniformScale]);
 
   // Remove local storage autosave, we will save manually via an explicit save button
   // ─── Save Staged Items ──────────────────────────────
@@ -130,7 +200,8 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
 
   const load3DModel = async (itemData) => {
     const cacheKey = itemData.isSketchfab ? itemData.sketchfabId : 
-                     itemData.isPolyHaven ? itemData.polyHavenId : null;
+                     itemData.isPolyHaven ? itemData.polyHavenId : 
+                     itemData.isLocalModel ? itemData.id : null;
                      
     if (!cacheKey) return null;
     
@@ -177,22 +248,11 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
                       child.receiveShadow = true;
                       if (child.material) {
                         const materials = Array.isArray(child.material) ? child.material : [child.material];
-                        const basicMaterials = materials.map(m => {
-                          const basic = new THREE.MeshBasicMaterial({
-                            map: m.map || null,
-                            color: m.color || 0xffffff,
-                            transparent: m.transparent || false,
-                            opacity: m.opacity || 1,
-                            side: m.side || THREE.FrontSide,
-                            alphaTest: m.alphaTest || 0,
-                            depthTest: true,
-                            depthWrite: true
-                          });
-                          basic.userData.originalColor = basic.color.getHex();
-                          m.dispose();
-                          return basic;
+                        materials.forEach(m => {
+                          if (m.color && m.userData.originalColor === undefined) {
+                            m.userData.originalColor = m.color.getHex();
+                          }
                         });
-                        child.material = Array.isArray(child.material) ? basicMaterials : basicMaterials[0];
                       }
                     }
                   });
@@ -271,6 +331,50 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
             );
           })
           .catch(reject);
+      } else if (itemData.isLocalModel) {
+        const loader = new GLTFLoader();
+        loader.load(
+          itemData.modelUrl,
+          (gltf) => {
+            const box = new THREE.Box3().setFromObject(gltf.scene);
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            if (maxDim > 5) {
+              const scale = 2.0 / maxDim;
+              gltf.scene.scale.setScalar(scale);
+            }
+
+            gltf.scene.traverse(child => {
+              if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+                if (child.material) {
+                  const materials = Array.isArray(child.material) ? child.material : [child.material];
+                  const basicMaterials = materials.map(m => {
+                    const basic = new THREE.MeshBasicMaterial({
+                      map: m.map || null,
+                      color: m.color || 0xffffff,
+                      transparent: m.transparent || false,
+                      opacity: m.opacity || 1,
+                      side: m.side || THREE.FrontSide,
+                      alphaTest: m.alphaTest || 0,
+                      depthTest: true,
+                      depthWrite: true
+                    });
+                    basic.userData.originalColor = basic.color.getHex();
+                    m.dispose();
+                    return basic;
+                  });
+                  child.material = Array.isArray(child.material) ? basicMaterials : basicMaterials[0];
+                }
+              }
+            });
+            loadedModelsCache.current[cacheKey] = gltf.scene;
+            resolve(gltf.scene);
+          },
+          undefined,
+          reject
+        );
       }
     });
   };
@@ -280,10 +384,17 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
     group.position.fromArray(itemData.position);
     group.rotation.fromArray(itemData.rotation);
     group.scale.fromArray(itemData.scale);
-    group.userData = { isStagedItem: true, id: itemData.id, isPolyHaven: itemData.isPolyHaven, polyHavenId: itemData.polyHavenId, isSketchfab: itemData.isSketchfab, sketchfabId: itemData.sketchfabId };
+    group.userData = { isStagedItem: true, id: itemData.id, isPolyHaven: itemData.isPolyHaven, polyHavenId: itemData.polyHavenId, isSketchfab: itemData.isSketchfab, sketchfabId: itemData.sketchfabId, isLocalModel: itemData.isLocalModel, modelUrl: itemData.modelUrl };
 
-    if (itemData.isPolyHaven || itemData.isSketchfab) {
-      const cacheKey = itemData.isSketchfab ? itemData.sketchfabId : itemData.polyHavenId;
+    const computeAndSetBaseSize = (targetObject) => {
+      targetObject.updateMatrixWorld(true);
+      const tempBox = new THREE.Box3().setFromObject(targetObject);
+      group.userData.baseSize = tempBox.getSize(new THREE.Vector3());
+    };
+
+    if (itemData.isPolyHaven || itemData.isSketchfab || itemData.isLocalModel) {
+      const cacheKey = itemData.isSketchfab ? itemData.sketchfabId : 
+                       itemData.isPolyHaven ? itemData.polyHavenId : itemData.id;
       if (loadedModelsCache.current[cacheKey]) {
         const sceneClone = loadedModelsCache.current[cacheKey].clone();
         sceneClone.traverse(child => {
@@ -292,6 +403,7 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
           }
         });
         group.add(sceneClone);
+        computeAndSetBaseSize(sceneClone);
       } else {
         const loadingGeo = new THREE.BoxGeometry(1, 1, 1);
         const loadingMat = new THREE.MeshStandardMaterial({ color: 0x888888, wireframe: true });
@@ -309,6 +421,7 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
             }
           });
           group.add(sceneClone);
+          computeAndSetBaseSize(sceneClone);
           if (rendererRef.current && sceneRef.current && cameraRef.current) {
             rendererRef.current.render(sceneRef.current, cameraRef.current);
           }
@@ -321,6 +434,7 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
     } else {
       const mesh = createFurniture(itemData.type, itemData.color);
       group.add(mesh);
+      computeAndSetBaseSize(mesh);
     }
     
     stagedGroupRef.current.add(group);
@@ -343,14 +457,17 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
       
       const setupGhost = async () => {
         let modelScene = null;
-        if (placementModeItem.isPolyHaven || placementModeItem.isSketchfab) {
+        if (placementModeItem.isPolyHaven || placementModeItem.isSketchfab || placementModeItem.isLocalModel) {
            setLoadingModelId(placementModeItem.id);
            try {
              const scene = await load3DModel({
                 isPolyHaven: !!placementModeItem.isPolyHaven,
                 isSketchfab: !!placementModeItem.isSketchfab,
+                isLocalModel: !!placementModeItem.isLocalModel,
                 polyHavenId: placementModeItem.isPolyHaven ? placementModeItem.id : undefined,
                 sketchfabId: placementModeItem.isSketchfab ? placementModeItem.id : undefined,
+                id: placementModeItem.id,
+                modelUrl: placementModeItem.modelUrl,
              });
              if (isActive && scene) {
                 modelScene = scene.clone();
@@ -416,7 +533,9 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
         ghostBox.expandByVector(size.multiplyScalar(-0.1));
 
         let collided = false;
-        if (stagedGroupRef.current) {
+        if (checkEnvironmentCollision(ghostBox)) {
+          collided = true;
+        } else if (stagedGroupRef.current) {
           for (const otherObj of stagedGroupRef.current.children) {
             if (!otherObj.userData.isStagedItem) continue;
             const otherBox = new THREE.Box3().setFromObject(otherObj);
@@ -456,10 +575,23 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
   useEffect(() => {
     if (!stagedGroupRef.current) return;
     
+    if (!selectedItemId) {
+      setSelectedDimensions(null);
+    }
+
     stagedGroupRef.current.children.forEach(mesh => {
       const isSelected = mesh.userData.id === selectedItemId;
       if (isSelected && transformControlRef.current) {
         transformControlRef.current.attach(mesh);
+        
+        const box = new THREE.Box3().setFromObject(mesh);
+        let currentSize = new THREE.Vector3();
+        if (mesh.userData.baseSize) {
+          currentSize.copy(mesh.userData.baseSize).multiply(mesh.scale);
+        } else {
+          box.getSize(currentSize);
+        }
+        setSelectedDimensions([Math.abs(currentSize.x), Math.abs(currentSize.y), Math.abs(currentSize.z)]);
       } else if (!isSelected && transformControlRef.current && transformControlRef.current.object === mesh) {
         transformControlRef.current.detach();
       }
@@ -489,27 +621,54 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
     const onChange = () => {
       const obj = transformControlRef.current.object;
       if (obj) {
+        obj.updateMatrixWorld(true);
+        const currentBox = new THREE.Box3().setFromObject(obj);
+        let currentSize = new THREE.Vector3();
+        if (obj.userData.baseSize) {
+          currentSize.copy(obj.userData.baseSize).multiply(obj.scale);
+        } else {
+          currentBox.getSize(currentSize);
+        }
+        
+        const dimX = Math.abs(currentSize.x);
+        const dimY = Math.abs(currentSize.y);
+        const dimZ = Math.abs(currentSize.z);
+        setSelectedDimensions([dimX, dimY, dimZ]);
+
+        // Direct DOM update for zero-latency real-time display during scale
+        const dimW = document.getElementById('staging-dim-width');
+        const dimH = document.getElementById('staging-dim-height');
+        const dimD = document.getElementById('staging-dim-depth');
+        if (dimW) dimW.innerText = dimX.toFixed(2) + 'm';
+        if (dimH) dimH.innerText = dimY.toFixed(2) + 'm';
+        if (dimD) dimD.innerText = dimZ.toFixed(2) + 'm';
+
         // --- Collision Detection ---
         if (lastValidTransformRef.current && stagedGroupRef.current) {
-          obj.updateMatrixWorld();
-          const activeBox = new THREE.Box3().setFromObject(obj);
+          const activeBox = currentBox;
           
           const size = new THREE.Vector3();
           activeBox.getSize(size);
           activeBox.expandByVector(size.multiplyScalar(-0.1)); // Shrink 10%
 
           let collided = false;
-          for (const otherObj of stagedGroupRef.current.children) {
-            if (otherObj === obj || !otherObj.userData.isStagedItem) continue;
+          if (checkEnvironmentCollision(activeBox)) {
+            collided = true;
+          }
+          
+          if (!collided) {
+            for (const otherObj of stagedGroupRef.current.children) {
+              if (otherObj === obj || !otherObj.userData.isStagedItem) continue;
 
-            const otherBox = new THREE.Box3().setFromObject(otherObj);
-            const otherSize = new THREE.Vector3();
-            otherBox.getSize(otherSize);
-            otherBox.expandByVector(otherSize.multiplyScalar(-0.1));
+              const otherBox = new THREE.Box3().setFromObject(otherObj);
+              const otherSize = new THREE.Vector3();
+              otherBox.getSize(otherSize);
+              otherBox.expandByVector(otherSize.multiplyScalar(-0.1));
 
-            if (activeBox.intersectsBox(otherBox)) {
-              collided = true;
-              break;
+              if (activeBox.intersectsBox(otherBox)) {
+                collided = true;
+                break;
+              }
             }
           }
 
@@ -544,9 +703,53 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
     };
 
     transformControlRef.current.addEventListener('change', onChange);
-    return () => transformControlRef.current.removeEventListener('change', onChange);
-  }, []);
+    // Also listen to objectChange for robust transform updates
+    transformControlRef.current.addEventListener('objectChange', onChange);
+    return () => {
+      if (transformControlRef.current) {
+        transformControlRef.current.removeEventListener('change', onChange);
+        transformControlRef.current.removeEventListener('objectChange', onChange);
+      }
+    };
+  }, [isDataLoaded]);
 
+  // Robust polling fallback for real-time scale dimensions
+  useEffect(() => {
+    let rafId;
+    if (transformMode === 'scale' && selectedItemId) {
+      const updateDimensions = () => {
+        if (transformControlRef.current && transformControlRef.current.object) {
+          const obj = transformControlRef.current.object;
+          obj.updateMatrixWorld(true);
+          const currentBox = new THREE.Box3().setFromObject(obj);
+          let currentSize = new THREE.Vector3();
+          
+          if (obj.userData.baseSize) {
+            currentSize.copy(obj.userData.baseSize).multiply(obj.scale);
+          } else {
+            currentBox.getSize(currentSize);
+          }
+          
+          const dimX = Math.abs(currentSize.x).toFixed(2);
+          const dimY = Math.abs(currentSize.y).toFixed(2);
+          const dimZ = Math.abs(currentSize.z).toFixed(2);
+          
+          const dimW = document.getElementById('staging-dim-width');
+          const dimH = document.getElementById('staging-dim-height');
+          const dimD = document.getElementById('staging-dim-depth');
+          
+          if (dimW && dimW.innerText !== dimX + 'm') dimW.innerText = dimX + 'm';
+          if (dimH && dimH.innerText !== dimY + 'm') dimH.innerText = dimY + 'm';
+          if (dimD && dimD.innerText !== dimZ + 'm') dimD.innerText = dimZ + 'm';
+        }
+        rafId = requestAnimationFrame(updateDimensions);
+      };
+      rafId = requestAnimationFrame(updateDimensions);
+    }
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [transformMode, selectedItemId]);
 
   const handleCanvasClick = useCallback((event) => {
     if (!isDataLoaded) return;
@@ -571,8 +774,10 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
             id: `item_${Date.now()}`,
             isPolyHaven: !!placementModeItem.isPolyHaven,
             isSketchfab: !!placementModeItem.isSketchfab,
+            isLocalModel: !!placementModeItem.isLocalModel,
             polyHavenId: placementModeItem.isPolyHaven ? placementModeItem.id : undefined,
             sketchfabId: placementModeItem.isSketchfab ? placementModeItem.id : undefined,
+            modelUrl: placementModeItem.modelUrl,
             dimensions: placementModeItem.dimensions,
             type: placementModeItem.type,
             color: placementModeItem.color,
@@ -680,5 +885,8 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
     loadingModelId,
     bakedTexturesMap,
     setBakedTexturesMap,
+    selectedDimensions,
+    uniformScale,
+    setUniformScale
   };
 };
