@@ -61,7 +61,12 @@ let InspectionsService = class InspectionsService {
                 panoramas: true,
                 areaPointers: true,
                 authorizedViewers: true,
-                stagingProfiles: true,
+                stagingProfiles: {
+                    include: {
+                        items: true,
+                        bakedPanoramas: true
+                    }
+                },
             },
         });
         if (!inspection) {
@@ -96,6 +101,12 @@ let InspectionsService = class InspectionsService {
                 tags: { include: { documents: true } },
                 areaPointers: true,
                 authorizedViewers: true,
+                stagingProfiles: {
+                    include: {
+                        items: true,
+                        bakedPanoramas: true
+                    }
+                },
             },
         });
         if (!original)
@@ -524,8 +535,8 @@ let InspectionsService = class InspectionsService {
         const profile = await this.prisma.stagingProfile.findUnique({
             where: { id: profileId },
             include: {
-                stagedItems: true,
-                bakedPanoramas: true,
+                items: true,
+                bakedPanoramas: true
             },
         });
         if (!profile || profile.inspectionId !== inspectionId) {

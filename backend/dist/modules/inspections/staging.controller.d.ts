@@ -12,34 +12,6 @@ export declare class StagingController {
         inspectionId: string;
     }>;
     getProfile(inspectionId: string, profileId: string): Promise<{
-        stagedItems: {
-            id: string;
-            color: string | null;
-            isPolyHaven: boolean;
-            isSketchfab: boolean;
-            polyHavenId: string | null;
-            sketchfabId: string | null;
-            type: string | null;
-            dimensions: import("@prisma/client/runtime/library").JsonValue | null;
-            positionX: number;
-            positionY: number;
-            positionZ: number;
-            rotationX: number;
-            rotationY: number;
-            rotationZ: number;
-            scaleX: number;
-            scaleY: number;
-            scaleZ: number;
-            stagingProfileId: string;
-        }[];
-        bakedPanoramas: {
-            id: string;
-            imageUrl: string;
-            stagingProfileId: string;
-            scanId: string;
-            face: string;
-        }[];
-    } & {
         id: string;
         createdAt: Date;
         updatedAt: Date;
@@ -49,34 +21,6 @@ export declare class StagingController {
     saveItems(inspectionId: string, profileId: string, body: {
         items: any[];
     }, req: any): Promise<{
-        stagedItems: {
-            id: string;
-            color: string | null;
-            isPolyHaven: boolean;
-            isSketchfab: boolean;
-            polyHavenId: string | null;
-            sketchfabId: string | null;
-            type: string | null;
-            dimensions: import("@prisma/client/runtime/library").JsonValue | null;
-            positionX: number;
-            positionY: number;
-            positionZ: number;
-            rotationX: number;
-            rotationY: number;
-            rotationZ: number;
-            scaleX: number;
-            scaleY: number;
-            scaleZ: number;
-            stagingProfileId: string;
-        }[];
-        bakedPanoramas: {
-            id: string;
-            imageUrl: string;
-            stagingProfileId: string;
-            scanId: string;
-            face: string;
-        }[];
-    } & {
         id: string;
         createdAt: Date;
         updatedAt: Date;
@@ -86,34 +30,6 @@ export declare class StagingController {
     saveBakedPanoramas(inspectionId: string, profileId: string, body: {
         panoramas: any[];
     }, req: any): Promise<{
-        stagedItems: {
-            id: string;
-            color: string | null;
-            isPolyHaven: boolean;
-            isSketchfab: boolean;
-            polyHavenId: string | null;
-            sketchfabId: string | null;
-            type: string | null;
-            dimensions: import("@prisma/client/runtime/library").JsonValue | null;
-            positionX: number;
-            positionY: number;
-            positionZ: number;
-            rotationX: number;
-            rotationY: number;
-            rotationZ: number;
-            scaleX: number;
-            scaleY: number;
-            scaleZ: number;
-            stagingProfileId: string;
-        }[];
-        bakedPanoramas: {
-            id: string;
-            imageUrl: string;
-            stagingProfileId: string;
-            scanId: string;
-            face: string;
-        }[];
-    } & {
         id: string;
         createdAt: Date;
         updatedAt: Date;

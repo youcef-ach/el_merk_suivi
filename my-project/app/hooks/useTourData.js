@@ -408,7 +408,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
               const baked = profile.bakedPanoramas.find(bp => bp.scanId === scanId && bp.face === face);
               if (baked && baked.imageUrl) {
                 // Determine if absolute or relative
-                imageUrl = baked.imageUrl.startsWith('http') ? baked.imageUrl : `http://localhost:3000${baked.imageUrl}`;
+                imageUrl = baked.imageUrl.startsWith('http') ? baked.imageUrl : `http://localhost:9000/virtual-inspections/${baked.imageUrl}`;
               }
             }
           }

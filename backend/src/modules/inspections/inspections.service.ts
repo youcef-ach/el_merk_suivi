@@ -70,7 +70,12 @@ export class InspectionsService {
         panoramas: true,
         areaPointers: true,
         authorizedViewers: true,
-        stagingProfiles: true,
+        stagingProfiles: {
+          include: {
+            items: true,
+            bakedPanoramas: true
+          }
+        },
       },
     });
 
@@ -120,6 +125,12 @@ export class InspectionsService {
         tags: { include: { documents: true } },
         areaPointers: true,
         authorizedViewers: true,
+        stagingProfiles: {
+          include: {
+            items: true,
+            bakedPanoramas: true
+          }
+        },
       },
     });
 
@@ -637,8 +648,8 @@ export class InspectionsService {
     const profile = await this.prisma.stagingProfile.findUnique({
       where: { id: profileId },
       include: {
-        stagedItems: true,
-        bakedPanoramas: true,
+        items: true,
+        bakedPanoramas: true
       },
     });
 

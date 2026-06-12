@@ -249,9 +249,13 @@ function StudioContent() {
 
       staging.setBakedTexturesMap(Object.fromEntries(bakedTexturesMap));
 
-      // Convert baked map to array to send to backend
+      // Upload baked panoramas to backend
       const panoramasToSave = [];
       const debugImages = [];
+      
+      const token = localStorage.getItem('access_token');
+      
+      let uploadCount = 0;
       for (const [key, blobUrl] of bakedTexturesMap.entries()) {
         const [scanId, face] = key.split('_');
         
@@ -260,16 +264,58 @@ function StudioContent() {
         const blob = await blobRes.blob();
         
         debugImages.push({ key, url: blobUrl });
+
+        // 1. Get presigned URL
+        const fileName = `staging/${activeProfileId}/${scanId}_${face}.jpg`;
+        const presignRes = await fetch(`http://localhost:3000/api/inspections/${id}/upload-url`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ fileName })
+        });
+        
+        if (presignRes.ok) {
+          const { url } = await presignRes.json();
+          // 2. Upload to MinIO
+          await fetch(url, {
+            method: 'PUT',
+            body: blob,
+            headers: { 'Content-Type': 'image/jpeg' }
+          });
+          
+          panoramasToSave.push({
+            scanId,
+            face,
+            imageUrl: `inspections/${id}/${fileName}` // Relative path used by useTourData
+          });
+        }
+        
+        uploadCount++;
+        setBakeProgress(uploadCount / bakedTexturesMap.size);
+      }
+      
+      // 3. Save to database
+      if (panoramasToSave.length > 0) {
+        await fetch(`http://localhost:3000/api/inspections/${id}/staging-profiles/${activeProfileId}/baked-panoramas`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ panoramas: panoramasToSave })
+        });
       }
       
       setDebugBakedImages(debugImages);
-      alert(`Baked ${bakedTexturesMap.size} faces successfully! Check the debug view.`);
+      alert(`Baked and saved ${bakedTexturesMap.size} faces successfully! They are now permanently available for this profile.`);
       
       setIsBaking(false);
     } catch (e) {
       console.error(e);
       setIsBaking(false);
-      alert("Error baking panoramas.");
+      alert("Error baking and saving panoramas.");
     }
   };
 

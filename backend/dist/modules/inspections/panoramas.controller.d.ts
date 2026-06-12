@@ -5,8 +5,8 @@ export declare class PanoramasController {
     constructor(inspectionsService: InspectionsService);
     updateStatus(id: string, dto: UpdatePanoramaStatusDto, user: any): Promise<{
         id: string;
+        inspectionId: string;
         imageUrl: string;
         status: import(".prisma/client").$Enums.ProcessingStatus;
-        inspectionId: string;
     }>;
 }

@@ -38,84 +38,6 @@ export declare class InspectionsController {
         projectId: string;
     }[]>;
     findOne(id: string, user: any): Promise<{
-        project: {
-            id: string;
-            description: string | null;
-            createdAt: Date;
-            updatedAt: Date;
-            name: string;
-            enterpriseId: string;
-        };
-        authorizedViewers: {
-            id: string;
-            createdAt: Date;
-            enterpriseId: string | null;
-            email: string;
-            password: string;
-            role: import(".prisma/client").$Enums.Role;
-        }[];
-        panoramas: {
-            id: string;
-            imageUrl: string;
-            status: import(".prisma/client").$Enums.ProcessingStatus;
-            inspectionId: string;
-        }[];
-        tags: ({
-            documents: {
-                id: string;
-                title: string;
-                fileUrl: string;
-                tagId: string;
-            }[];
-        } & {
-            id: string;
-            title: string;
-            description: string | null;
-            inspectionId: string;
-            posX: number;
-            posY: number;
-            posZ: number;
-            icon: string;
-            color: string;
-            size: number;
-        })[];
-        scans: {
-            id: string;
-            inspectionId: string;
-            posX: number;
-            posY: number;
-            posZ: number;
-            quatW: number;
-            quatX: number;
-            quatY: number;
-            quatZ: number;
-            targetScanId: string | null;
-        }[];
-        areaPointers: {
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            name: string;
-            inspectionId: string;
-            posX: number;
-            posY: number;
-            posZ: number;
-            color: string;
-            height: number;
-            thickness: number;
-            labelSize: number;
-            sizeX: number;
-            sizeY: number;
-            wallHeight: number;
-        }[];
-        stagingProfiles: {
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            name: string;
-            inspectionId: string;
-        }[];
-    } & {
         id: string;
         title: string;
         description: string | null;
@@ -131,84 +53,6 @@ export declare class InspectionsController {
         projectId: string;
     }>;
     getBundle(id: string, user: any): Promise<{
-        project: {
-            id: string;
-            description: string | null;
-            createdAt: Date;
-            updatedAt: Date;
-            name: string;
-            enterpriseId: string;
-        };
-        authorizedViewers: {
-            id: string;
-            createdAt: Date;
-            enterpriseId: string | null;
-            email: string;
-            password: string;
-            role: import(".prisma/client").$Enums.Role;
-        }[];
-        panoramas: {
-            id: string;
-            imageUrl: string;
-            status: import(".prisma/client").$Enums.ProcessingStatus;
-            inspectionId: string;
-        }[];
-        tags: ({
-            documents: {
-                id: string;
-                title: string;
-                fileUrl: string;
-                tagId: string;
-            }[];
-        } & {
-            id: string;
-            title: string;
-            description: string | null;
-            inspectionId: string;
-            posX: number;
-            posY: number;
-            posZ: number;
-            icon: string;
-            color: string;
-            size: number;
-        })[];
-        scans: {
-            id: string;
-            inspectionId: string;
-            posX: number;
-            posY: number;
-            posZ: number;
-            quatW: number;
-            quatX: number;
-            quatY: number;
-            quatZ: number;
-            targetScanId: string | null;
-        }[];
-        areaPointers: {
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            name: string;
-            inspectionId: string;
-            posX: number;
-            posY: number;
-            posZ: number;
-            color: string;
-            height: number;
-            thickness: number;
-            labelSize: number;
-            sizeX: number;
-            sizeY: number;
-            wallHeight: number;
-        }[];
-        stagingProfiles: {
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            name: string;
-            inspectionId: string;
-        }[];
-    } & {
         id: string;
         title: string;
         description: string | null;
@@ -240,7 +84,6 @@ export declare class InspectionsController {
     }>;
     createScan(id: string, dto: CreateScanDto, user: any): Promise<{
         id: string;
-        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
@@ -249,21 +92,22 @@ export declare class InspectionsController {
         quatY: number;
         quatZ: number;
         targetScanId: string | null;
+        inspectionId: string;
     }>;
     createPanorama(id: string, dto: CreatePanoramaDto, user: any): Promise<{
         id: string;
+        inspectionId: string;
         imageUrl: string;
         status: import(".prisma/client").$Enums.ProcessingStatus;
-        inspectionId: string;
     }>;
     setPermissions(id: string, dto: UpdateInspectionPermissionsDto, user: any): Promise<{
         authorizedViewers: {
             id: string;
             createdAt: Date;
-            enterpriseId: string | null;
             email: string;
             password: string;
             role: import(".prisma/client").$Enums.Role;
+            enterpriseId: string | null;
         }[];
     } & {
         id: string;
