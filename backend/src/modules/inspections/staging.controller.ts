@@ -40,4 +40,14 @@ export class StagingController {
     const { enterpriseId, role } = req.user;
     return this.inspectionsService.saveBakedPanoramas(inspectionId, profileId, body.panoramas || [], enterpriseId, role as Role);
   }
+
+  @Post(':id/upload-url')
+  getUploadUrl(
+    @Param('id') id: string,
+    @Body('fileName') fileName: string,
+    @Request() req,
+  ) {
+    const { enterpriseId, role } = req.user;
+    return this.inspectionsService.getUploadUrl(id, fileName, enterpriseId, role as Role);
+  }
 }

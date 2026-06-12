@@ -35,6 +35,10 @@ let StagingController = class StagingController {
         const { enterpriseId, role } = req.user;
         return this.inspectionsService.saveBakedPanoramas(inspectionId, profileId, body.panoramas || [], enterpriseId, role);
     }
+    getUploadUrl(id, fileName, req) {
+        const { enterpriseId, role } = req.user;
+        return this.inspectionsService.getUploadUrl(id, fileName, enterpriseId, role);
+    }
 };
 exports.StagingController = StagingController;
 __decorate([
@@ -74,6 +78,15 @@ __decorate([
     __metadata("design:paramtypes", [String, String, Object, Object]),
     __metadata("design:returntype", void 0)
 ], StagingController.prototype, "saveBakedPanoramas", null);
+__decorate([
+    (0, common_1.Post)(':id/upload-url'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)('fileName')),
+    __param(2, (0, common_1.Request)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, Object]),
+    __metadata("design:returntype", void 0)
+], StagingController.prototype, "getUploadUrl", null);
 exports.StagingController = StagingController = __decorate([
     (0, common_1.Controller)('inspections'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),

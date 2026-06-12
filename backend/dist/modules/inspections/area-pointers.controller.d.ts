@@ -9,10 +9,10 @@ export declare class AreaPointersController {
         createdAt: Date;
         updatedAt: Date;
         name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
         color: string;
         height: number;
         thickness: number;
@@ -26,10 +26,10 @@ export declare class AreaPointersController {
         createdAt: Date;
         updatedAt: Date;
         name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
         color: string;
         height: number;
         thickness: number;
@@ -43,10 +43,10 @@ export declare class AreaPointersController {
         createdAt: Date;
         updatedAt: Date;
         name: string;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
         color: string;
         height: number;
         thickness: number;

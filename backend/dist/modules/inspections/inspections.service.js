@@ -63,7 +63,7 @@ let InspectionsService = class InspectionsService {
                 authorizedViewers: true,
                 stagingProfiles: {
                     include: {
-                        items: true,
+                        stagedItems: true,
                         bakedPanoramas: true
                     }
                 },
@@ -103,7 +103,7 @@ let InspectionsService = class InspectionsService {
                 authorizedViewers: true,
                 stagingProfiles: {
                     include: {
-                        items: true,
+                        stagedItems: true,
                         bakedPanoramas: true
                     }
                 },
@@ -535,7 +535,7 @@ let InspectionsService = class InspectionsService {
         const profile = await this.prisma.stagingProfile.findUnique({
             where: { id: profileId },
             include: {
-                items: true,
+                stagedItems: true,
                 bakedPanoramas: true
             },
         });

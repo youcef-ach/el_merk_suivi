@@ -16,10 +16,10 @@ export declare class TagsController {
         id: string;
         title: string;
         description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
         icon: string;
         color: string;
         size: number;
@@ -35,10 +35,10 @@ export declare class TagsController {
         id: string;
         title: string;
         description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
         icon: string;
         color: string;
         size: number;
@@ -47,10 +47,10 @@ export declare class TagsController {
         id: string;
         title: string;
         description: string | null;
+        inspectionId: string;
         posX: number;
         posY: number;
         posZ: number;
-        inspectionId: string;
         icon: string;
         color: string;
         size: number;

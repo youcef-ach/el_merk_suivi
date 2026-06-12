@@ -608,6 +608,176 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
         Floor Plan View
       </button>
 
+      {/* Model Loading Overlay */}
+      {staging?.loadingModelId && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 2000,
+          background: 'rgba(15, 15, 15, 0.9)',
+          padding: '24px 32px',
+          borderRadius: '16px',
+          border: '1px solid rgba(0, 229, 255, 0.3)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '16px',
+          color: '#fff',
+          boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 229, 255, 0.1)',
+          backdropFilter: 'blur(12px)',
+          fontFamily: 'Inter, sans-serif'
+        }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            border: '3px solid rgba(255,255,255,0.1)',
+            borderTopColor: '#00e5ff',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }} />
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontWeight: 'bold', fontSize: '15px', marginBottom: '4px' }}>Loading 3D Model...</div>
+            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Downloading and processing assets</div>
+          </div>
+          <style>{`
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* Staging Transform Toolbar */}
+      {stagingMode && staging?.selectedItemId && (
+        <div style={{
+          position: 'absolute',
+          bottom: '120px', /* Above the timeline/bottom bar */
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1500,
+          background: 'rgba(13, 14, 20, 0.95)',
+          backdropFilter: 'blur(20px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: '12px',
+          padding: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+          fontFamily: 'Inter, -apple-system, sans-serif'
+        }}>
+          {/* Transform Modes */}
+          <div style={{ display: 'flex', gap: '4px', borderRight: '1px solid rgba(255,255,255,0.1)', paddingRight: '8px' }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); staging.setTransformMode('translate'); }}
+              style={{
+                background: staging.transformMode === 'translate' ? 'rgba(0, 229, 255, 0.15)' : 'transparent',
+                color: staging.transformMode === 'translate' ? '#00e5ff' : 'rgba(255,255,255,0.7)',
+                border: staging.transformMode === 'translate' ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid transparent',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 500,
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M19 9l3 3-3 3M9 19l3 3 3-3M2 12h20M12 2v20"/></svg>
+              Move
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); staging.setTransformMode('rotate'); }}
+              style={{
+                background: staging.transformMode === 'rotate' ? 'rgba(0, 229, 255, 0.15)' : 'transparent',
+                color: staging.transformMode === 'rotate' ? '#00e5ff' : 'rgba(255,255,255,0.7)',
+                border: staging.transformMode === 'rotate' ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid transparent',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 500,
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+              Rotate
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); staging.setTransformMode('scale'); }}
+              style={{
+                background: staging.transformMode === 'scale' ? 'rgba(0, 229, 255, 0.15)' : 'transparent',
+                color: staging.transformMode === 'scale' ? '#00e5ff' : 'rgba(255,255,255,0.7)',
+                border: staging.transformMode === 'scale' ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid transparent',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 500,
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 3l-6 6M21 3v6M21 3h-6M3 21l6-6M3 21v-6M3 21h6M15 15l6 6M9 9L3 3"/></svg>
+              Scale
+            </button>
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: '4px', paddingLeft: '4px' }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); staging.duplicateSelected(); }}
+              title="Duplicate (Ctrl+D)"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                color: 'rgba(255,255,255,0.8)',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); staging.deleteSelected(); }}
+              title="Delete (Del/Backspace)"
+              style={{
+                background: 'rgba(255, 50, 50, 0.1)',
+                border: '1px solid rgba(255, 50, 50, 0.2)',
+                color: '#ff4444',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 50, 50, 0.2)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 50, 50, 0.1)'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Tag Info Popup (Engine/Read-only mode) */}
       {activeTagInfo && (
         <div

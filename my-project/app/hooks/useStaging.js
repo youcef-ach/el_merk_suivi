@@ -20,6 +20,7 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
   const transformControlRef = useRef(null);
   const ghostRef = useRef(null);
   const raycasterRef = useRef(new THREE.Raycaster());
+  const lastValidTransformRef = useRef(null);
 
   // Initialize group and transform controls
   useEffect(() => {
@@ -36,6 +37,16 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
       transformControlRef.current.addEventListener('dragging-changed', function (event) {
         if (controlsRef.current) {
           controlsRef.current.enabled = !event.value;
+        }
+        if (event.value && transformControlRef.current.object) {
+          const obj = transformControlRef.current.object;
+          lastValidTransformRef.current = {
+            position: obj.position.clone(),
+            rotation: obj.rotation.clone(),
+            scale: obj.scale.clone()
+          };
+        } else {
+          lastValidTransformRef.current = null;
         }
       });
       sceneRef.current.add(transformControlRef.current.getHelper());
@@ -115,74 +126,98 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
     }
   };
 
-  const spawnFurnitureMesh = (itemData) => {
-    const group = new THREE.Group();
-    group.position.fromArray(itemData.position);
-    group.rotation.fromArray(itemData.rotation);
-    group.scale.fromArray(itemData.scale);
-    group.userData = { isStagedItem: true, id: itemData.id, isPolyHaven: itemData.isPolyHaven, polyHavenId: itemData.polyHavenId };
+  const loadedModelsCache = useRef({});
 
-    if (itemData.isPolyHaven) {
-      // Create a temporary loading box
-      const w = (itemData.dimensions?.[0] || 1000) * 0.001;
-      const h = (itemData.dimensions?.[1] || 1000) * 0.001;
-      const d = (itemData.dimensions?.[2] || 1000) * 0.001;
-      const loadingGeo = new THREE.BoxGeometry(w, h, d);
-      const loadingMat = new THREE.MeshStandardMaterial({ color: 0x888888, wireframe: true });
-      const loadingMesh = new THREE.Mesh(loadingGeo, loadingMat);
-      loadingMesh.position.y = h / 2; // Center bottom to origin
-      group.add(loadingMesh);
+  const load3DModel = async (itemData) => {
+    const cacheKey = itemData.isSketchfab ? itemData.sketchfabId : 
+                     itemData.isPolyHaven ? itemData.polyHavenId : null;
+                     
+    if (!cacheKey) return null;
+    
+    if (loadedModelsCache.current[cacheKey]) {
+      return loadedModelsCache.current[cacheKey];
+    }
 
-      // Fetch and load GLTF
-      setLoadingModelId(itemData.id);
-      fetch(`https://api.polyhaven.com/files/${itemData.polyHavenId}`)
-        .then(res => res.json())
-        .then(data => {
-          const gltfEntry = data.gltf?.['1k']?.gltf || data.gltf?.['2k']?.gltf || data.gltf?.['4k']?.gltf;
-          if (gltfEntry && gltfEntry.url) {
-            const gltfUrl = gltfEntry.url;
-            const includeMap = gltfEntry.include || {};
-
-            // Build a URL remap from relative texture paths to absolute CDN URLs
-            const textureUrlMap = {};
-            for (const [relativePath, fileInfo] of Object.entries(includeMap)) {
-              if (fileInfo.url) {
-                textureUrlMap[relativePath] = fileInfo.url;
+    return new Promise((resolve, reject) => {
+      if (itemData.isPolyHaven) {
+        fetch(`https://api.polyhaven.com/files/${itemData.polyHavenId}`)
+          .then(res => res.json())
+          .then(data => {
+            const gltfEntry = data.gltf?.['1k']?.gltf || data.gltf?.['2k']?.gltf || data.gltf?.['4k']?.gltf;
+            if (gltfEntry && gltfEntry.url) {
+              const gltfUrl = gltfEntry.url;
+              const includeMap = gltfEntry.include || {};
+              const textureUrlMap = {};
+              for (const [relativePath, fileInfo] of Object.entries(includeMap)) {
+                if (fileInfo.url) textureUrlMap[relativePath] = fileInfo.url;
               }
+
+              const manager = new THREE.LoadingManager();
+              const gltfBaseUrl = gltfUrl.substring(0, gltfUrl.lastIndexOf('/') + 1);
+              manager.resolveURL = (url) => {
+                if (url.startsWith(gltfBaseUrl)) {
+                  const relativePath = url.substring(gltfBaseUrl.length);
+                  if (textureUrlMap[relativePath]) return textureUrlMap[relativePath];
+                }
+                for (const [relPath, absUrl] of Object.entries(textureUrlMap)) {
+                  if (url.endsWith(relPath)) return absUrl;
+                }
+                return url;
+              };
+
+              const loader = new GLTFLoader(manager);
+              loader.setCrossOrigin('anonymous');
+              loader.load(
+                gltfUrl,
+                (gltf) => {
+                  gltf.scene.scale.set(1, 1, 1);
+                  gltf.scene.traverse(child => {
+                    if (child.isMesh) {
+                      child.castShadow = true;
+                      child.receiveShadow = true;
+                      if (child.material) {
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        const basicMaterials = materials.map(m => {
+                          const basic = new THREE.MeshBasicMaterial({
+                            map: m.map || null,
+                            color: m.color || 0xffffff,
+                            transparent: m.transparent || false,
+                            opacity: m.opacity || 1,
+                            side: m.side || THREE.FrontSide,
+                            alphaTest: m.alphaTest || 0,
+                            depthTest: true,
+                            depthWrite: true
+                          });
+                          basic.userData.originalColor = basic.color.getHex();
+                          m.dispose();
+                          return basic;
+                        });
+                        child.material = Array.isArray(child.material) ? basicMaterials : basicMaterials[0];
+                      }
+                    }
+                  });
+                  loadedModelsCache.current[cacheKey] = gltf.scene;
+                  resolve(gltf.scene);
+                },
+                undefined,
+                reject
+              );
+            } else {
+              reject(new Error('No GLTF entry found'));
             }
+          })
+          .catch(reject);
 
-            console.log('[PolyHaven] Loading GLTF:', gltfUrl);
-            console.log('[PolyHaven] Texture remap:', textureUrlMap);
-
-            // Custom LoadingManager that remaps relative texture paths
+      } else if (itemData.isSketchfab) {
+        const sfToken = localStorage.getItem('sketchfab_token') || undefined;
+        getSketchfabDownloadUrl(itemData.sketchfabId, sfToken)
+          .then(zipUrl => downloadAndExtractSketchfabGltf(zipUrl))
+          .then(({ gltfUrl, blobUrls, cleanup }) => {
             const manager = new THREE.LoadingManager();
-            manager.onLoad = () => {
-              console.log('[PolyHaven] All resources loaded for', itemData.polyHavenId);
-              setLoadingModelId(null);
-            };
-            manager.onError = (url) => {
-              console.error('[PolyHaven] Failed to load resource:', url);
-              setLoadingModelId(null);
-            };
-
-            const gltfBaseUrl = gltfUrl.substring(0, gltfUrl.lastIndexOf('/') + 1);
             manager.resolveURL = (url) => {
-              // If the URL starts with the gltf base, extract the relative part
-              if (url.startsWith(gltfBaseUrl)) {
-                const relativePath = url.substring(gltfBaseUrl.length);
-                if (textureUrlMap[relativePath]) {
-                  console.log('[PolyHaven] Remapped:', relativePath, '->', textureUrlMap[relativePath]);
-                  return textureUrlMap[relativePath];
-                }
+              for (const [relPath, blobUrl] of Object.entries(blobUrls)) {
+                if (url.endsWith(relPath)) return blobUrl;
               }
-              // Also try matching just the relative path directly
-              for (const [relPath, absUrl] of Object.entries(textureUrlMap)) {
-                if (url.endsWith(relPath)) {
-                  console.log('[PolyHaven] Remapped (suffix):', relPath, '->', absUrl);
-                  return absUrl;
-                }
-              }
-              console.log('[PolyHaven] No remap for:', url);
               return url;
             };
 
@@ -191,12 +226,15 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
             loader.load(
               gltfUrl,
               (gltf) => {
-                // Remove loading mesh
-                group.remove(loadingMesh);
-                
-                gltf.scene.scale.set(1, 1, 1);
-                
-                // Ensure children can cast/receive shadows and store original colors for highlighting
+                cleanup();
+                const box = new THREE.Box3().setFromObject(gltf.scene);
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                if (maxDim > 5) {
+                  const scale = 2.0 / maxDim;
+                  gltf.scene.scale.setScalar(scale);
+                }
+
                 gltf.scene.traverse(child => {
                   if (child.isMesh) {
                     child.castShadow = true;
@@ -222,134 +260,66 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
                     }
                   }
                 });
-
-                group.add(gltf.scene);
-
-                // Force a render since the smart render loop only re-renders on camera change
-                if (rendererRef.current && sceneRef.current && cameraRef.current) {
-                  rendererRef.current.render(sceneRef.current, cameraRef.current);
-                }
+                loadedModelsCache.current[cacheKey] = gltf.scene;
+                resolve(gltf.scene);
               },
-              (progress) => {
-                if (progress.total > 0) {
-                  console.log(`[PolyHaven] Loading ${itemData.polyHavenId}: ${Math.round(progress.loaded / progress.total * 100)}%`);
-                }
-              },
-              (error) => {
-                console.error('[PolyHaven] GLTF load error:', error);
-                setLoadingModelId(null);
+              undefined,
+              (err) => {
+                cleanup();
+                reject(err);
               }
             );
-          } else {
-            console.error('[PolyHaven] No GLTF entry found for', itemData.polyHavenId);
-            setLoadingModelId(null);
+          })
+          .catch(reject);
+      }
+    });
+  };
+
+  const spawnFurnitureMesh = (itemData) => {
+    const group = new THREE.Group();
+    group.position.fromArray(itemData.position);
+    group.rotation.fromArray(itemData.rotation);
+    group.scale.fromArray(itemData.scale);
+    group.userData = { isStagedItem: true, id: itemData.id, isPolyHaven: itemData.isPolyHaven, polyHavenId: itemData.polyHavenId, isSketchfab: itemData.isSketchfab, sketchfabId: itemData.sketchfabId };
+
+    if (itemData.isPolyHaven || itemData.isSketchfab) {
+      const cacheKey = itemData.isSketchfab ? itemData.sketchfabId : itemData.polyHavenId;
+      if (loadedModelsCache.current[cacheKey]) {
+        const sceneClone = loadedModelsCache.current[cacheKey].clone();
+        sceneClone.traverse(child => {
+          if (child.isMesh && child.material) {
+            child.material = Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone();
           }
-        })
-        .catch(err => {
-          console.error("Failed to load Poly Haven model:", err);
+        });
+        group.add(sceneClone);
+      } else {
+        const loadingGeo = new THREE.BoxGeometry(1, 1, 1);
+        const loadingMat = new THREE.MeshStandardMaterial({ color: 0x888888, wireframe: true });
+        const loadingMesh = new THREE.Mesh(loadingGeo, loadingMat);
+        loadingMesh.position.y = 0.5;
+        group.add(loadingMesh);
+
+        setLoadingModelId(itemData.id);
+        load3DModel(itemData).then(scene => {
+          group.remove(loadingMesh);
+          const sceneClone = scene.clone();
+          sceneClone.traverse(child => {
+            if (child.isMesh && child.material) {
+              child.material = Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone();
+            }
+          });
+          group.add(sceneClone);
+          if (rendererRef.current && sceneRef.current && cameraRef.current) {
+            rendererRef.current.render(sceneRef.current, cameraRef.current);
+          }
+        }).catch(err => {
+          console.error('Failed to load model', err);
+        }).finally(() => {
           setLoadingModelId(null);
         });
-
-    } else if (itemData.isSketchfab) {
-      const loadingGeo = new THREE.BoxGeometry(1, 1, 1);
-      const loadingMat = new THREE.MeshStandardMaterial({ color: 0x888888, wireframe: true });
-      const loadingMesh = new THREE.Mesh(loadingGeo, loadingMat);
-      loadingMesh.position.y = 0.5;
-      group.add(loadingMesh);
-
-      setLoadingModelId(itemData.id);
-      const sfToken = localStorage.getItem('sketchfab_token');
-
-      getSketchfabDownloadUrl(itemData.id, sfToken)
-        .then(zipUrl => downloadAndExtractSketchfabGltf(zipUrl))
-        .then(({ gltfUrl, blobUrls, cleanup }) => {
-          const manager = new THREE.LoadingManager();
-          manager.onLoad = () => {
-            console.log('[Sketchfab] All resources loaded');
-            setLoadingModelId(null);
-          };
-          manager.onError = (url) => {
-            console.error('[Sketchfab] Failed to load resource:', url);
-            setLoadingModelId(null);
-          };
-
-          manager.resolveURL = (url) => {
-            // Find if this URL matches any of our extracted blob relative paths
-            for (const [relPath, blobUrl] of Object.entries(blobUrls)) {
-              if (url.endsWith(relPath)) return blobUrl;
-            }
-            return url;
-          };
-
-          const loader = new GLTFLoader(manager);
-          loader.setCrossOrigin('anonymous');
-          loader.load(
-            gltfUrl,
-            (gltf) => {
-              group.remove(loadingMesh);
-              
-              // Cleanup memory once loaded
-              cleanup();
-
-              // Auto-scale since Sketchfab models vary wildly in scale
-              const box = new THREE.Box3().setFromObject(gltf.scene);
-              const size = box.getSize(new THREE.Vector3());
-              const maxDim = Math.max(size.x, size.y, size.z);
-              if (maxDim > 5) {
-                // If larger than 5 meters, scale down to fit roughly 2 meters
-                const scale = 2.0 / maxDim;
-                gltf.scene.scale.setScalar(scale);
-              }
-
-              // Ensure children can cast/receive shadows and store original colors for highlighting
-              gltf.scene.traverse(child => {
-                if (child.isMesh) {
-                  child.castShadow = true;
-                  child.receiveShadow = true;
-                  if (child.material) {
-                    const materials = Array.isArray(child.material) ? child.material : [child.material];
-                    const basicMaterials = materials.map(m => {
-                      const basic = new THREE.MeshBasicMaterial({
-                        map: m.map || null,
-                        color: m.color || 0xffffff,
-                        transparent: m.transparent || false,
-                        opacity: m.opacity || 1,
-                        side: m.side || THREE.FrontSide,
-                        alphaTest: m.alphaTest || 0,
-                        depthTest: true,
-                        depthWrite: true
-                      });
-                      basic.userData.originalColor = basic.color.getHex();
-                      m.dispose();
-                      return basic;
-                    });
-                    child.material = Array.isArray(child.material) ? basicMaterials : basicMaterials[0];
-                  }
-                }
-              });
-
-              group.add(gltf.scene);
-
-              if (rendererRef.current && sceneRef.current && cameraRef.current) {
-                rendererRef.current.render(sceneRef.current, cameraRef.current);
-              }
-            },
-            undefined,
-            (err) => {
-              console.error('[Sketchfab] GLTF load error:', err);
-              setLoadingModelId(null);
-              cleanup();
-            }
-          );
-        })
-        .catch(err => {
-          console.error("Failed to load Sketchfab model:", err);
-          setLoadingModelId(null);
-        });
-
+      }
     } else {
       const mesh = createFurniture(itemData.type, itemData.color);
-      // createFurniture models might already be centered or bottom-aligned. 
       group.add(mesh);
     }
     
@@ -363,38 +333,62 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
 
   // Handle ghost mesh for placement
   useEffect(() => {
+    let isActive = true;
+
     if (placementModeItem && sceneRef.current) {
       if (ghostRef.current) {
         sceneRef.current.remove(ghostRef.current);
+        ghostRef.current = null;
       }
       
-      if (placementModeItem.isPolyHaven) {
-        const w = (placementModeItem.dimensions?.[0] || 1000) * 0.001;
-        const h = (placementModeItem.dimensions?.[1] || 1000) * 0.001;
-        const d = (placementModeItem.dimensions?.[2] || 1000) * 0.001;
-        const boxGeo = new THREE.BoxGeometry(w, h, d);
-        const boxMat = new THREE.MeshStandardMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5, wireframe: true });
-        ghostRef.current = new THREE.Mesh(boxGeo, boxMat);
-        // We want the bottom of the box to sit on the cursor
-        ghostRef.current.geometry.translate(0, h / 2, 0); 
-      } else {
-        ghostRef.current = createFurniture(placementModeItem.type, placementModeItem.color);
-        // Make it semi-transparent
+      const setupGhost = async () => {
+        let modelScene = null;
+        if (placementModeItem.isPolyHaven || placementModeItem.isSketchfab) {
+           setLoadingModelId(placementModeItem.id);
+           try {
+             const scene = await load3DModel({
+                isPolyHaven: !!placementModeItem.isPolyHaven,
+                isSketchfab: !!placementModeItem.isSketchfab,
+                polyHavenId: placementModeItem.isPolyHaven ? placementModeItem.id : undefined,
+                sketchfabId: placementModeItem.isSketchfab ? placementModeItem.id : undefined,
+             });
+             if (isActive && scene) {
+                modelScene = scene.clone();
+             }
+           } catch(e) {
+             console.error("Ghost load failed", e);
+           } finally {
+             if (isActive) setLoadingModelId(null);
+           }
+        } else {
+           modelScene = createFurniture(placementModeItem.type, placementModeItem.color);
+        }
+
+        if (!isActive || !modelScene) return;
+        
+        ghostRef.current = modelScene;
         ghostRef.current.traverse(child => {
-          if (child.isMesh) {
-            child.material = child.material.clone();
-            child.material.transparent = true;
-            child.material.opacity = 0.5;
+          if (child.isMesh && child.material) {
+            child.material = Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone();
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach(m => {
+               m.transparent = true;
+               m.opacity = 0.5;
+            });
           }
         });
-      }
-      // Rotate the ghost mesh 90 degrees on X to stand it up in a Z-up scene
-      ghostRef.current.rotation.set(Math.PI / 2, 0, 0);
-      sceneRef.current.add(ghostRef.current);
+        
+        ghostRef.current.rotation.set(Math.PI / 2, 0, 0);
+        sceneRef.current.add(ghostRef.current);
+      };
+      
+      setupGhost();
     } else if (!placementModeItem && ghostRef.current && sceneRef.current) {
       sceneRef.current.remove(ghostRef.current);
       ghostRef.current = null;
     }
+
+    return () => { isActive = false; };
   }, [placementModeItem, sceneRef]);
 
   // Mouse move for ghost placement
@@ -414,6 +408,41 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
       if (intersects.length > 0 && ghostRef.current) {
         ghostRef.current.position.copy(intersects[0].point);
         ghostRef.current.visible = true;
+
+        ghostRef.current.updateMatrixWorld();
+        const ghostBox = new THREE.Box3().setFromObject(ghostRef.current);
+        const size = new THREE.Vector3();
+        ghostBox.getSize(size);
+        ghostBox.expandByVector(size.multiplyScalar(-0.1));
+
+        let collided = false;
+        if (stagedGroupRef.current) {
+          for (const otherObj of stagedGroupRef.current.children) {
+            if (!otherObj.userData.isStagedItem) continue;
+            const otherBox = new THREE.Box3().setFromObject(otherObj);
+            const otherSize = new THREE.Vector3();
+            otherBox.getSize(otherSize);
+            otherBox.expandByVector(otherSize.multiplyScalar(-0.1));
+            
+            if (ghostBox.intersectsBox(otherBox)) {
+              collided = true;
+              break;
+            }
+          }
+        }
+        
+        ghostRef.current.userData.collided = collided;
+        ghostRef.current.traverse(child => {
+           if (child.isMesh && child.material) {
+              if (collided) {
+                 child.material.color.setHex(0xff0000);
+                 child.material.opacity = 0.8;
+              } else {
+                 child.material.color.setHex(0x00ff00);
+                 child.material.opacity = 0.5;
+              }
+           }
+        });
       } else if (ghostRef.current) {
         ghostRef.current.visible = false;
       }
@@ -460,6 +489,46 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
     const onChange = () => {
       const obj = transformControlRef.current.object;
       if (obj) {
+        // --- Collision Detection ---
+        if (lastValidTransformRef.current && stagedGroupRef.current) {
+          obj.updateMatrixWorld();
+          const activeBox = new THREE.Box3().setFromObject(obj);
+          
+          const size = new THREE.Vector3();
+          activeBox.getSize(size);
+          activeBox.expandByVector(size.multiplyScalar(-0.1)); // Shrink 10%
+
+          let collided = false;
+          for (const otherObj of stagedGroupRef.current.children) {
+            if (otherObj === obj || !otherObj.userData.isStagedItem) continue;
+
+            const otherBox = new THREE.Box3().setFromObject(otherObj);
+            const otherSize = new THREE.Vector3();
+            otherBox.getSize(otherSize);
+            otherBox.expandByVector(otherSize.multiplyScalar(-0.1));
+
+            if (activeBox.intersectsBox(otherBox)) {
+              collided = true;
+              break;
+            }
+          }
+
+          if (collided) {
+            // Revert transform
+            obj.position.copy(lastValidTransformRef.current.position);
+            obj.rotation.copy(lastValidTransformRef.current.rotation);
+            obj.scale.copy(lastValidTransformRef.current.scale);
+            obj.updateMatrixWorld();
+            return; // Don't trigger state update
+          } else {
+            // Update valid transform
+            lastValidTransformRef.current.position.copy(obj.position);
+            lastValidTransformRef.current.rotation.copy(obj.rotation);
+            lastValidTransformRef.current.scale.copy(obj.scale);
+          }
+        }
+        // --- End Collision Detection ---
+
         setStagedItems(prev => prev.map(item => {
           if (item.id === obj.userData.id) {
             return {
@@ -492,13 +561,18 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
 
     // 1. Placement Mode
     if (placementModeItem) {
+      if (ghostRef.current && ghostRef.current.userData.collided) {
+        return true; // Block placement, consume event
+      }
       if (modelRef.current) {
         const intersects = raycasterRef.current.intersectObject(modelRef.current, true);
         if (intersects.length > 0) {
           const newItem = {
             id: `item_${Date.now()}`,
-            isPolyHaven: placementModeItem.isPolyHaven,
-            polyHavenId: placementModeItem.id, // from Poly Haven JSON
+            isPolyHaven: !!placementModeItem.isPolyHaven,
+            isSketchfab: !!placementModeItem.isSketchfab,
+            polyHavenId: placementModeItem.isPolyHaven ? placementModeItem.id : undefined,
+            sketchfabId: placementModeItem.isSketchfab ? placementModeItem.id : undefined,
             dimensions: placementModeItem.dimensions,
             type: placementModeItem.type,
             color: placementModeItem.color,

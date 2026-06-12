@@ -66,7 +66,7 @@ const FurnitureCatalog = ({ onSelectFurniture, isPlacementMode }) => {
         isSketchfab: true,
         id: model.uid,
         name: model.name,
-        category: 'sketchfab', // Sketchfab search is keyword based, no strict categories
+        category: 'sketchfab',
         thumbnail: model.thumbnails?.images?.[0]?.url || '',
         author: model.user?.username
       }));
@@ -88,68 +88,56 @@ const FurnitureCatalog = ({ onSelectFurniture, isPlacementMode }) => {
     }
   };
 
-
   const currentCatalog = source === 'Local' ? localCatalog : source === 'Poly Haven' ? polyCatalog : sketchfabCatalog;
   const categories = source === 'Sketchfab' ? [] : ['All', ...new Set(currentCatalog.map(item => item.category))];
   const filteredCatalog = activeCategory === 'All' ? currentCatalog : currentCatalog.filter(item => item.category === activeCategory);
 
   return (
-    <div className={`furniture-catalog ${isOpen ? 'open' : 'closed'}`}>
-      <button className="toggle-btn" onClick={() => setIsOpen(!isOpen)}>
-        {isOpen ? '◀' : '▶'} Catalog
-      </button>
-
+    <div className={`catalog-panel ${isOpen ? 'open' : 'closed'}`}>
       {isOpen && (
-        <div className="catalog-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <h2>Furniture Catalog</h2>
+        <div className="catalog-content">
+          {/* Header */}
+          <div className="catalog-header">
+            <h3 className="tool-section-title">Objects Catalog</h3>
 
-          <div style={{ display: 'flex', gap: '5px', marginBottom: '15px' }}>
-            <button
-              style={{ flex: 1, padding: '5px', background: source === 'Local' ? '#555' : '#333', color: 'white', border: '1px solid #666', cursor: 'pointer' }}
-              onClick={() => setSource('Local')}
-            >
-              Local
-            </button>
-            <button
-              style={{ flex: 1, padding: '5px', background: source === 'Poly Haven' ? '#555' : '#333', color: 'white', border: '1px solid #666', cursor: 'pointer' }}
-              onClick={() => setSource('Poly Haven')}
-            >
-              Poly Haven
-            </button>
-            <button
-              style={{ flex: 1, padding: '5px', background: source === 'Sketchfab' ? '#555' : '#333', color: 'white', border: '1px solid #666', cursor: 'pointer' }}
-              onClick={() => setSource('Sketchfab')}
-            >
-              Sketchfab
-            </button>
+            {/* Source Tabs */}
+            <div className="catalog-source-tabs">
+              {['Local', 'Poly Haven', 'Sketchfab'].map(s => (
+                <button
+                  key={s}
+                  className={`catalog-source-tab ${source === s ? 'active' : ''}`}
+                  onClick={() => setSource(s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* Sketchfab Search */}
           {source === 'Sketchfab' && (
-            <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', gap: '5px' }}>
-                  <input 
-                    type="text" 
-                    value={sfSearchQuery}
-                    onChange={e => setSfSearchQuery(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleSfSearch(false)}
-                    placeholder="Search modern furniture..."
-                    style={{ flex: 1, padding: '5px', background: '#222', color: 'white', border: '1px solid #444' }}
-                  />
-                  <button onClick={() => handleSfSearch(false)} style={{ padding: '5px 10px', background: '#2196F3', color: 'white', border: 'none', cursor: 'pointer' }}>Search</button>
-                </div>
+            <div className="catalog-sf-panel">
+              <div className="catalog-sf-search">
+                <input 
+                  type="text" 
+                  value={sfSearchQuery}
+                  onChange={e => setSfSearchQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSfSearch(false)}
+                  placeholder="Search models..."
+                />
+                <button className="catalog-sf-search-btn" onClick={() => handleSfSearch(false)}>Search</button>
               </div>
             </div>
           )}
 
-          {source !== 'Sketchfab' && (
-            <div className="category-tabs" style={{ display: 'flex', overflowX: 'auto', paddingBottom: '10px', marginBottom: '10px' }}>
+          {/* Category Tabs */}
+          {source !== 'Sketchfab' && categories.length > 1 && (
+            <div className="catalog-category-tabs">
               {categories.map(cat => (
                 <button
                   key={cat}
-                  className={`tab-btn ${activeCategory === cat ? 'active' : ''}`}
+                  className={`catalog-category-tab ${activeCategory === cat ? 'active' : ''}`}
                   onClick={() => setActiveCategory(cat)}
-                  style={{ flexShrink: 0, marginRight: '5px' }}
                 >
                   {cat}
                 </button>
@@ -157,75 +145,54 @@ const FurnitureCatalog = ({ onSelectFurniture, isPlacementMode }) => {
             </div>
           )}
 
-          <div className="item-grid" style={{ overflowY: 'auto', flex: 1, paddingRight: '10px' }}>
-            {isLoading && !sfCursor && <div style={{ textAlign: 'center', padding: '20px' }}>Loading...</div>}
+          {/* Scrollable Items */}
+          <div className="catalog-items">
+            {isLoading && !sfCursor && (
+              <div className="catalog-loading">Loading models...</div>
+            )}
 
             {(!isLoading || sfCursor) && filteredCatalog.map(item => (
-              <div key={item.id} className="item-card" style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px' }}>
+              <div key={item.id} className="catalog-card">
                 {(item.isPolyHaven || item.isSketchfab) ? (
-                  <div 
-                    className="item-preview" 
-                    id={`preview-${item.id}`}
-                    style={{ position: 'relative', height: '120px', width: '100%', borderRadius: '4px', marginBottom: '10px', backgroundColor: '#1a1a2e', overflow: 'hidden' }}
-                  >
+                  <div className="catalog-card-preview">
                     <img
-                      id={`img-${item.id}`}
                       src={item.thumbnail}
                       alt={item.name}
                       referrerPolicy="no-referrer"
-                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
                       onError={(e) => {
                         e.target.style.display = 'none';
-                        e.target.parentElement.innerHTML = '<div style="color:red;font-size:12px;padding:10px;text-align:center;">Image blocked</div>';
                       }}
                     />
-                    {/* Diagnostic Test Button - Only show on hover for debugging */}
-                    <button 
-                      style={{ position: 'absolute', bottom: 0, right: 0, fontSize: '10px', opacity: 0.5 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const container = document.getElementById(`preview-${item.id}`);
-                        const img = document.getElementById(`img-${item.id}`);
-                        console.log(`[Diagnostic] ${item.name}:`);
-                        console.log(`Container: height=${container.offsetHeight}px, clientHeight=${container.clientHeight}px`);
-                        console.log(`Image: height=${img.offsetHeight}px, clientHeight=${img.clientHeight}px, natural=${img.naturalHeight}px`);
-                      }}
-                    >
-                      Test
-                    </button>
                   </div>
                 ) : (
                   <div
-                    className="item-preview"
-                    style={{ backgroundColor: item.color, height: '120px', borderRadius: '4px', marginBottom: '10px' }}
+                    className="catalog-card-preview"
+                    style={{ backgroundColor: item.color }}
                     title={`${item.name} (${item.type})`}
-                  ></div>
+                  />
                 )}
 
-                <div className="item-info" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span className="item-name" style={{ fontSize: '14px', fontWeight: 'bold' }}>{item.name}</span>
-                      {item.author && <span style={{ fontSize: '10px', color: '#888' }}>by {item.author}</span>}
-                    </div>
-                    <button
-                      className={`place-btn ${isPlacementMode ? 'disabled' : ''}`}
-                      onClick={() => onSelectFurniture(item)}
-                      disabled={isPlacementMode}
-                      style={{ padding: '5px 10px', background: '#2196F3', color: 'white', border: 'none', borderRadius: '4px', cursor: isPlacementMode ? 'not-allowed' : 'pointer', opacity: isPlacementMode ? 0.5 : 1, flexShrink: 0, marginLeft: '10px' }}
-                    >
-                      Place
-                    </button>
+                <div className="catalog-card-info">
+                  <div className="catalog-card-meta">
+                    <span className="catalog-card-name">{item.name}</span>
+                    {item.author && <span className="catalog-card-author">by {item.author}</span>}
                   </div>
+                  <button
+                    className={`catalog-place-btn ${isPlacementMode ? 'disabled' : ''}`}
+                    onClick={() => onSelectFurniture(item)}
+                    disabled={isPlacementMode}
+                  >
+                    Place
+                  </button>
                 </div>
               </div>
             ))}
 
             {source === 'Sketchfab' && sfHasMore && (
               <button 
+                className="catalog-load-more"
                 onClick={() => handleSfSearch(true)}
                 disabled={isLoading}
-                style={{ width: '100%', padding: '10px', background: '#333', color: 'white', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', marginBottom: '20px' }}
               >
                 {isLoading ? 'Loading...' : 'Load More'}
               </button>

@@ -276,21 +276,27 @@ function StudioContent() {
           body: JSON.stringify({ fileName })
         });
         
-        if (presignRes.ok) {
-          const { url } = await presignRes.json();
-          // 2. Upload to MinIO
-          await fetch(url, {
-            method: 'PUT',
-            body: blob,
-            headers: { 'Content-Type': 'image/jpeg' }
-          });
-          
-          panoramasToSave.push({
-            scanId,
-            face,
-            imageUrl: `inspections/${id}/${fileName}` // Relative path used by useTourData
-          });
+        if (!presignRes.ok) {
+          throw new Error(`Failed to get upload URL for ${fileName}`);
         }
+        
+        const { url } = await presignRes.json();
+        // 2. Upload to MinIO
+        const uploadRes = await fetch(url, {
+          method: 'PUT',
+          body: blob,
+          headers: { 'Content-Type': 'image/jpeg' }
+        });
+        
+        if (!uploadRes.ok) {
+          throw new Error(`Failed to upload to MinIO for ${fileName}`);
+        }
+        
+        panoramasToSave.push({
+          scanId,
+          face,
+          imageUrl: `inspections/${id}/${fileName}` // Relative path used by useTourData
+        });
         
         uploadCount++;
         setBakeProgress(uploadCount / bakedTexturesMap.size);
