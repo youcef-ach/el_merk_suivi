@@ -61,5 +61,23 @@
     "isLocalModel": true,
     "modelUrl": "/furniture/models/flame_pipe.glb",
     "thumbnail": "/furniture/thumbnails/flame_pipe.png"
+  },
+  {
+    "id": "centrifugal_pump",
+    "name": "Centrifugal Pump",
+    "category": "industrial",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/centrifugal_pump__bomba_centrifuga.glb",
+    "thumbnail": "/furniture/thumbnails/centrifugal_pump.png"
+  },
+  {
+    "id": "steam_condensate_trap",
+    "name": "Steam Condensate Trap",
+    "category": "industrial",
+    "type": "model",
+    "isLocalModel": true,
+    "modelUrl": "/furniture/models/steam_condensate_trap__trampa_de_condensado.glb",
+    "thumbnail": "/furniture/thumbnails/steam_condensate_trap.png"
   }
 ]
