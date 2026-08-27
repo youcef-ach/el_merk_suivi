@@ -41,6 +41,7 @@ import {
   Cpu
 } from 'lucide-react';
 import './engine.css';
+import { API_URL } from '../config/api';
 
 export function meta() {
   return [{ title: "3D Digital Twin Engine | Photogrammetry GIS Viewer" }];
@@ -289,7 +290,7 @@ export default function EnginePage() {
   // Fetch Inspection details
   useEffect(() => {
     const token = localStorage.getItem('access_token');
-    fetch(`http://localhost:3000/api/inspections/${id}`, {
+    fetch(`${API_URL}/inspections/${id}`, {
       headers: token ? { 'Authorization': `Bearer ${token}` } : {}
     })
       .then(res => res.json())
@@ -518,7 +519,7 @@ export default function EnginePage() {
     if (!token || !id) return;
 
     try {
-      await fetch(`http://localhost:3000/api/inspections/${id}/survey/cross-sections`, {
+      await fetch(`${API_URL}/inspections/${id}/survey/cross-sections`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

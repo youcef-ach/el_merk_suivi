@@ -9,6 +9,7 @@ import { createTagSpriteMaterial } from './useTags';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { TilesetEngine } from '../utils/TilesetEngine';
 import { OrthomosaicLayer } from '../utils/OrthomosaicLayer';
+import { API_URL, MINIO_URL } from '../config/api';
 
 // Inject BVH methods into Three.js prototypes
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -55,7 +56,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
       try {
         const token = localStorage.getItem('access_token');
-        const res = await fetch(`http://localhost:3000/api/inspections/${tourId}`, {
+        const res = await fetch(`${API_URL}/inspections/${tourId}`, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
 
@@ -72,28 +73,28 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
         if (tour.tilesetUrl) {
           tilesetUrl = tour.tilesetUrl.startsWith('http') 
             ? tour.tilesetUrl 
-            : `http://localhost:9000/virtual-inspections/${tour.tilesetUrl}`;
+            : `${MINIO_URL}/virtual-inspections/${tour.tilesetUrl}`;
         }
 
         // Traditional GLB model
         if (tour.glbModelUrl) {
           glbUrl = tour.glbModelUrl.startsWith('http')
             ? tour.glbModelUrl
-            : `http://localhost:9000/virtual-inspections/${tour.glbModelUrl}`;
+            : `${MINIO_URL}/virtual-inspections/${tour.glbModelUrl}`;
         }
 
         // Orthomosaic / Orthoprojection
         if (tour.orthoUrl) {
           orthoUrl = tour.orthoUrl.startsWith('http')
             ? tour.orthoUrl
-            : `http://localhost:9000/virtual-inspections/${tour.orthoUrl}`;
+            : `${MINIO_URL}/virtual-inspections/${tour.orthoUrl}`;
         }
 
         // Scan telemetry mapping for 360 red rings
         if (tour.scansJsonUrl) {
           jsonUrl = tour.scansJsonUrl.startsWith('http')
             ? tour.scansJsonUrl
-            : `http://localhost:9000/virtual-inspections/${tour.scansJsonUrl}`;
+            : `${MINIO_URL}/virtual-inspections/${tour.scansJsonUrl}`;
         }
 
         if (tour.tags && tour.tags.length > 0) tourTags = tour.tags;
@@ -343,7 +344,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
     const loadPromises = faces.map((face, index) => {
       const bakedFace = baked?.find(b => b.face === face);
-      let url = bakedFace ? bakedFace.imageUrl : `http://localhost:9000/virtual-inspections/${tourId}/panoramas/${scanId}_${face}.jpg`;
+      let url = bakedFace ? bakedFace.imageUrl : `${MINIO_URL}/virtual-inspections/${tourId}/panoramas/${scanId}_${face}.jpg`;
       
       return new Promise((resolve) => {
         texLoader.load(

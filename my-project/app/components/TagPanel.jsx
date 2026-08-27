@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { iconMap } from '../hooks/useTags';
 import './TagPanel.css';
+import { MINIO_URL } from '../config/api';
 
 /**
  * TagPanel — Slide-in overlay panel for editing a selected tag's info + uploading media.
@@ -76,7 +77,7 @@ export default function TagPanel({ tag, onUpdate, onUploadDocument, onDeleteDocu
   };
 
   const mediaPreviewUrl = tag.mediaUrl
-    ? `http://localhost:9000/virtual-tours/${tag.mediaUrl}`
+    ? `${MINIO_URL}/virtual-tours/${tag.mediaUrl}`
     : null;
 
   const isPdf = tag.mediaUrl?.endsWith('.pdf');

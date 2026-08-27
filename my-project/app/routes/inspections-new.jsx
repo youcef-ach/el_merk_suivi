@@ -27,6 +27,7 @@ import {
   FolderOpen
 } from 'lucide-react';
 import './new-inspection.css';
+import { API_URL, MINIO_URL } from '../config/api';
 
 export function meta() {
   return [
@@ -107,7 +108,7 @@ function NewInspectionContent() {
       if (data.flightAltitude && !isNaN(parseFloat(data.flightAltitude))) payload.flightAltitude = parseFloat(data.flightAltitude);
       if (data.coordinateSystem && data.coordinateSystem.trim()) payload.coordinateSystem = data.coordinateSystem.trim();
 
-      const response = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections`, {
+      const response = await fetch(`${API_URL}/projects/${projectId}/inspections`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -131,7 +132,7 @@ function NewInspectionContent() {
     const token = localStorage.getItem('access_token');
     const fileName = overrideFileName || file.name;
 
-    const presignRes = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}/upload-url`, {
+    const presignRes = await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/upload-url`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -194,7 +195,7 @@ function NewInspectionContent() {
             setUploadStatusText('Uploading 3D Tileset bundle (.zip)...');
             await uploadFileToMinio(inspectionId, tilesetFile, 'tileset.zip');
             setUploadStatusText('Extracting 3D Tileset LODs on server...');
-            const procRes = await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}/process-tileset`, {
+            const procRes = await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-tileset`, {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -204,7 +205,7 @@ function NewInspectionContent() {
           } else {
             setUploadStatusText('Uploading 3D Tileset...');
             await uploadFileToMinio(inspectionId, tilesetFile, `tileset_${tilesetFile.name}`);
-            await fetch(`http://localhost:3000/api/inspections/${inspectionId}/survey/meta`, {
+            await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
               body: JSON.stringify({ tilesetUrl: `inspections/${inspectionId}/tileset_${tilesetFile.name}` })
@@ -219,7 +220,7 @@ function NewInspectionContent() {
         tasks.push((async () => {
           setUploadStatusText('Uploading Orthoprojection...');
           await uploadFileToMinio(inspectionId, orthoFile, `ortho_${orthoFile.name}`);
-          await fetch(`http://localhost:3000/api/inspections/${inspectionId}/survey/meta`, {
+          await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ orthoUrl: `inspections/${inspectionId}/ortho_${orthoFile.name}` })
@@ -233,7 +234,7 @@ function NewInspectionContent() {
         tasks.push((async () => {
           setUploadStatusText('Uploading DSM elevation model...');
           await uploadFileToMinio(inspectionId, dsmFile, `dsm_${dsmFile.name}`);
-          await fetch(`http://localhost:3000/api/inspections/${inspectionId}/survey/meta`, {
+          await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ dsmUrl: `inspections/${inspectionId}/dsm_${dsmFile.name}` })
@@ -247,13 +248,13 @@ function NewInspectionContent() {
         tasks.push((async () => {
           setUploadStatusText('Attaching RealityScan report...');
           await uploadFileToMinio(inspectionId, reportFile, `reports/${reportFile.name}`);
-          await fetch(`http://localhost:3000/api/inspections/${inspectionId}/survey/reports`, {
+          await fetch(`${API_URL}/inspections/${inspectionId}/survey/reports`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({
               title: `RealityScan Report (${reportFile.name})`,
               reportType: 'ALIGNMENT',
-              fileUrl: `http://localhost:9000/virtual-inspections/${inspectionId}/reports/${reportFile.name}`
+              fileUrl: `${MINIO_URL}/virtual-inspections/${inspectionId}/reports/${reportFile.name}`
             })
           });
           incrementProgress('Report linked');
@@ -265,7 +266,7 @@ function NewInspectionContent() {
         tasks.push((async () => {
           setUploadStatusText('Uploading GLB model...');
           await uploadFileToMinio(inspectionId, glbFile, 'ultimate_final.glb');
-          await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
+          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
           });
@@ -279,7 +280,7 @@ function NewInspectionContent() {
           setUploadStatusText('Processing 360 scan coordinate mapping...');
           const mpText = await jsonFile.text();
           const rcText = await rcJsonFile.text();
-          await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
+          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ mpData: JSON.parse(mpText), rcData: JSON.parse(rcText) })
@@ -296,7 +297,7 @@ function NewInspectionContent() {
       if (thumbnailFile) {
         tasks.push((async () => {
           await uploadFileToMinio(inspectionId, thumbnailFile, `thumb_${thumbnailFile.name}`);
-          await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}`, {
+          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ thumbnailUrl: `inspections/${inspectionId}/thumb_${thumbnailFile.name}` })
@@ -310,7 +311,7 @@ function NewInspectionContent() {
         tasks.push((async () => {
           setUploadStatusText('Uploading Site Tour video...');
           await uploadFileToMinio(inspectionId, videoFile, `video_${videoFile.name}`);
-          await fetch(`http://localhost:3000/api/projects/${projectId}/inspections/${inspectionId}`, {
+          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ videoUrl: `inspections/${inspectionId}/video_${videoFile.name}` })

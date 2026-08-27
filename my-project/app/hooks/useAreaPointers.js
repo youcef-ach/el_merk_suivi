@@ -1,8 +1,7 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { createAreaPointerGroup, updateAreaWalls } from '../utils/createAreaPointerGraphics';
-
-const API = 'http://localhost:3000/api';
+import { API_URL as API } from '../config/api';
 
 export const useAreaPointers = (viewerRef, tourId) => {
   const [areaPointers, setAreaPointers] = useState([]);

@@ -5,6 +5,7 @@ import { useThreeScene } from '../hooks/useThreeScene';
 import { useTourData } from '../hooks/useTourData';
 import { executeFlightAnimation, toggleBoxFading, toggleModelFading } from '../utils/tourAnimations';
 import { useStaging } from '../hooks/useStaging';
+import { API_URL, MINIO_URL } from '../config/api';
 
 const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect, onPointerDragStart, onPointerDragMove, onPointerDragEnd, volumeMode, onVolumeClick }, ref) => {
   // --- Persistent dummy texture to prevent shader recompilation lag ---
@@ -495,7 +496,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
             const tagId = hitSprite.userData.tagId;
             // Fetch tag info from backend
             const token = localStorage.getItem('access_token');
-            fetch(`http://localhost:3000/api/inspections/${tourId}`, {
+            fetch(`${API_URL}/inspections/${tourId}`, {
               headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             })
               .then(r => r.json())
@@ -1065,7 +1066,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
                 {activeTagInfo.documents.map(doc => (
                   <a
                     key={doc.id}
-                    href={`http://localhost:9000/virtual-tours/${doc.fileUrl}`}
+                    href={`${MINIO_URL}/virtual-tours/${doc.fileUrl}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{

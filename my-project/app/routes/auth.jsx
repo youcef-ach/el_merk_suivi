@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import './auth.css';
+import { API_URL } from '../config/api';
 
 export function meta() {
   return [
@@ -48,7 +49,7 @@ export default function AuthPage() {
     setApiError('');
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:3000/api/auth/login', {
+      const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: data.email, password: data.password }),
@@ -70,7 +71,7 @@ export default function AuthPage() {
     setApiError('');
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:3000/api/auth/register-enterprise', {
+      const response = await fetch(`${API_URL}/auth/register-enterprise`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,7 +1,7 @@
-FROM node:20-alpine
+FROM node:20-bookworm
 WORKDIR /app
-RUN apk add --no-cache openssl
 COPY package*.json ./
+COPY prisma ./prisma/
 RUN npm install
 COPY . .
 RUN npx prisma generate

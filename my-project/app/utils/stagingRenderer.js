@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MINIO_URL } from '../config/api';
 
 const FACES = ['py', 'pz', 'px', 'nz', 'nx', 'ny'];
 
@@ -306,7 +307,7 @@ export async function bakeStaging(scene, renderer, scansData, stagedGroup, model
       
       // Composite over original image
       const baseUrl = tourId
-        ? `http://localhost:9000/virtual-inspections/inspections/${tourId}/`
+        ? `${MINIO_URL}/virtual-inspections/inspections/${tourId}/`
         : `/`;
       const bgSrc = `${baseUrl}images/${scan.id}_${faceName}.jpg`;
       const finalBlob = await compositeImages(bgSrc, fgBlob, faceName);

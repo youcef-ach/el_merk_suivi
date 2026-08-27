@@ -30,6 +30,7 @@ import {
   Box
 } from 'lucide-react';
 import './studio.css';
+import { API_URL, MINIO_URL } from '../config/api';
 
 export function meta() {
   return [{ title: "Drone Survey Studio | VirtualTwin SaaS" }];
@@ -88,7 +89,7 @@ function StudioContent() {
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      const res = await fetch(`http://localhost:3000/api/inspections/${id}`, {
+      const res = await fetch(`${API_URL}/inspections/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -307,7 +308,7 @@ function StudioContent() {
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      const res = await fetch(`http://localhost:3000/api/inspections/${id}/survey/cross-sections`, {
+      const res = await fetch(`${API_URL}/inspections/${id}/survey/cross-sections`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -328,7 +329,7 @@ function StudioContent() {
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      const res = await fetch(`http://localhost:3000/api/inspections/${id}/survey/measurements`, {
+      const res = await fetch(`${API_URL}/inspections/${id}/survey/measurements`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -349,7 +350,7 @@ function StudioContent() {
     if (!token) return;
 
     // 1. Get presigned upload URL
-    const presignRes = await fetch(`http://localhost:3000/api/inspections/${id}/upload-url`, {
+    const presignRes = await fetch(`${API_URL}/inspections/${id}/upload-url`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -364,7 +365,7 @@ function StudioContent() {
     await fetch(presignedUrl, { method: 'PUT', body: file });
 
     // 3. Register Report in Backend
-    const regRes = await fetch(`http://localhost:3000/api/inspections/${id}/survey/reports`, {
+    const regRes = await fetch(`${API_URL}/inspections/${id}/survey/reports`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -373,7 +374,7 @@ function StudioContent() {
       body: JSON.stringify({
         title,
         reportType,
-        fileUrl: `http://localhost:9000/virtual-inspections/${id}/reports/${file.name}`
+        fileUrl: `${MINIO_URL}/virtual-inspections/${id}/reports/${file.name}`
       })
     });
     if (regRes.ok) {
@@ -388,7 +389,7 @@ function StudioContent() {
     if (!name) return;
     const token = localStorage.getItem('access_token');
     try {
-      const res = await fetch(`http://localhost:3000/api/inspections/${id}/staging-profiles`, {
+      const res = await fetch(`${API_URL}/inspections/${id}/staging-profiles`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -409,7 +410,7 @@ function StudioContent() {
     const token = localStorage.getItem('access_token');
     try {
       const items = viewerRef.current.staging.getStagedItemsData();
-      await fetch(`http://localhost:3000/api/inspections/${id}/staging-profiles/${activeProfileId}/items`, {
+      await fetch(`${API_URL}/inspections/${id}/staging-profiles/${activeProfileId}/items`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

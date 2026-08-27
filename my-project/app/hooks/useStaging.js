@@ -4,8 +4,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createFurniture } from '../utils/furnitureFactory';
 import { getSketchfabDownloadUrl, downloadAndExtractSketchfabGltf } from '../utils/sketchfabService';
-
-const API = 'http://localhost:3000/api';
+import { API_URL as API } from '../config/api';
 
 export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelRef, isDataLoaded, tourId, activeProfileId) => {
   const getToken = () => localStorage.getItem('access_token');

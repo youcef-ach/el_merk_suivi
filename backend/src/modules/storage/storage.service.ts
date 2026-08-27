@@ -6,40 +6,70 @@ import * as Minio from 'minio';
 export class StorageService implements OnModuleInit {
   private minioClient: Minio.Client;
 
+  /** The internal MinIO origin that appears in presigned URLs (e.g. "http://minio:9000"). */
+  private internalOrigin: string;
+
+  /** The public origin to replace it with (e.g. "http://197.140.41.131"). */
+  private publicOrigin: string;
+
   constructor(private configService: ConfigService) {
+    const endpoint = this.configService.get<string>('MINIO_ENDPOINT', 'localhost');
+    const port = parseInt(this.configService.get<string>('MINIO_PORT', '9000'), 10);
+    const useSSL = this.configService.get<string>('MINIO_USE_SSL') === 'true';
+
     this.minioClient = new Minio.Client({
-      endPoint: this.configService.get<string>('MINIO_ENDPOINT', 'localhost'),
-      port: parseInt(this.configService.get<string>('MINIO_PORT', '9000'), 10),
-      useSSL: this.configService.get<string>('MINIO_USE_SSL') === 'true',
+      endPoint: endpoint,
+      port,
+      useSSL,
       accessKey: this.configService.get<string>('MINIO_ACCESS_KEY', 'minioadmin'),
       secretKey: this.configService.get<string>('MINIO_SECRET_KEY', 'minioadmin'),
     });
+
+    // Build the internal origin string that will appear in presigned URLs
+    const scheme = useSSL ? 'https' : 'http';
+    this.internalOrigin = `${scheme}://${endpoint}:${port}`;
+
+    // Build the public origin – if not set, presigned URLs are returned as-is
+    const publicEndpoint = this.configService.get<string>('MINIO_PUBLIC_ENDPOINT');
+    if (publicEndpoint) {
+      const publicPort = this.configService.get<string>('MINIO_PUBLIC_PORT', '80');
+      const publicSSL = this.configService.get<string>('MINIO_PUBLIC_SSL') === 'true';
+      const publicScheme = publicSSL ? 'https' : 'http';
+      // Omit :80 for http and :443 for https (standard ports)
+      const portSuffix = (publicPort === '80' && !publicSSL) || (publicPort === '443' && publicSSL)
+        ? ''
+        : `:${publicPort}`;
+      this.publicOrigin = `${publicScheme}://${publicEndpoint}${portSuffix}`;
+    } else {
+      this.publicOrigin = this.internalOrigin; // no rewrite
+    }
   }
 
   async onModuleInit() {
+    console.log(`[StorageService] Internal Origin: ${this.internalOrigin}`);
+    console.log(`[StorageService] Public Origin: ${this.publicOrigin}`);
     await this.ensureBucketExists('virtual-tours');
     await this.ensureBucketExists('virtual-inspections');
   }
 
   /**
    * Generates a pre-signed URL for uploading a file directly to MinIO.
-   * By default, it grants 1 hour (3600 seconds) for the client to perform a PUT request.
-   * 
-   * @param bucket - The target bucket name (e.g., 'virtual-tours').
-   * @param fileName - Target filename/path inside the bucket.
-   * @returns Pre-signed URL string.
+   * The internal hostname is replaced with the public-facing one so
+   * browsers can reach it through the Nginx reverse proxy.
    */
   async getPresignedPutUrl(bucket: string, fileName: string): Promise<string> {
     try {
-      return await this.minioClient.presignedPutObject(bucket, fileName, 3600);
+      const url = await this.minioClient.presignedPutObject(bucket, fileName, 3600);
+      // Replace http://minio:9000 → http://197.140.41.131
+      return url.replace(this.internalOrigin, this.publicOrigin);
     } catch (error) {
+      console.error('getPresignedPutUrl error:', error);
       throw new InternalServerErrorException(`Failed to generate presigned URL: ${error.message}`);
     }
   }
 
   /**
-   * (Optional Utility) Checks if bucket exists, creating it if necessary.
-   * Normally handled via docker-compose init, but good as a fallback.
+   * Checks if bucket exists, creating it if necessary.
    */
   async ensureBucketExists(bucket: string): Promise<void> {
     try {
@@ -68,11 +98,6 @@ export class StorageService implements OnModuleInit {
 
   /**
    * Uploads a buffer directly to MinIO.
-   * 
-   * @param bucket - The target bucket name.
-   * @param fileName - Target filename/path inside the bucket.
-   * @param buffer - The file buffer.
-   * @param contentType - The MIME type of the file.
    */
   async uploadBuffer(bucket: string, fileName: string, buffer: Buffer, contentType: string = 'application/octet-stream'): Promise<void> {
     try {

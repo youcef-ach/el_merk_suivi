@@ -6,37 +6,37 @@ export declare class EnterprisesService {
     constructor(prisma: PrismaService);
     create(createEnterpriseDto: CreateEnterpriseDto): Promise<{
         id: string;
-        createdAt: Date;
         name: string;
+        createdAt: Date;
     }>;
     findAll(): Promise<{
         id: string;
-        createdAt: Date;
         name: string;
+        createdAt: Date;
     }[]>;
     findOne(id: string): Promise<{
         id: string;
-        createdAt: Date;
         name: string;
+        createdAt: Date;
     }>;
     addMember(dto: AddMemberDto, callerEnterpriseId: string): Promise<{
         id: string;
+        createdAt: Date;
         email: string;
         role: import(".prisma/client").$Enums.Role;
-        createdAt: Date;
     }>;
     getMembers(enterpriseId: string): Promise<{
         id: string;
+        createdAt: Date;
         email: string;
         role: import(".prisma/client").$Enums.Role;
-        createdAt: Date;
     }[]>;
     removeMember(memberId: string, callerEnterpriseId: string, callerId: string): Promise<{
         id: string;
+        createdAt: Date;
         email: string;
         password: string;
         role: import(".prisma/client").$Enums.Role;
         enterpriseId: string | null;
-        createdAt: Date;
     }>;
 }

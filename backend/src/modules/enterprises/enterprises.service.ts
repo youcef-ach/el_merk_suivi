@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ConflictException, ForbiddenException } 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEnterpriseDto } from './dto/create-enterprise.dto';
 import { AddMemberDto } from './dto/add-member.dto';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class EnterprisesService {

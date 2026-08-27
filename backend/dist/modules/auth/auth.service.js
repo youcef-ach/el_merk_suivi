@@ -13,7 +13,7 @@ exports.AuthService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const jwt_1 = require("@nestjs/jwt");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const client_1 = require("@prisma/client");
 let AuthService = class AuthService {
     constructor(prisma, jwtService) {

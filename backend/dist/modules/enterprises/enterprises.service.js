@@ -12,7 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.EnterprisesService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 let EnterprisesService = class EnterprisesService {
     constructor(prisma) {
         this.prisma = prisma;

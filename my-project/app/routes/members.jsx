@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import ProtectedRoute from '../components/ProtectedRoute';
 import Navbar from '../components/Navbar';
 import './dashboard.css';
+import { API_URL } from '../config/api';
 
 export function meta() {
   return [
@@ -37,7 +38,7 @@ function MembersContent() {
   const fetchMembers = async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch('http://localhost:3000/api/enterprises/members/list', {
+      const res = await fetch(`${API_URL}/enterprises/members/list`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to fetch team members');
@@ -54,7 +55,7 @@ function MembersContent() {
     e.preventDefault();
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch('http://localhost:3000/api/enterprises/members/add', {
+      const res = await fetch(`${API_URL}/enterprises/members/add`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -80,7 +81,7 @@ function MembersContent() {
     if (!window.confirm('Remove this member from your enterprise?')) return;
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`http://localhost:3000/api/enterprises/members/${memberId}`, {
+      const res = await fetch(`${API_URL}/enterprises/members/${memberId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });

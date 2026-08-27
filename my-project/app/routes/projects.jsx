@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import ProtectedRoute from '../components/ProtectedRoute';
 import Navbar from '../components/Navbar';
 import './dashboard.css';
+import { API_URL } from '../config/api';
 
 export function meta() {
   return [
@@ -34,7 +35,7 @@ function ProjectsContent() {
   const fetchProjects = async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch('http://localhost:3000/api/projects', {
+      const response = await fetch(`${API_URL}/projects`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -62,7 +63,7 @@ function ProjectsContent() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch('http://localhost:3000/api/projects', {
+      const response = await fetch(`${API_URL}/projects`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
