@@ -353,33 +353,37 @@ export class InspectionsService {
   }
 
   async getUploadUrl(id: string, fileName: string, userEnterpriseId: string, role: Role) {
-    const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
-    if (!inspection) throw new NotFoundException('Inspection not found');
+    try {
+      const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+      if (!inspection) throw new NotFoundException('Inspection not found');
 
-    if (inspection.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
-      throw new ForbiddenException('Only the creator or admin can upload files to this inspection');
+      if (inspection.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
+        throw new ForbiddenException('Only the creator or admin can upload files to this inspection');
+      }
+
+      // Use Minio StorageService
+      const bucket = 'virtual-inspections';
+      const s3Path = `inspections/${id}/${fileName}`;
+      const presignedUrl = await this.storageService.getPresignedPutUrl(bucket, s3Path);
+
+      // Optionally update the DB here if it's the main GLB model, or handle via a separate endpoint
+      if (fileName && fileName.endsWith('.glb')) {
+        await this.prisma.inspection.update({
+          where: { id },
+          data: { glbModelUrl: s3Path },
+        });
+      } else if (fileName && fileName.endsWith('scans.json')) {
+        await this.prisma.inspection.update({
+          where: { id },
+          data: { scansJsonUrl: s3Path },
+        });
+      }
+
+      return { presignedUrl, expectedPath: s3Path };
+    } catch (error) {
+      console.error('DEBUG: getUploadUrl error ->', error);
+      throw error;
     }
-
-    // Use Minio StorageService
-    const bucket = 'virtual-inspections';
-    const s3Path = `inspections/${id}/${fileName}`;
-    const presignedUrl = await this.storageService.getPresignedPutUrl(bucket, s3Path);
-
-    // Optionally update the DB here if it's the main GLB model, or handle via a separate endpoint
-    if (fileName.endsWith('.glb')) {
-      await this.prisma.inspection.update({
-        where: { id },
-        data: { glbModelUrl: s3Path },
-      });
-    } else if (fileName.endsWith('scans.json')) {
-      await this.prisma.inspection.update({
-        where: { id },
-        data: { scansJsonUrl: s3Path },
-      });
-    }
-
-
-    return { presignedUrl, expectedPath: s3Path };
   }
 
   async processAndUploadScans(id: string, mpData: any, rcData: any, userEnterpriseId: string, role: Role) {
