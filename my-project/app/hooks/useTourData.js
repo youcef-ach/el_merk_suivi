@@ -7,57 +7,56 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
 import { createTagSpriteMaterial } from './useTags';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+import { TilesetEngine } from '../utils/TilesetEngine';
+import { OrthomosaicLayer } from '../utils/OrthomosaicLayer';
 
 // Inject BVH methods into Three.js prototypes
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
-// DO NOT globally override THREE.Mesh.prototype.raycast as it breaks InstancedMesh.
-// Instead, we will assign it directly to the GLB child meshes.
 
 /**
- * Handles loading GLB models, scan coordinates, and initializing Dual Panorama boxes.
- * 
- * @param {React.MutableRefObject<THREE.Scene>} sceneRef 
- * @param {THREE.Texture} dummyTex 
+ * Enhanced useTourData:
+ * Supports Cesium 3D Tiles (via 3d-tiles-renderer), GLTF/GLB models,
+ * Georeferenced Orthomosaics, 360° Panorama dual-box fading,
+ * Red scan rings instanced mesh, and Drone Survey deliverables.
  */
-
-export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId) => {
-
+export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, beforeRenderCallbacksRef) => {
   const modelRef = useRef(null);
+  const tilesetEngineRef = useRef(null);
+  const orthoLayerRef = useRef(null);
 
-  // Dual Box Refs
+  // Dual Box Refs for 360 Panoramas
   const box1Ref = useRef(null);
   const panoramaGroup1Ref = useRef(null);
   const box2Ref = useRef(null);
   const panoramaGroup2Ref = useRef(null);
 
-  // State for loaded entities to trigger re-renders or allow interaction
+  // State for loaded entities
   const [scanSpheres, setScanSpheres] = useState([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [scansData, setScansData] = useState([]);
+  const [tourDetails, setTourDetails] = useState(null);
   const stagingProfilesRef = useRef([]);
 
   useEffect(() => {
     const scene = sceneRef.current;
-    if (!scene || !sceneReady) return;
+    if (!scene || !sceneReady || !tourId) return;
+
+    let isSubscribed = true;
 
     const initEngine = async () => {
       let glbUrl = null;
       let jsonUrl = null;
+      let tilesetUrl = null;
+      let orthoUrl = null;
       let tourTags = [];
       let tourAreaPointers = [];
 
-      if (!tourId) {
-        return;
-      }
-
       try {
         const token = localStorage.getItem('access_token');
-        if (!token || token === 'undefined') throw new Error("Missing authentication token in browser");
-
         const res = await fetch(`http://localhost:3000/api/inspections/${tourId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
 
         if (!res.ok) {
@@ -66,38 +65,64 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
         }
 
         const tour = await res.json();
+        if (!isSubscribed) return;
+        setTourDetails(tour);
+
+        // 3D Tileset / RealityScan photogrammetry model
+        if (tour.tilesetUrl) {
+          tilesetUrl = tour.tilesetUrl.startsWith('http') 
+            ? tour.tilesetUrl 
+            : `http://localhost:9000/virtual-inspections/${tour.tilesetUrl}`;
+        }
+
+        // Traditional GLB model
         if (tour.glbModelUrl) {
-          glbUrl = `http://localhost:9000/virtual-inspections/${tour.glbModelUrl}`;
-        } else {
-          throw new Error('This tour has no GLB architecture model attached to it.');
+          glbUrl = tour.glbModelUrl.startsWith('http')
+            ? tour.glbModelUrl
+            : `http://localhost:9000/virtual-inspections/${tour.glbModelUrl}`;
         }
 
+        // Orthomosaic / Orthoprojection
+        if (tour.orthoUrl) {
+          orthoUrl = tour.orthoUrl.startsWith('http')
+            ? tour.orthoUrl
+            : `http://localhost:9000/virtual-inspections/${tour.orthoUrl}`;
+        }
+
+        // Scan telemetry mapping for 360 red rings
         if (tour.scansJsonUrl) {
-          jsonUrl = `http://localhost:9000/virtual-inspections/${tour.scansJsonUrl}`;
-        } else {
-          throw new Error('This tour has no Scan telemetry mapping attached to it.');
+          jsonUrl = tour.scansJsonUrl.startsWith('http')
+            ? tour.scansJsonUrl
+            : `http://localhost:9000/virtual-inspections/${tour.scansJsonUrl}`;
         }
 
-        // Capture tags from the tour data for rendering
-        if (tour.tags && tour.tags.length > 0) {
-          tourTags = tour.tags;
-        }
-        if (tour.areaPointers && tour.areaPointers.length > 0) {
-          tourAreaPointers = tour.areaPointers;
-        }
-        if (tour.stagingProfiles) {
-          stagingProfilesRef.current = tour.stagingProfiles;
-        }
+        if (tour.tags && tour.tags.length > 0) tourTags = tour.tags;
+        if (tour.areaPointers && tour.areaPointers.length > 0) tourAreaPointers = tour.areaPointers;
+        if (tour.stagingProfiles) stagingProfilesRef.current = tour.stagingProfiles;
+
       } catch (err) {
         console.error("CRITICAL ENGINE ERROR:", err.message);
-        alert("Engine Initialization Failed: " + err.message);
-        return; // Strictly abort engine
+        return;
       }
 
-      // Load GLB model and scan JSON in parallel
-      const glbPromise = new Promise((resolve, reject) => {
+      // ─── 1. Load Cesium 3D Tiles if configured ───
+      if (tilesetUrl) {
+        console.log('[useTourData] Pure 3D Tileset loading via TilesetEngine:', tilesetUrl);
+        const engine = new TilesetEngine(scene, cameraRef.current, rendererRef.current);
+        engine.loadTileset(tilesetUrl, 'rotX_neg90');
+        tilesetEngineRef.current = engine;
+
+        // Register continuous update in main Three.js render frame
+        if (beforeRenderCallbacksRef && beforeRenderCallbacksRef.current) {
+          beforeRenderCallbacksRef.current.push(() => {
+            engine.update();
+          });
+        }
+        setIsDataLoaded(true);
+        return; // Pure 3D Tiles only mode as requested
+      }
+      const glbPromise = glbUrl ? new Promise((resolve, reject) => {
         const gltfLoader = new GLTFLoader();
-        
         const dracoLoader = new DRACOLoader();
         dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
         gltfLoader.setDRACOLoader(dracoLoader);
@@ -106,117 +131,99 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
           const ktx2Loader = new KTX2Loader()
             .setTranscoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/')
             .detectSupport(rendererRef.current)
-            .setWorkerLimit(Math.max(1, (navigator.hardwareConcurrency || 4) - 1)); // Use background workers
+            .setWorkerLimit(Math.max(1, (navigator.hardwareConcurrency || 4) - 1));
           gltfLoader.setKTX2Loader(ktx2Loader);
         }
         
         gltfLoader.setMeshoptDecoder(MeshoptDecoder);
-
         gltfLoader.load(glbUrl, resolve, undefined, reject);
-      });
+      }) : Promise.resolve(null);
 
-      const jsonPromise = fetch(jsonUrl).then((res) => {
+      // ─── 4. Load Scans Telemetry for 360 Red Rings ───
+      const jsonPromise = jsonUrl ? fetch(jsonUrl).then((res) => {
         if (!res.ok) throw new Error("JSON endpoint returned " + res.status);
         return res.json();
-      });
+      }).catch(err => {
+        console.warn("Scan telemetry fetch notice:", err.message);
+        return [];
+      }) : Promise.resolve([]);
 
       Promise.all([glbPromise, jsonPromise])
         .then(([gltf, scanData]) => {
-          // --- Setup GLB model (MeshBasicMaterial — no lighting needed) ---
-          gltf.scene.traverse((child) => {
-            if (child.isMesh) {
-              const oldMats = Array.isArray(child.material) ? child.material : [child.material];
-              const newMats = oldMats.map(m => {
-                const basic = new THREE.MeshBasicMaterial({
-                  map: m.map || null,
-                  color: m.color || 0xffffff,
-                  transparent: false, // Prevents GPU depth-sorting lag
-                  side: m.side,
+          if (!isSubscribed) return;
+
+          if (gltf) {
+            gltf.scene.traverse((child) => {
+              if (child.isMesh) {
+                const oldMats = Array.isArray(child.material) ? child.material : [child.material];
+                const newMats = oldMats.map(m => {
+                  const basic = new THREE.MeshBasicMaterial({
+                    map: m.map || null,
+                    color: m.color || 0xffffff,
+                    transparent: false,
+                    side: m.side,
+                  });
+                  m.dispose();
+                  return basic;
                 });
-                m.dispose();
-                return basic;
-              });
-              child.material = newMats.length === 1 ? newMats[0] : newMats;
+                child.material = newMats.length === 1 ? newMats[0] : newMats;
+                child.matrixAutoUpdate = false;
+                child.updateMatrix();
 
-              // 2. Freeze Transformation Matrices (Massive CPU saver)
-              child.matrixAutoUpdate = false;
-              child.updateMatrix();
-
-              if (child.geometry) {
-                // 3. Ensure Frustum Culling is Accurate
-                // Sometimes compressed GLBs have corrupted bounding boxes.
-                // We must force recalculate them so they don't render when behind the camera.
-                child.geometry.computeBoundingBox();
-                child.geometry.computeBoundingSphere();
-
-                // Generate BVH spatial index for ultra-fast raycasting
-                child.geometry.computeBoundsTree();
-                child.raycast = acceleratedRaycast; // Only apply to GLB meshes
+                if (child.geometry) {
+                  child.geometry.computeBoundingBox();
+                  child.geometry.computeBoundingSphere();
+                  child.geometry.computeBoundsTree();
+                  child.raycast = acceleratedRaycast;
+                }
               }
-            }
-          });
-          scene.add(gltf.scene);
-          modelRef.current = gltf.scene;
-
-          // Pre-compile shaders to prevent massive GPU stutter on first frame render
-          if (rendererRef && rendererRef.current && cameraRef && cameraRef.current) {
-            rendererRef.current.compile(scene, cameraRef.current);
+            });
+            scene.add(gltf.scene);
+            modelRef.current = gltf.scene;
           }
 
           setIsModelLoaded(true);
 
-          // Compute the floor level: bbox.min.z is the absolute bottom of the model
-          // (which may include sub-floor geometry like pillars/slabs below the walkable surface).
-          // Using min.z + 15% of total height reliably lands on the actual floor plane.
-          const bbox = new THREE.Box3().setFromObject(gltf.scene);
-          const modelHeight = bbox.max.z - bbox.min.z;
-          const floorZ = bbox.min.z + modelHeight * 0.15 + 0.02;
-          console.log('[useTourData] bbox:', bbox.min.z.toFixed(3), bbox.max.z.toFixed(3), '→ floorZ:', floorZ.toFixed(3));
+          // ─── 5. Place 360 Scan Red Rings on Floor / Ground ───
+          if (Array.isArray(scanData) && scanData.length > 0) {
+            const ringGeo = new THREE.RingGeometry(0.12, 0.18, 32);
+            const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true });
 
-          // --- Place scan rings on the model floor ---
-          const ringGeo = new THREE.RingGeometry(0.1, 0.15, 32);
-          const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true });
+            const instancedMesh = new THREE.InstancedMesh(ringGeo, markerMat, scanData.length);
+            instancedMesh.renderOrder = 10;
+            
+            const dummy = new THREE.Object3D();
+            const scanMetadata = [];
+            setScansData(scanData);
 
-          const instancedMesh = new THREE.InstancedMesh(ringGeo, markerMat, scanData.length);
-          instancedMesh.renderOrder = 10;
-          
-          const dummy = new THREE.Object3D();
-          const scanMetadata = [];
-          
-          setScansData(scanData);
+            scanData.forEach((data, i) => {
+              const scanKey = data['#name'] || `scan_${i}`;
+              const posX = data.x || 0;
+              const posY = data.y || 0;
+              const posZ = data.alt || data.z || 0;
 
-          // scanData is an array of { #name, x, y, alt, rotation_quaternion }
-          scanData.forEach((data, i) => {
-            const scanKey = data['#name'];
-            const posX = data.x;
-            const posY = data.y;
-            const posZ = data.alt;
+              dummy.position.set(posX, posY, posZ);
+              dummy.updateMatrix();
+              instancedMesh.setMatrixAt(i, dummy.matrix);
 
-            dummy.position.set(posX, posY, posZ);
-            dummy.updateMatrix();
-            instancedMesh.setMatrixAt(i, dummy.matrix);
-
-            scanMetadata.push({
-              id: scanKey,
-              realPosition: new THREE.Vector3(posX, posY, posZ),
-              snappedPosition: new THREE.Vector3(posX, posY, posZ), // Will be updated by raycaster
-              rotation_quaternion: data.rotation_quaternion,
-              instanceId: i,
-              isVisible: true // Track visibility state for distance thresholding
+              scanMetadata.push({
+                id: scanKey,
+                realPosition: new THREE.Vector3(posX, posY, posZ),
+                snappedPosition: new THREE.Vector3(posX, posY, posZ),
+                rotation_quaternion: data.rotation_quaternion,
+                instanceId: i,
+                isVisible: true
+              });
             });
-          });
 
-          instancedMesh.instanceMatrix.needsUpdate = true;
-          instancedMesh.computeBoundingSphere(); // CRITICAL FIX: required for raycaster to hit instances!
-          instancedMesh.userData = { isScanRings: true, metadata: scanMetadata };
-          scene.add(instancedMesh);
+            instancedMesh.instanceMatrix.needsUpdate = true;
+            instancedMesh.computeBoundingSphere();
+            instancedMesh.userData = { isScanRings: true, metadata: scanMetadata };
+            scene.add(instancedMesh);
+            setScanSpheres([instancedMesh]);
+          }
 
-          setScanSpheres([instancedMesh]);
-
-          // --- Render Tag Sprites ---
-          // Only create base tag sprites if useTags (studio) hasn't already created the group.
-          // This ensures tags are visible in the engine view (read-only) and avoids
-          // duplicates in studio where useTags manages its own interactive sprites.
+          // ─── 6. Render Site Inspection Tags ───
           if (tourTags.length > 0 && !scene.getObjectByName('tagMarkers')) {
             const tagGroup = new THREE.Group();
             tagGroup.name = 'tagMarkers';
@@ -224,7 +231,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
             tourTags.forEach((tag) => {
               const mat = createTagSpriteMaterial(tag.title, tag.icon, tag.color, false);
-              mat.depthTest = false; // Always float on top of geometry, same as Studio
+              mat.depthTest = false;
 
               const sprite = new THREE.Sprite(mat);
               sprite.position.set(tag.posX, tag.posY, tag.posZ);
@@ -232,21 +239,19 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
               const sizeMult = tag.size ?? 1.0;
               sprite.scale.set(0.4 * sizeMult, 0.6 * sizeMult, 1);
-
               sprite.renderOrder = 1000;
               sprite.userData.tagId = tag.id;
               tagGroup.add(sprite);
             });
 
             scene.add(tagGroup);
-            console.log(`[useTourData] Rendered ${tourTags.length} tag sprite(s)`);
           }
 
-          // --- Render Area Pointers ---
+          // ─── 7. Render Area Pointers ───
           if (tourAreaPointers.length > 0 && !scene.getObjectByName('areaPointers')) {
             const areaPointersGroup = new THREE.Group();
             areaPointersGroup.name = 'areaPointers';
-            areaPointersGroup.renderOrder = 997; // Just below tags
+            areaPointersGroup.renderOrder = 997;
 
             tourAreaPointers.forEach(ap => {
               const ptr = createAreaPointerGroup(
@@ -266,9 +271,9 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
               areaPointersGroup.add(ptr);
             });
             scene.add(areaPointersGroup);
-            console.log(`[useTourData] Rendered ${tourAreaPointers.length} area pointer(s)`);
           }
 
+          // ─── 8. Setup Dual 360 Panorama Cubemaps ───
           const createPanoramaBox = () => {
             const boxMaterials = Array(6).fill(0).map(() =>
               new THREE.MeshBasicMaterial({
@@ -285,7 +290,6 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
             const texturedBox = new THREE.Mesh(boxGeo, boxMaterials);
             texturedBox.rotation.x = Math.PI / 2;
             texturedBox.visible = false;
-
             texturedBox.renderOrder = -1;
             texturedBox.frustumCulled = false;
 
@@ -305,137 +309,80 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
           setIsDataLoaded(true);
         })
         .catch(err => {
-          alert("MinIO Scans JSON Fetch Failed: " + err.message);
-          console.error("Error loading scan data:", err);
+          console.error("Asset loading error:", err);
+          setIsDataLoaded(true);
         });
     };
 
     initEngine();
+
+    return () => {
+      isSubscribed = false;
+      if (tilesetEngineRef.current) {
+        tilesetEngineRef.current.dispose();
+        tilesetEngineRef.current = null;
+      }
+      if (orthoLayerRef.current) {
+        orthoLayerRef.current.dispose();
+        orthoLayerRef.current = null;
+      }
+    };
   }, [sceneRef, dummyTex, tourId, sceneReady]);
 
-  // --- Snap Scan Spheres to Floor ---
-  useEffect(() => {
-    if (!isModelLoaded || !isDataLoaded || scanSpheres.length === 0 || !modelRef.current) return;
+  // Load Panorama Textures helper
+  const loadPanoramaTextures = async (scanId, targetBox) => {
+    if (!targetBox || !tourId) return;
 
-    // Force matrix update to ensure raycaster checks accurate geometry coordinates
-    modelRef.current.updateMatrixWorld(true);
+    // Check if staged profile has baked panoramas
+    const profile = stagingProfilesRef.current.find(p => p.id === activeProfileId);
+    const baked = profile?.bakedPanoramas?.filter(p => p.scanId === scanId);
 
-    // Temporarily set all model materials to DoubleSide so the downward ray
-    // hits floor meshes regardless of normal direction (floors typically have
-    // upward normals, which would cause FrontSide materials to ignore our
-    // downward ray — making it pass through and hit the wrong floor).
-    const originalSides = [];
-    modelRef.current.traverse((child) => {
-      if (child.isMesh) {
-        const mats = Array.isArray(child.material) ? child.material : [child.material];
-        mats.forEach(mat => {
-          originalSides.push({ mat, side: mat.side });
-          mat.side = THREE.DoubleSide;
-        });
-      }
-    });
+    const faces = ['front', 'back', 'top', 'bottom', 'right', 'left'];
+    const faceOrder = [0, 1, 2, 3, 4, 5]; // Box face mapping
+    const texLoader = new THREE.TextureLoader();
 
-    const instancedMesh = scanSpheres[0];
-    if (!instancedMesh || !instancedMesh.isInstancedMesh) {
-      originalSides.forEach(({ mat, side }) => { mat.side = side; });
-      return;
-    }
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.firstHitOnly = true; // BVH optimization flag: stops searching after the first hit
-    const downVector = new THREE.Vector3(0, 0, -1);
-    const dummy = new THREE.Object3D();
-
-    instancedMesh.userData.metadata.forEach((data) => {
-      const startPos = data.realPosition.clone();
+    const loadPromises = faces.map((face, index) => {
+      const bakedFace = baked?.find(b => b.face === face);
+      let url = bakedFace ? bakedFace.imageUrl : `http://localhost:9000/virtual-inspections/${tourId}/panoramas/${scanId}_${face}.jpg`;
       
-      raycaster.set(startPos, downVector);
-      const intersects = raycaster.intersectObject(modelRef.current, true);
-
-      let floorZ = startPos.z - 1.6;
-      if (intersects.length > 0) {
-        floorZ = intersects[0].point.z + 0.05;
-      }
-      
-      data.snappedPosition = new THREE.Vector3(startPos.x, startPos.y, floorZ);
-      dummy.position.copy(data.snappedPosition);
-      
-      // If this scan is currently active, hide it (scale 0), otherwise scale 1
-      // However, at initial load, no sphere is active yet, so just scale 1
-      dummy.scale.set(1, 1, 1);
-      dummy.updateMatrix();
-      instancedMesh.setMatrixAt(data.instanceId, dummy.matrix);
-    });
-    
-    instancedMesh.instanceMatrix.needsUpdate = true;
-    instancedMesh.computeBoundingSphere(); // Update bounding sphere again
-
-    // Restore original material sides
-    originalSides.forEach(({ mat, side }) => { mat.side = side; });
-
-  }, [isModelLoaded, isDataLoaded, scanSpheres]);
-
-  const loadPanoramaTextures = (scanId, renderer, bakedTexturesMap = null) => {
-    return new Promise((resolve) => {
-      const bitmapLoader = new THREE.ImageBitmapLoader();
-      bitmapLoader.setOptions({ imageOrientation: 'flipY' });
-      const faces = ['py', 'pz', 'px', 'nz', 'nx', 'ny'];
-
-      const baseUrl = tourId
-        ? `http://localhost:9000/virtual-inspections/inspections/${tourId}/`
-        : `/`;
-
-      const loadPromises = faces.map((face) => {
-        return new Promise((resFace) => {
-          // 1. Check if we have a locally generated Blob URL from the baker
-          if (bakedTexturesMap && bakedTexturesMap[`${scanId}_${face}`]) {
-            bitmapLoader.load(bakedTexturesMap[`${scanId}_${face}`], (imageBitmap) => {
-              const tex = new THREE.Texture(imageBitmap);
-              tex.colorSpace = THREE.SRGBColorSpace;
-              tex.needsUpdate = true;
-              if (renderer) renderer.initTexture(tex);
-              resFace(tex);
-            });
-            return;
+      return new Promise((resolve) => {
+        texLoader.load(
+          url,
+          (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.generateMipmaps = true;
+            tex.minFilter = THREE.LinearMipmapLinearFilter;
+            targetBox.material[faceOrder[index]].map = tex;
+            targetBox.material[faceOrder[index]].needsUpdate = true;
+            resolve();
+          },
+          undefined,
+          () => {
+            // Fallback
+            targetBox.material[faceOrder[index]].map = dummyTex;
+            targetBox.material[faceOrder[index]].needsUpdate = true;
+            resolve();
           }
-
-          let imageUrl = `${baseUrl}images/${scanId}_${face}.jpg`;
-          
-          // 2. Check for backend-saved baked panoramas
-          if (activeProfileId && stagingProfilesRef.current) {
-            const profile = stagingProfilesRef.current.find(p => p.id === activeProfileId);
-            if (profile && profile.bakedPanoramas) {
-              const baked = profile.bakedPanoramas.find(bp => bp.scanId === scanId && bp.face === face);
-              if (baked && baked.imageUrl) {
-                // Determine if absolute or relative
-                imageUrl = baked.imageUrl.startsWith('http') ? baked.imageUrl : `http://localhost:9000/virtual-inspections/${baked.imageUrl}`;
-              }
-            }
-          }
-
-          bitmapLoader.load(imageUrl, (imageBitmap) => {
-            const tex = new THREE.Texture(imageBitmap);
-            tex.colorSpace = THREE.SRGBColorSpace; // CRITICAL: Treat JPEG as sRGB to prevent washed-out colors
-            tex.needsUpdate = true;
-            if (renderer) renderer.initTexture(tex);
-            resFace(tex);
-          });
-        });
+        );
       });
-
-      Promise.all(loadPromises).then(resolve);
     });
+
+    await Promise.all(loadPromises);
   };
 
   return {
     modelRef,
+    tilesetEngineRef,
+    orthoLayerRef,
     box1Ref,
     panoramaGroup1Ref,
     box2Ref,
     panoramaGroup2Ref,
     scanSpheres,
-    isDataLoaded,
     loadPanoramaTextures,
-    scansData
+    isDataLoaded,
+    isModelLoaded,
+    scansData,
+    tourDetails,
   };
 };

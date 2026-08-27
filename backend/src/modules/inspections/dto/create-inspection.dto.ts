@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsNumber, IsDateString } from 'class-validator';
 import { Visibility } from '@prisma/client';
 
 export class CreateInspectionDto {
@@ -12,4 +12,48 @@ export class CreateInspectionDto {
   @IsEnum(Visibility)
   @IsOptional()
   visibility?: Visibility;
+
+  @IsOptional()
+  @IsDateString()
+  surveyDate?: string;
+
+  @IsOptional()
+  @IsString()
+  droneModel?: string;
+
+  @IsOptional()
+  @IsNumber()
+  gsd?: number;
+
+  @IsOptional()
+  @IsNumber()
+  flightAltitude?: number;
+
+  @IsOptional()
+  @IsString()
+  coordinateSystem?: string;
+
+  @IsOptional()
+  @IsString()
+  tilesetUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  orthoUrl?: string;
+
+  @IsOptional()
+  orthoBounds?: any;
+
+  @IsOptional()
+  @IsString()
+  dsmUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  dtmUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  contoursUrl?: string;
 }
+

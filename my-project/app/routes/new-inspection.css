@@ -1,0 +1,509 @@
+/* ==========================================================================
+   Drone Survey & Photogrammetry Ingestion Form - Premium Modern GIS Styles
+   ========================================================================== */
+
+.survey-form-container {
+  min-height: 100vh;
+  width: 100%;
+  position: relative;
+  background-color: #07090e;
+  background-image: 
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(6, 182, 212, 0.15), transparent 70%),
+    linear-gradient(to bottom, transparent, rgba(7, 9, 14, 0.8)),
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 48px 48px, 48px 48px;
+  color: #f1f5f9;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  padding-bottom: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.survey-content-wrapper {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 110px 24px 80px 24px;
+}
+
+/* ─── Breadcrumbs & Header ─── */
+.survey-header-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.survey-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.survey-breadcrumbs button,
+.survey-breadcrumbs a {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  transition: color 0.15s;
+}
+
+.survey-breadcrumbs button:hover,
+.survey-breadcrumbs a:hover {
+  color: #38bdf8;
+}
+
+.survey-hero-card {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.5) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 20px;
+  padding: 28px 32px;
+  margin-bottom: 32px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5), 0 0 30px rgba(6, 182, 212, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.survey-hero-title {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  margin: 0 0 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.survey-hero-subtitle {
+  font-size: 14px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.survey-badge-rtk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.35);
+  color: #38bdf8;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ─── Wizard Step Progress Bar ─── */
+.wizard-steps-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.wizard-step-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  border-radius: 30px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.wizard-step-item.active {
+  background: rgba(6, 182, 212, 0.15);
+  border-color: rgba(6, 182, 212, 0.45);
+  color: #38bdf8;
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.15);
+}
+
+.wizard-step-item.completed {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.wizard-step-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+}
+
+.wizard-step-item.active .wizard-step-number {
+  background: #06b6d4;
+  color: #07090e;
+  font-weight: 700;
+}
+
+.wizard-step-item.completed .wizard-step-number {
+  background: #10b981;
+  color: #ffffff;
+}
+
+/* ─── Form Section Cards ─── */
+.survey-section-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 28px;
+  margin-bottom: 24px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.2s;
+}
+
+.survey-section-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.survey-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.survey-section-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(6, 182, 212, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.survey-section-icon.amber {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.survey-section-icon.purple {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.survey-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f8fafc;
+  margin: 0;
+}
+
+.survey-section-desc {
+  font-size: 12px;
+  color: #64748b;
+  margin: 2px 0 0 0;
+}
+
+/* ─── Grid Inputs ─── */
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 640px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 768px) {
+  .form-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.field-label .req {
+  color: #f43f5e;
+}
+
+.field-input,
+.field-select,
+.field-textarea {
+  width: 100%;
+  background: rgba(7, 9, 14, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #f8fafc;
+  outline: none;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.field-input:focus,
+.field-select:focus,
+.field-textarea:focus {
+  border-color: #06b6d4;
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.15);
+  background: rgba(11, 15, 25, 0.9);
+}
+
+.field-input::placeholder,
+.field-textarea::placeholder {
+  color: #475569;
+}
+
+.field-error {
+  font-size: 11px;
+  color: #fb7185;
+  margin-top: 2px;
+}
+
+/* ─── Premium Dropzone Cards (Deliverables Ingestion) ─── */
+.dropzone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.dropzone-card {
+  position: relative;
+  background: rgba(7, 9, 14, 0.6);
+  border: 1.5px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 165px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.dropzone-card:hover {
+  border-color: rgba(6, 182, 212, 0.5);
+  background: rgba(15, 23, 42, 0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -10px rgba(6, 182, 212, 0.2);
+}
+
+.dropzone-card.has-file {
+  border-style: solid;
+  border-color: rgba(16, 185, 129, 0.5);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.dropzone-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.dropzone-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(6, 182, 212, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  transition: transform 0.2s;
+}
+
+.dropzone-card:hover .dropzone-icon {
+  transform: scale(1.08);
+}
+
+.dropzone-icon.emerald {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.dropzone-icon.purple {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.25);
+}
+
+.dropzone-icon.blue {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.dropzone-icon.rose {
+  background: rgba(244, 63, 94, 0.12);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.25);
+}
+
+.dropzone-format-tag {
+  font-family: monospace;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dropzone-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0 0 4px 0;
+}
+
+.dropzone-desc {
+  font-size: 11px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.dropzone-file-status {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dropzone-filename {
+  color: #34d399;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.dropzone-upload-btn {
+  color: #38bdf8;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Hidden file input overlay */
+.dropzone-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ─── Actions & Progress Bar ─── */
+.survey-submit-btn {
+  width: 100%;
+  padding: 14px 24px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #06b6d4 0%, #2563eb 100%);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+  box-shadow: 0 4px 20px rgba(6, 182, 212, 0.3);
+}
+
+.survey-submit-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 25px rgba(6, 182, 212, 0.4);
+}
+
+.survey-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.survey-progress-box {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #06b6d4, #3b82f6, #10b981);
+  border-radius: 10px;
+  transition: width 0.3s ease;
+}

@@ -1,13 +1,35 @@
+@import "tailwindcss";
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-html, body, #root {
+html, body {
   width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: #0a0a0f;
-  font-family: 'Inter', sans-serif;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #07090e;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-x: hidden;
+  overflow-y: auto;
+  color: #f1f5f9;
+}
+
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
+/* Lock viewport and eliminate any scrollbars when inside the 3D Engine view */
+html:has(.engine-viewport-root),
+body:has(.engine-viewport-root),
+body:has(.engine-viewport-root) #root {
+  overflow: hidden !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }

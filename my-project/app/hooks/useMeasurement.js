@@ -29,12 +29,12 @@ export const useMeasurement = (viewerRef) => {
 
   // Create a visible marker sphere at a world position
   const createMarker = useCallback((position, color = 0x00e5ff) => {
-    const geo = new THREE.SphereGeometry(0.03, 16, 16);
+    const geo = new THREE.SphereGeometry(0.35, 16, 16);
     const mat = new THREE.MeshBasicMaterial({ 
       color, 
       depthTest: false,
       transparent: true,
-      opacity: 0.9 
+      opacity: 0.95 
     });
     const sphere = new THREE.Mesh(geo, mat);
     sphere.position.copy(position);
@@ -50,8 +50,8 @@ export const useMeasurement = (viewerRef) => {
       color: 0x00e5ff,
       depthTest: false,
       transparent: true,
-      opacity: 0.8,
-      linewidth: 2
+      opacity: 0.9,
+      linewidth: 3
     });
     const line = new THREE.Line(geo, mat);
     line.renderOrder = 999;
@@ -66,20 +66,20 @@ export const useMeasurement = (viewerRef) => {
     canvas.height = 64;
 
     // Background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillStyle = 'rgba(7, 9, 14, 0.88)';
     ctx.beginPath();
-    ctx.roundRect(0, 0, 256, 64, 10);
+    ctx.roundRect(0, 0, 256, 64, 12);
     ctx.fill();
 
     // Border
-    ctx.strokeStyle = 'rgba(0, 229, 255, 0.5)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.roundRect(1, 1, 254, 62, 10);
+    ctx.roundRect(1, 1, 254, 62, 12);
     ctx.stroke();
 
     // Text
-    ctx.fillStyle = '#00e5ff';
+    ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 28px Inter, Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -95,8 +95,8 @@ export const useMeasurement = (viewerRef) => {
     });
     const sprite = new THREE.Sprite(mat);
     sprite.position.copy(midpoint);
-    sprite.position.z += 0.12;
-    sprite.scale.set(0.5, 0.125, 1);
+    sprite.position.y += 0.8;
+    sprite.scale.set(3.5, 0.88, 1);
     sprite.renderOrder = 1001;
     return sprite;
   }, []);
@@ -106,8 +106,9 @@ export const useMeasurement = (viewerRef) => {
     const renderer = viewerRef.current?.rendererRef?.current;
     const camera = viewerRef.current?.cameraRef?.current;
     const model = viewerRef.current?.modelRef?.current;
+    const tilesGroup = viewerRef.current?.tilesetEngine?.getGroup?.() || viewerRef.current?.tilesetEngineRef?.current?.getGroup?.();
     
-    if (!renderer || !camera || !model) return;
+    if (!renderer || !camera) return;
 
     const rect = renderer.domElement.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -118,13 +119,22 @@ export const useMeasurement = (viewerRef) => {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, camera);
 
-    // Collect only GLB model meshes for raycasting
+    // Collect meshes from GLB model or 3D Tileset group
     const meshes = [];
-    model.traverse((child) => {
-      if (child.isMesh) meshes.push(child);
-    });
+    if (model) {
+      model.traverse((child) => {
+        if (child.isMesh) meshes.push(child);
+      });
+    }
+    if (tilesGroup) {
+      tilesGroup.traverse((child) => {
+        if (child.isMesh) meshes.push(child);
+      });
+    }
 
-    const intersects = raycaster.intersectObjects(meshes, false);
+    if (meshes.length === 0) return;
+
+    const intersects = raycaster.intersectObjects(meshes, true);
     if (intersects.length === 0) return;
 
     const hitPoint = intersects[0].point.clone();
@@ -140,14 +150,19 @@ export const useMeasurement = (viewerRef) => {
     } else {
       // Second point — complete the measurement
       const startPoint = pendingPointRef.current.point;
-      const startMarker = pendingPointRef.current.marker;  // capture before nullifying ref
-      const distance = startPoint.distanceTo(hitPoint);
+      const startMarker = pendingPointRef.current.marker;
+      
+      const dist3D = startPoint.distanceTo(hitPoint);
+      const dist2D = Math.sqrt(Math.pow(startPoint.x - hitPoint.x, 2) + Math.pow(startPoint.z - hitPoint.z, 2));
+      const distZ = Math.abs(startPoint.y - hitPoint.y);
+      const slope = dist2D > 0 ? (distZ / dist2D) * 100 : 0;
+
       const midpoint = startPoint.clone().add(hitPoint).multiplyScalar(0.5);
       const id = ++activeMeasurementIdRef.current;
 
       const endMarker = createMarker(hitPoint, 0xff6b6b);
       const line = createLine(startPoint, hitPoint);
-      const label = createDistanceLabel(midpoint, distance);
+      const label = createDistanceLabel(midpoint, dist3D);
 
       group.add(endMarker);
       group.add(line);
@@ -159,7 +174,11 @@ export const useMeasurement = (viewerRef) => {
 
       setMeasurements(prev => [...prev, {
         id,
-        distance,
+        distance: Number(dist3D.toFixed(2)),
+        dist3D: Number(dist3D.toFixed(2)),
+        dist2D: Number(dist2D.toFixed(2)),
+        distZ: Number(distZ.toFixed(2)),
+        slope: Number(slope.toFixed(1)),
         from: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
         to: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z },
         objects: [startMarker, endMarker, line, label]

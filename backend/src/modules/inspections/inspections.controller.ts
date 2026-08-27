@@ -117,4 +117,13 @@ export class InspectionsController {
   ) {
     return this.inspectionsService.processGlb(id, user.enterpriseId, user.role);
   }
+
+  @Post(':id/process-tileset')
+  async processTileset(
+    @Param('id') id: string,
+    @GetUser() user: any,
+  ) {
+    return this.inspectionsService.processTileset(id, user.enterpriseId, user.role);
+  }
 }
+

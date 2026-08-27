@@ -5,11 +5,11 @@ export declare class ProjectsService {
     constructor(prisma: PrismaService);
     create(createProjectDto: CreateProjectDto, userId: string, enterpriseId: string): Promise<{
         id: string;
-        description: string | null;
-        createdAt: Date;
-        updatedAt: Date;
-        name: string;
         enterpriseId: string;
+        createdAt: Date;
+        name: string;
+        description: string | null;
+        updatedAt: Date;
     }>;
     findAllForEnterprise(enterpriseId: string): Promise<({
         _count: {
@@ -17,42 +17,55 @@ export declare class ProjectsService {
         };
     } & {
         id: string;
-        description: string | null;
-        createdAt: Date;
-        updatedAt: Date;
-        name: string;
         enterpriseId: string;
+        createdAt: Date;
+        name: string;
+        description: string | null;
+        updatedAt: Date;
     })[]>;
     findOne(id: string, enterpriseId: string): Promise<{
         inspections: {
             id: string;
-            title: string;
+            createdAt: Date;
             description: string | null;
+            updatedAt: Date;
+            title: string;
+            visibility: import(".prisma/client").$Enums.Visibility;
             glbModelUrl: string | null;
             scansJsonUrl: string | null;
             rawScansJsonUrl: string | null;
             rawCsvJsonUrl: string | null;
             thumbnailUrl: string | null;
             videoUrl: string | null;
-            visibility: import(".prisma/client").$Enums.Visibility;
-            createdAt: Date;
-            updatedAt: Date;
+            surveyDate: Date | null;
+            droneModel: string | null;
+            gsd: number | null;
+            flightAltitude: number | null;
+            coordinateSystem: string | null;
+            tilesetUrl: string | null;
+            orthoUrl: string | null;
+            orthoBounds: import("@prisma/client/runtime/library").JsonValue | null;
+            dsmUrl: string | null;
+            dtmUrl: string | null;
+            dsmMinElevation: number | null;
+            dsmMaxElevation: number | null;
+            contoursUrl: string | null;
             projectId: string;
         }[];
     } & {
         id: string;
-        description: string | null;
-        createdAt: Date;
-        updatedAt: Date;
-        name: string;
         enterpriseId: string;
+        createdAt: Date;
+        name: string;
+        description: string | null;
+        updatedAt: Date;
     }>;
     remove(id: string, enterpriseId: string): Promise<{
         id: string;
-        description: string | null;
-        createdAt: Date;
-        updatedAt: Date;
-        name: string;
         enterpriseId: string;
+        createdAt: Date;
+        name: string;
+        description: string | null;
+        updatedAt: Date;
     }>;
 }

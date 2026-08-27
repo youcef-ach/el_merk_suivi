@@ -299,7 +299,8 @@ export const useTags = (viewerRef, tourId) => {
     const renderer = viewerRef.current?.rendererRef?.current;
     const camera = viewerRef.current?.cameraRef?.current;
     const model = viewerRef.current?.modelRef?.current;
-    if (!renderer || !camera || !model) return;
+    const tilesGroup = viewerRef.current?.tilesetEngine?.getGroup?.() || viewerRef.current?.tilesetEngineRef?.current?.getGroup?.();
+    if (!renderer || !camera) return;
 
     const rect = renderer.domElement.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -311,11 +312,20 @@ export const useTags = (viewerRef, tourId) => {
     raycaster.setFromCamera(mouse, camera);
 
     const meshes = [];
-    model.traverse((child) => {
-      if (child.isMesh) meshes.push(child);
-    });
+    if (model) {
+      model.traverse((child) => {
+        if (child.isMesh) meshes.push(child);
+      });
+    }
+    if (tilesGroup) {
+      tilesGroup.traverse((child) => {
+        if (child.isMesh) meshes.push(child);
+      });
+    }
 
-    const intersects = raycaster.intersectObjects(meshes, false);
+    if (meshes.length === 0) return;
+
+    const intersects = raycaster.intersectObjects(meshes, true);
     if (intersects.length === 0) return;
 
     const hitPoint = intersects[0].point.clone();

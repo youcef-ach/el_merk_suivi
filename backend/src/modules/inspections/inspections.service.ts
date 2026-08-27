@@ -4,6 +4,7 @@ import { StorageService } from '../storage/storage.service';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as zlib from 'zlib';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { CreateInspectionDto } from './dto/create-inspection.dto';
@@ -16,6 +17,10 @@ import { UpdateInspectionPermissionsDto } from './dto/update-inspection-permissi
 import { UpdatePanoramaStatusDto } from './dto/update-panorama-status.dto';
 import { CreateAreaPointerDto } from './dto/create-area-pointer.dto';
 import { UpdateAreaPointerDto } from './dto/update-area-pointer.dto';
+import { UpdateSurveyMetaDto } from './dto/survey-meta.dto';
+import { CreateSurveyReportDto } from './dto/create-survey-report.dto';
+import { CreateCrossSectionDto } from './dto/create-cross-section.dto';
+import { CreateSiteMeasurementDto } from './dto/create-site-measurement.dto';
 import { Visibility, Role, ProcessingStatus } from '@prisma/client';
 
 @Injectable()
@@ -26,15 +31,14 @@ export class InspectionsService {
   ) {}
 
   async create(projectId: string, createInspectionDto: CreateInspectionDto, userEnterpriseId: string) {
-    return this.prisma.inspection.create({
-      data: {
-        ...createInspectionDto,
-        projectId,
-        // Wait, Inspection does not have userEnterpriseId anymore, it relies on authorizedViewers, Project has enterprise.
-        // If we want to link user who created the inspection, we need to add back userEnterpriseId to Inspection.
-        // Wait, did I remove userEnterpriseId? Yes, I replaced it. Let's see the schema I pushed.
-      },
-    });
+    const data: any = {
+      ...createInspectionDto,
+      projectId,
+    };
+    if (createInspectionDto.surveyDate) {
+      data.surveyDate = new Date(createInspectionDto.surveyDate);
+    }
+    return this.prisma.inspection.create({ data });
   }
 
   async findAll(projectId: string, user?: { id: string; role: Role }) {
@@ -69,6 +73,9 @@ export class InspectionsService {
         tags: { include: { documents: true } },
         panoramas: true,
         areaPointers: true,
+        surveyReports: true,
+        crossSections: true,
+        siteMeasurements: true,
         authorizedViewers: true,
         stagingProfiles: {
           include: {
@@ -733,4 +740,279 @@ export class InspectionsService {
     return this.getStagingProfile(inspectionId, profileId);
   }
 
+  // ─── Drone Survey Operations ───
+
+  async updateSurveyMeta(inspectionId: string, dto: UpdateSurveyMetaDto, userId: string, role: Role) {
+    const inspection = await this.prisma.inspection.findUnique({
+      where: { id: inspectionId },
+      include: { project: true },
+    });
+    if (!inspection) throw new NotFoundException('Inspection not found');
+
+    const updateData: any = { ...dto };
+    if (dto.surveyDate) {
+      updateData.surveyDate = new Date(dto.surveyDate);
+    }
+
+    return this.prisma.inspection.update({
+      where: { id: inspectionId },
+      data: updateData,
+      include: {
+        surveyReports: true,
+        crossSections: true,
+        siteMeasurements: true,
+      },
+    });
+  }
+
+  async createSurveyReport(inspectionId: string, dto: CreateSurveyReportDto, userId: string, role: Role) {
+    const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId } });
+    if (!inspection) throw new NotFoundException('Inspection not found');
+
+    return this.prisma.surveyReport.create({
+      data: {
+        inspectionId,
+        title: dto.title,
+        reportType: dto.reportType,
+        summary: dto.summary,
+        fileUrl: dto.fileUrl,
+      },
+    });
+  }
+
+  async getSurveyReports(inspectionId: string, userId: string, role: Role) {
+    return this.prisma.surveyReport.findMany({
+      where: { inspectionId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async deleteSurveyReport(inspectionId: string, reportId: string, userId: string, role: Role) {
+    return this.prisma.surveyReport.delete({
+      where: { id: reportId },
+    });
+  }
+
+  async createCrossSection(inspectionId: string, dto: CreateCrossSectionDto, userId: string, role: Role) {
+    const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId } });
+    if (!inspection) throw new NotFoundException('Inspection not found');
+
+    return this.prisma.crossSection.create({
+      data: {
+        inspectionId,
+        name: dto.name,
+        startPoint: dto.startPoint,
+        endPoint: dto.endPoint,
+        sampleData: dto.sampleData,
+        length: dto.length,
+        minElev: dto.minElev,
+        maxElev: dto.maxElev,
+        slope: dto.slope,
+      },
+    });
+  }
+
+  async getCrossSections(inspectionId: string, userId: string, role: Role) {
+    return this.prisma.crossSection.findMany({
+      where: { inspectionId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async deleteCrossSection(inspectionId: string, sectionId: string, userId: string, role: Role) {
+    return this.prisma.crossSection.delete({
+      where: { id: sectionId },
+    });
+  }
+
+  async createSiteMeasurement(inspectionId: string, dto: CreateSiteMeasurementDto, userId: string, role: Role) {
+    const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId } });
+    if (!inspection) throw new NotFoundException('Inspection not found');
+
+    return this.prisma.siteMeasurement.create({
+      data: {
+        inspectionId,
+        type: dto.type,
+        points: dto.points,
+        values: dto.values,
+        label: dto.label,
+      },
+    });
+  }
+
+  async getSiteMeasurements(inspectionId: string, userId: string, role: Role) {
+    return this.prisma.siteMeasurement.findMany({
+      where: { inspectionId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async deleteSiteMeasurement(inspectionId: string, measurementId: string, userId: string, role: Role) {
+    return this.prisma.siteMeasurement.delete({
+      where: { id: measurementId },
+    });
+  }
+
+  async processTileset(id: string, userEnterpriseId: string, role: Role) {
+    const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+    if (!inspection) throw new NotFoundException('Inspection not found');
+
+    if (inspection.project.enterpriseId !== userEnterpriseId && role !== Role.ADMIN) {
+      throw new ForbiddenException('Only the creator or admin can process 3D tiles for this inspection');
+    }
+
+    const bucket = 'virtual-inspections';
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tileset-'));
+    const zipPath = path.join(tempDir, 'tileset.zip');
+
+    try {
+      // 1. Download tileset.zip from MinIO
+      await this.storageService.downloadFile(bucket, `inspections/${id}/tileset.zip`, zipPath);
+
+      // 2. Unzip using AdmZip
+      const AdmZip = require('adm-zip');
+      const zip = new AdmZip(zipPath);
+      const extractDir = path.join(tempDir, 'extracted');
+      zip.extractAllTo(extractDir, true);
+
+      // 3. Intelligently locate the 3D Tiles root json file
+      // Could be 'tileset.json', 'tileset_cesium_lods.json', 'tileset_textured_lods.json', etc.
+      let rootJsonDir = extractDir;
+      let rootJsonName = 'tileset.json';
+      let foundJsonPath: string | null = null;
+
+      const searchForTilesetJson = (dir: string): void => {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name);
+          if (!entry.isDirectory() && entry.name.toLowerCase().endsWith('.json')) {
+            try {
+              const content = fs.readFileSync(full, 'utf-8');
+              const parsed = JSON.parse(content);
+              // Check if it matches 3D Tileset spec (has 'asset' and 'geometricError' or 'root')
+              if (parsed.asset || parsed.root || parsed.geometricError !== undefined) {
+                foundJsonPath = full;
+                rootJsonDir = dir;
+                rootJsonName = entry.name;
+                return;
+              }
+            } catch (e) {
+              // Not a valid JSON or parsing error, continue
+            }
+          }
+          if (entry.isDirectory()) {
+            searchForTilesetJson(full);
+            if (foundJsonPath) return;
+          }
+        }
+      };
+
+      searchForTilesetJson(extractDir);
+
+      // Fallback: If no 3D tiles JSON found with metadata, search for any json file
+      if (!foundJsonPath) {
+        const findAnyJson = (dir: string): void => {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const full = path.join(dir, entry.name);
+            if (!entry.isDirectory() && entry.name.toLowerCase().endsWith('.json')) {
+              foundJsonPath = full;
+              rootJsonDir = dir;
+              rootJsonName = entry.name;
+              return;
+            }
+            if (entry.isDirectory()) {
+              findAnyJson(full);
+              if (foundJsonPath) return;
+            }
+          }
+        };
+        findAnyJson(extractDir);
+      }
+
+      console.log(`[processTileset] Located 3D Tiles root at: ${rootJsonDir}, primary file: ${rootJsonName}`);
+
+      // 4. Recursively upload all files to MinIO preserving relative paths from rootJsonDir
+      const uploadRecursive = async (currDir: string, relPath: string = '') => {
+        const entries = fs.readdirSync(currDir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(currDir, entry.name);
+          const s3Rel = relPath ? `${relPath}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) {
+            await uploadRecursive(fullPath, s3Rel);
+          } else {
+            // Auto-decompress gzip b3dm / pnts / i3dm files
+            if (entry.name.endsWith('.b3dm') || entry.name.endsWith('.pnts') || entry.name.endsWith('.i3dm')) {
+              try {
+                const buf = fs.readFileSync(fullPath);
+                if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+                  const decompressed = zlib.gunzipSync(buf);
+                  fs.writeFileSync(fullPath, decompressed);
+                  console.log(`[processTileset] Auto-decompressed gzip tile: ${entry.name} (${buf.length} -> ${decompressed.length} bytes)`);
+                }
+              } catch (e) {
+                console.warn(`[processTileset] Gzip check error on ${entry.name}:`, e.message);
+              }
+            }
+
+            // Auto-normalize JSON tilesets content.url -> content.uri
+            if (entry.name.endsWith('.json')) {
+              try {
+                const buf = fs.readFileSync(fullPath);
+                const json = JSON.parse(buf.toString('utf-8'));
+                if (json.root) {
+                  const normalizeNode = (node: any) => {
+                    if (!node) return;
+                    if (node.content) {
+                      if (node.content.url && !node.content.uri) {
+                        node.content.uri = node.content.url;
+                      }
+                    }
+                    if (Array.isArray(node.children)) {
+                      node.children.forEach(normalizeNode);
+                    }
+                  };
+                  normalizeNode(json.root);
+                  fs.writeFileSync(fullPath, JSON.stringify(json, null, 2));
+                }
+              } catch (e) {}
+            }
+
+            const s3Dest = `inspections/${id}/tileset/${s3Rel}`;
+            let contentType = 'application/octet-stream';
+            if (entry.name.endsWith('.json')) contentType = 'application/json';
+            else if (entry.name.endsWith('.b3dm')) contentType = 'application/octet-stream';
+            else if (entry.name.endsWith('.glb')) contentType = 'model/gltf-binary';
+            else if (entry.name.endsWith('.pnts')) contentType = 'application/octet-stream';
+            
+            await this.storageService.uploadFile(bucket, s3Dest, fullPath, contentType);
+
+            // If the primary json file is named something other than tileset.json, also create a 'tileset.json' alias
+            if (currDir === rootJsonDir && entry.name === rootJsonName && rootJsonName !== 'tileset.json') {
+              await this.storageService.uploadFile(bucket, `inspections/${id}/tileset/tileset.json`, fullPath, 'application/json');
+            }
+          }
+        }
+      };
+
+      await uploadRecursive(rootJsonDir);
+
+      // 5. Update inspection record with the tileset URL
+      const relativeTilesetUrl = `inspections/${id}/tileset/${rootJsonName}`;
+      await this.prisma.inspection.update({
+        where: { id },
+        data: { tilesetUrl: relativeTilesetUrl },
+      });
+
+      console.log(`[processTileset] 3D Tileset unpacked successfully. tilesetUrl = ${relativeTilesetUrl}`);
+      return { status: 'SUCCESS', tilesetUrl: relativeTilesetUrl };
+    } catch (err) {
+      console.error(`[processTileset] Error:`, err);
+      throw new InternalServerErrorException(`Failed to unpack 3D Tileset: ${err.message}`);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
 }
+
+

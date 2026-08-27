@@ -65,6 +65,21 @@ model Inspection {
   videoUrl          String?
   visibility        Visibility   @default(PRIVATE)
   
+  // Drone Survey Metadata
+  surveyDate        DateTime?
+  droneModel        String?
+  gsd               Float?       // Ground Sampling Distance in cm/px
+  flightAltitude    Float?       // Flight altitude in meters
+  coordinateSystem  String?      // e.g., EPSG:4326 / UTM
+  tilesetUrl        String?      // MinIO / S3 path to tileset.json or textured LODs
+  orthoUrl          String?      // MinIO path to Orthoprojection / Orthomosaic image
+  orthoBounds       Json?        // Georeferenced bounds / dimensions / offsets
+  dsmUrl            String?      // Digital Surface Model raster/GeoTIFF
+  dtmUrl            String?      // Digital Terrain Model raster/GeoTIFF
+  dsmMinElevation   Float?
+  dsmMaxElevation   Float?
+  contoursUrl       String?      // Contours vector (GeoJSON / DXF)
+  
   projectId         String
   project           Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   
@@ -74,6 +89,9 @@ model Inspection {
   tags              Tag[]
   scans             Scan[]
   areaPointers      AreaPointer[]
+  surveyReports     SurveyReport[]
+  crossSections     CrossSection[]
+  siteMeasurements  SiteMeasurement[]
   
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
@@ -199,3 +217,49 @@ model BakedPanorama {
   stagingProfileId String
   stagingProfile   StagingProfile @relation(fields: [stagingProfileId], references: [id], onDelete: Cascade)
 }
+
+enum ReportType {
+  ALIGNMENT
+  MAP_VIEW
+  ORTHO_PROJECTION
+  QUALITY
+  CUSTOM
+}
+
+model SurveyReport {
+  id           String       @id @default(uuid())
+  inspectionId String
+  inspection   Inspection   @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  reportType   ReportType   @default(CUSTOM)
+  title        String
+  summary      Json?        // Extracted stats: camera count, tie points, mean reprojection error, GSD, area covered
+  fileUrl      String       // Path to PDF / HTML / Image in MinIO
+  createdAt    DateTime     @default(now())
+}
+
+model CrossSection {
+  id           String       @id @default(uuid())
+  inspectionId String
+  inspection   Inspection   @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  name         String
+  startPoint   Json         // { x, y, z }
+  endPoint     Json         // { x, y, z }
+  sampleData   Json         // Array of { distance, elevation, x, y, z }
+  length       Float
+  minElev      Float
+  maxElev      Float
+  slope        Float
+  createdAt    DateTime     @default(now())
+}
+
+model SiteMeasurement {
+  id           String       @id @default(uuid())
+  inspectionId String
+  inspection   Inspection   @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  type         String       // DISTANCE_3D, DISTANCE_2D, HEIGHT_DIFF, AREA, VOLUME
+  points       Json         // Array of coordinates
+  values       Json         // { dist3D, dist2D, distZ, area, volumeCut, volumeFill, etc. }
+  label        String?
+  createdAt    DateTime     @default(now())
+}
+

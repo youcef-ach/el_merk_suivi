@@ -195,8 +195,32 @@ function ProjectDetailContent() {
                        {insp.visibility}
                      </span>
                    </div>
+
+                   {/* Drone Photogrammetry Deliverable Badges */}
+                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                     {insp.tilesetUrl && (
+                       <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4', border: '1px solid rgba(6, 182, 212, 0.3)', fontFamily: 'monospace' }}>
+                         3D TILES
+                       </span>
+                     )}
+                     {insp.orthoUrl && (
+                       <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', fontFamily: 'monospace' }}>
+                         ORTHOMOSAIC
+                       </span>
+                     )}
+                     {insp.gsd && (
+                       <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)', fontFamily: 'monospace' }}>
+                         GSD {insp.gsd}cm
+                       </span>
+                     )}
+                     {insp.surveyDate && (
+                       <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', fontFamily: 'monospace' }}>
+                         Flight: {new Date(insp.surveyDate).toLocaleDateString()}
+                       </span>
+                     )}
+                   </div>
                    
-                   <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginBottom: '16px' }}>
+                   <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginBottom: '14px' }}>
                       Created: {new Date(insp.createdAt).toLocaleDateString()}
                    </div>
    

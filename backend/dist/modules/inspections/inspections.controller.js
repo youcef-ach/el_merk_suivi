@@ -69,6 +69,9 @@ let InspectionsController = class InspectionsController {
     async processGlb(id, user) {
         return this.inspectionsService.processGlb(id, user.enterpriseId, user.role);
     }
+    async processTileset(id, user) {
+        return this.inspectionsService.processTileset(id, user.enterpriseId, user.role);
+    }
 };
 exports.InspectionsController = InspectionsController;
 __decorate([
@@ -187,6 +190,14 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], InspectionsController.prototype, "processGlb", null);
+__decorate([
+    (0, common_1.Post)(':id/process-tileset'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], InspectionsController.prototype, "processTileset", null);
 exports.InspectionsController = InspectionsController = __decorate([
     (0, common_1.Controller)('projects/:projectId/inspections'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, roles_guard_1.RolesGuard),

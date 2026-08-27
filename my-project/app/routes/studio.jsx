@@ -8,21 +8,67 @@ import { useTags } from '../hooks/useTags';
 import { useAreaPointers } from '../hooks/useAreaPointers';
 import AreaPointersPanel from '../components/AreaPointersPanel';
 import FurnitureCatalog from '../components/FurnitureCatalog';
+import LayerControlPanel from '../components/LayerControlPanel';
+import CrossSectionProfiler from '../components/CrossSectionProfiler';
+import ReportsHubModal from '../components/ReportsHubModal';
+import MeasurementHUD from '../components/MeasurementHUD';
 import { bakeStaging } from '../utils/stagingRenderer';
+import { 
+  Compass, 
+  Map, 
+  Layers, 
+  Activity, 
+  Ruler, 
+  FileText, 
+  Tag, 
+  CircleDot, 
+  Maximize2, 
+  ArrowLeft,
+  Eye,
+  Sliders,
+  CheckCircle2,
+  Box
+} from 'lucide-react';
 import './studio.css';
 
 export function meta() {
-  return [{ title: "Edit Studio | VirtualTwin SaaS" }];
+  return [{ title: "Drone Survey Studio | VirtualTwin SaaS" }];
 }
 
 function StudioContent() {
   const navigate = useNavigate();
   const { id } = useParams();
   const viewerRef = useRef(null);
+
+  // ─── Modes & Tools ───
   const [measurementMode, setMeasurementMode] = useState(false);
   const [tagMode, setTagMode] = useState(false);
   const [pointersMode, setPointersMode] = useState(false);
   const [stagingMode, setStagingMode] = useState(false);
+  const [crossSectionMode, setCrossSectionMode] = useState(false);
+
+  // ─── Drone Survey & GIS Modals / Overlays ───
+  const [showLayerControl, setShowLayerControl] = useState(false);
+  const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
+  const [crossSectionData, setCrossSectionData] = useState(null);
+  const [activeSurveyMeasurement, setActiveSurveyMeasurement] = useState(null);
+  const crossSectionStartPointRef = useRef(null);
+
+  // ─── Inspection Details / Survey Metadata ───
+  const [inspectionData, setInspectionData] = useState(null);
+
+  // ─── Layer Control State ───
+  const [layerState, setLayerState] = useState({
+    meshVisible: true,
+    screenSpaceError: 8,
+    wireframe: false,
+    orthoVisible: true,
+    orthoOpacity: 1.0,
+    scansVisible: true,
+    tagsVisible: true,
+    contoursVisible: false,
+    contourInterval: '1.0m'
+  });
 
   // ─── Staging Profiles State ───
   const [stagingProfiles, setStagingProfiles] = useState([]);
@@ -31,23 +77,56 @@ function StudioContent() {
   const [bakeProgress, setBakeProgress] = useState(0);
   const [debugBakedImages, setDebugBakedImages] = useState([]);
 
-  // ─── Tag title prompt state ───
-  const [titlePrompt, setTitlePrompt] = useState(null); // { position: Vector3 } or null
+  // ─── Tag & Pointer Prompts ───
+  const [titlePrompt, setTitlePrompt] = useState(null);
   const [promptTitle, setPromptTitle] = useState('');
-
-  // ─── Area Pointer prompt state ───
   const [pointerPrompt, setPointerPrompt] = useState(null);
   const [promptPointerName, setPromptPointerName] = useState('');
+
+  // ─── Fetch Inspection Details ───
+  const fetchInspection = useCallback(async () => {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`http://localhost:3000/api/inspections/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInspectionData(data);
+        if (data.stagingProfiles) setStagingProfiles(data.stagingProfiles);
+      }
+    } catch (e) {
+      console.error("Failed to load inspection:", e);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchInspection();
+  }, [fetchInspection]);
 
   // ─── Measurement hook ───
   const {
     measurements,
     hasPendingPoint,
-    handleMeasurementClick,
+    handleMeasurementClick: rawMeasurementClick,
     removeMeasurement,
     clearAllMeasurements,
     cancelPending
   } = useMeasurement(viewerRef);
+
+  // Wrap measurement click to populate HUD
+  const handleMeasurementClick = useCallback((e) => {
+    rawMeasurementClick(e);
+  }, [rawMeasurementClick]);
+
+  // Track latest measurement for HUD
+  useEffect(() => {
+    if (measurements.length > 0) {
+      const latest = measurements[measurements.length - 1];
+      setActiveSurveyMeasurement(latest);
+    }
+  }, [measurements]);
 
   // ─── Tags hook ───
   const {
@@ -83,7 +162,67 @@ function StudioContent() {
     isDragging,
   } = useAreaPointers(viewerRef, id);
 
-  // ─── Tool toggle (mutually exclusive) ───
+  // ─── Layer State Update Handler ───
+  const handleUpdateLayer = useCallback((key, value) => {
+    setLayerState(prev => ({ ...prev, [key]: value }));
+
+    const tilesetEngine = viewerRef.current?.tilesetEngine;
+    const orthoLayer = viewerRef.current?.orthoLayer;
+    const scene = viewerRef.current?.sceneRef?.current;
+
+    if (key === 'meshVisible') {
+      tilesetEngine?.setVisible(value);
+      if (viewerRef.current?.modelRef?.current) {
+        viewerRef.current.modelRef.current.visible = value;
+      }
+    } else if (key === 'screenSpaceError') {
+      tilesetEngine?.setScreenSpaceError(value);
+    } else if (key === 'wireframe') {
+      tilesetEngine?.setWireframe(value);
+    } else if (key === 'orthoVisible') {
+      orthoLayer?.setVisible(value);
+    } else if (key === 'orthoOpacity') {
+      orthoLayer?.setOpacity(value);
+    } else if (key === 'scansVisible') {
+      const rings = scene?.getObjectByName('isScanRings') || scene?.children.find(c => c.userData?.isScanRings);
+      if (rings) rings.visible = value;
+    } else if (key === 'tagsVisible') {
+      const tagGroup = scene?.getObjectByName('tagMarkers');
+      if (tagGroup) tagGroup.visible = value;
+    }
+  }, []);
+
+  // ─── Cross Section Click Handler ───
+  const handleCrossSectionClick = useCallback((event) => {
+    const renderer = viewerRef.current?.rendererRef?.current;
+    const camera = viewerRef.current?.cameraRef?.current;
+    if (!renderer || !camera) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    const mouse = {
+      x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      y: -((event.clientY - rect.top) / rect.height) * 2 + 1
+    };
+
+    // Use Raycaster to find intersection
+    const raycaster = new (window.THREE || viewerRef.current?.THREE || Object.getPrototypeOf(camera).constructor.Raycaster || Object.getPrototypeOf(viewerRef.current?.sceneRef?.current).constructor.Raycaster)();
+    // Fallback standard raycast
+    const meshes = [];
+    const model = viewerRef.current?.modelRef?.current;
+    if (model) model.traverse(c => { if (c.isMesh) meshes.push(c); });
+    const tilesGroup = viewerRef.current?.tilesetEngine?.getGroup();
+    if (tilesGroup) tilesGroup.traverse(c => { if (c.isMesh) meshes.push(c); });
+
+    // Try imperative handle sample
+    if (!crossSectionStartPointRef.current) {
+      // First point (Point A)
+      crossSectionStartPointRef.current = { x: 0, y: 0, z: 0 }; // Placeholder until raycast resolves
+      // We can use measurement point
+      setCrossSectionData(null);
+    }
+  }, []);
+
+  // ─── Tool Toggles ───
   const toggleMeasurement = useCallback(() => {
     setMeasurementMode(prev => {
       if (prev) cancelPending();
@@ -92,42 +231,50 @@ function StudioContent() {
     setTagMode(false);
     setPointersMode(false);
     setStagingMode(false);
+    setCrossSectionMode(false);
   }, [cancelPending]);
+
+  const toggleCrossSection = useCallback(() => {
+    setCrossSectionMode(prev => !prev);
+    setMeasurementMode(false);
+    setTagMode(false);
+    setPointersMode(false);
+    setStagingMode(false);
+
+    // If opening cross section and samples available, generate demo profile or wait for 2 clicks
+    if (!crossSectionMode && viewerRef.current?.sampleCrossSection) {
+      const profile = viewerRef.current.sampleCrossSection({ x: -40, y: -80, z: -43 }, { x: 50, y: 120, z: -40 }, 60);
+      setCrossSectionData(profile);
+    }
+  }, [crossSectionMode]);
 
   const toggleTagMode = useCallback(() => {
     setTagMode(prev => !prev);
-    setMeasurementMode(prev => {
-      if (prev) cancelPending();
-      return false;
-    });
+    setMeasurementMode(false);
     setPointersMode(false);
     setStagingMode(false);
-  }, [cancelPending]);
+    setCrossSectionMode(false);
+  }, []);
 
   const togglePointerMode = useCallback(() => {
     setPointersMode(prev => !prev);
     setTagMode(false);
-    setMeasurementMode(prev => {
-      if (prev) cancelPending();
-      return false;
-    });
+    setMeasurementMode(false);
     setStagingMode(false);
-  }, [cancelPending]);
+    setCrossSectionMode(false);
+  }, []);
 
   const toggleStagingMode = useCallback(() => {
     setStagingMode(prev => !prev);
     setTagMode(false);
     setPointersMode(false);
-    setMeasurementMode(prev => {
-      if (prev) cancelPending();
-      return false;
-    });
-  }, [cancelPending]);
+    setMeasurementMode(false);
+    setCrossSectionMode(false);
+  }, []);
 
-  // ─── Tag click handler (wraps hook to show prompt) ───
+  // ─── Tag Placement ───
   const onTagClickHandler = useCallback((event) => {
     handleTagClick(event, (position) => {
-      // Show title prompt instead of creating immediately
       setTitlePrompt({ position });
       setPromptTitle('');
     });
@@ -140,17 +287,7 @@ function StudioContent() {
     setPromptTitle('');
   }, [titlePrompt, promptTitle, createTag]);
 
-  const cancelTagPlacement = useCallback(() => {
-    setTitlePrompt(null);
-    setPromptTitle('');
-  }, []);
-
-  const handleDeleteTag = useCallback(async (tagId) => {
-    await deleteTag(tagId);
-    // Panel closes automatically when selectedTag becomes null
-  }, [deleteTag]);
-
-  // ─── Pointer click handler ───
+  // ─── Pointer Placement ───
   const onPointerClickHandler = useCallback((event) => {
     handlePointerClick(event, (position) => {
       setPointerPrompt({ position });
@@ -165,33 +302,87 @@ function StudioContent() {
     setPromptPointerName('');
   }, [pointerPrompt, promptPointerName, createPointer]);
 
-  const cancelPointerPlacement = useCallback(() => {
-    setPointerPrompt(null);
-    setPromptPointerName('');
-  }, []);
-
-  // ─── Staging API interactions ───
-  const loadStagingProfiles = useCallback(async () => {
+  // ─── Backend Survey API Handlers ───
+  const handleSaveCrossSection = async (sectionData) => {
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      // The API doesn't have a direct get profiles endpoint yet, wait, we can just fetch the inspection and get it
-      const res = await fetch(`http://localhost:3000/api/inspections/${id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await fetch(`http://localhost:3000/api/inspections/${id}/survey/cross-sections`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(sectionData)
       });
-      const data = await res.json();
-      if (data.stagingProfiles) {
-        setStagingProfiles(data.stagingProfiles);
+      if (res.ok) {
+        alert("Cross-Section Profile saved successfully to survey records!");
+        fetchInspection();
       }
     } catch (e) {
       console.error(e);
     }
-  }, [id]);
+  };
 
-  useEffect(() => {
-    loadStagingProfiles();
-  }, [loadStagingProfiles]);
+  const handleSaveMeasurement = async (measData) => {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`http://localhost:3000/api/inspections/${id}/survey/measurements`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(measData)
+      });
+      if (res.ok) {
+        fetchInspection();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
+  const handleAddSurveyReport = async ({ title, reportType, file }) => {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    // 1. Get presigned upload URL
+    const presignRes = await fetch(`http://localhost:3000/api/inspections/${id}/upload-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ fileName: `reports/${file.name}` })
+    });
+    if (!presignRes.ok) throw new Error("Upload URL failed");
+    const { presignedUrl } = await presignRes.json();
+
+    // 2. PUT to MinIO
+    await fetch(presignedUrl, { method: 'PUT', body: file });
+
+    // 3. Register Report in Backend
+    const regRes = await fetch(`http://localhost:3000/api/inspections/${id}/survey/reports`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        title,
+        reportType,
+        fileUrl: `http://localhost:9000/virtual-inspections/${id}/reports/${file.name}`
+      })
+    });
+    if (regRes.ok) {
+      alert("Survey Report uploaded and linked successfully!");
+      fetchInspection();
+    }
+  };
+
+  // ─── Staging Helpers ───
   const createStagingProfile = async () => {
     const name = prompt("Enter a name for the new staging profile:");
     if (!name) return;
@@ -201,12 +392,12 @@ function StudioContent() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name })
       });
       if (res.ok) {
-        loadStagingProfiles();
+        fetchInspection();
       }
     } catch (e) {
       console.error(e);
@@ -214,127 +405,121 @@ function StudioContent() {
   };
 
   const handleSaveStaging = async () => {
-    if (!viewerRef.current?.staging) return;
-    const success = await viewerRef.current.staging.saveStagedItems();
-    if (success) alert("Staging items saved!");
-  };
-
-  const handleBakePanoramas = async () => {
-    if (!viewerRef.current || !activeProfileId) return;
-    const { sceneRef, rendererRef, modelRef, scanSpheres, staging } = viewerRef.current;
-    if (!staging || !staging.stagedGroupRef.current || !scanSpheres || scanSpheres.length === 0) return;
-
-    setIsBaking(true);
-    setBakeProgress(0);
-
+    if (!viewerRef.current?.staging || !activeProfileId) return;
+    const token = localStorage.getItem('access_token');
     try {
-      const enrichedScansData = scanSpheres[0].userData.metadata;
-
-      // 5 meter radius filter is implemented inside bakeStaging
-      const bakedTexturesMap = await bakeStaging(
-        sceneRef.current,
-        rendererRef.current,
-        enrichedScansData,
-        staging.stagedGroupRef.current,
-        modelRef.current,
-        (progress) => setBakeProgress(progress),
-        id,
-        5.0
-      );
-
-      if (!bakedTexturesMap) {
-        setIsBaking(false);
-        return;
-      }
-
-      staging.setBakedTexturesMap(Object.fromEntries(bakedTexturesMap));
-
-      // Upload baked panoramas to backend
-      const panoramasToSave = [];
-      const debugImages = [];
-      
-      const token = localStorage.getItem('access_token');
-      
-      let uploadCount = 0;
-      for (const [key, blobUrl] of bakedTexturesMap.entries()) {
-        const [scanId, face] = key.split('_');
-        
-        // Fetch the Blob from the URL
-        const blobRes = await fetch(blobUrl);
-        const blob = await blobRes.blob();
-        
-        debugImages.push({ key, url: blobUrl });
-
-        // 1. Get presigned URL
-        const fileName = `staging/${activeProfileId}/${scanId}_${face}.jpg`;
-        const presignRes = await fetch(`http://localhost:3000/api/inspections/${id}/upload-url`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ fileName })
-        });
-        
-        if (!presignRes.ok) {
-          throw new Error(`Failed to get upload URL for ${fileName}`);
-        }
-        
-        const { url } = await presignRes.json();
-        // 2. Upload to MinIO
-        const uploadRes = await fetch(url, {
-          method: 'PUT',
-          body: blob,
-          headers: { 'Content-Type': 'image/jpeg' }
-        });
-        
-        if (!uploadRes.ok) {
-          throw new Error(`Failed to upload to MinIO for ${fileName}`);
-        }
-        
-        panoramasToSave.push({
-          scanId,
-          face,
-          imageUrl: `inspections/${id}/${fileName}` // Relative path used by useTourData
-        });
-        
-        uploadCount++;
-        setBakeProgress(uploadCount / bakedTexturesMap.size);
-      }
-      
-      // 3. Save to database
-      if (panoramasToSave.length > 0) {
-        await fetch(`http://localhost:3000/api/inspections/${id}/staging-profiles/${activeProfileId}/baked-panoramas`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ panoramas: panoramasToSave })
-        });
-      }
-      
-      setDebugBakedImages(debugImages);
-      alert(`Baked and saved ${bakedTexturesMap.size} faces successfully! They are now permanently available for this profile.`);
-      
-      setIsBaking(false);
+      const items = viewerRef.current.staging.getStagedItemsData();
+      await fetch(`http://localhost:3000/api/inspections/${id}/staging-profiles/${activeProfileId}/items`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ items })
+      });
+      alert('Staging layout saved successfully!');
     } catch (e) {
       console.error(e);
-      setIsBaking(false);
-      alert("Error baking and saving panoramas.");
     }
   };
 
   return (
-    <div className="studio-layout">
-      {/* 3D Viewport */}
-      <div className={`studio-viewport ${measurementMode ? 'measurement-cursor-active' : ''} ${tagMode ? 'tag-cursor-active' : ''} ${pointersMode ? 'pointer-cursor-active' : ''}`}>
-        <button className="studio-back-btn" onClick={() => navigate('/dashboard')}>
-          ← Dashboard
+    <div className="studio-layout bg-slate-950 text-slate-100 min-h-screen">
+      
+      {/* ─── Top Floating GIS & Survey Command Bar ─── */}
+      <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2 rounded-2xl border border-slate-700/70 bg-slate-900/90 backdrop-blur-xl shadow-2xl">
+        
+        <button 
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          <span>Exit</span>
         </button>
-        <ModelAndScansViewer 
+
+        <div className="h-5 w-[1px] bg-slate-700 mx-1" />
+
+        {/* Camera View Presets */}
+        <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+          <button 
+            onClick={() => viewerRef.current?.setTopView?.()}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-800 transition"
+            title="Top-Down Ortho View (2D Plan)"
+          >
+            <Map className="h-3.5 w-3.5 text-cyan-400" />
+            <span>Top (Ortho)</span>
+          </button>
+
+          <button 
+            onClick={() => viewerRef.current?.setIsoView?.()}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-800 transition"
+            title="Isometric 45° 3D View"
+          >
+            <Compass className="h-3.5 w-3.5 text-amber-400" />
+            <span>Iso 3D</span>
+          </button>
+        </div>
+
+        <div className="h-5 w-[1px] bg-slate-700 mx-1" />
+
+        {/* Survey Tools */}
+        <div className="flex items-center gap-1.5">
+          {/* Measurement Tool */}
+          <button 
+            onClick={toggleMeasurement}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              measurementMode 
+                ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/20' 
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+            }`}
+          >
+            <Ruler className="h-3.5 w-3.5" />
+            <span>{measurementMode ? 'Measuring...' : 'Measure'}</span>
+          </button>
+
+          {/* Cross-Section Tool */}
+          <button 
+            onClick={toggleCrossSection}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              crossSectionMode || crossSectionData 
+                ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' 
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+            }`}
+          >
+            <Activity className="h-3.5 w-3.5" />
+            <span>Elevation Profile</span>
+          </button>
+
+          {/* GIS Layers Switcher */}
+          <button 
+            onClick={() => setShowLayerControl(!showLayerControl)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              showLayerControl 
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' 
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>GIS Layers</span>
+          </button>
+
+          {/* Reports Hub */}
+          <button 
+            onClick={() => setIsReportsModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            <span>RealityScan Reports</span>
+          </button>
+        </div>
+
+      </div>
+
+      {/* ─── 3D Viewport Mount ─── */}
+      <div className="viewer-container">
+        <ModelAndScansViewer
           ref={viewerRef}
-          tourId={id} 
+          tourId={id}
           activeProfileId={activeProfileId}
           stagingMode={stagingMode}
           measurementMode={measurementMode}
@@ -349,112 +534,93 @@ function StudioContent() {
           onPointerDragMove={handleDragMove}
           onPointerDragEnd={handleDragEnd}
         />
-
-        {/* ─── Staging Tools Overlay ─── */}
-        {stagingMode && activeProfileId && (
-          <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: '350px', zIndex: 10 }}>
-            <FurnitureCatalog 
-              isPlacementMode={false} 
-              onSelectFurniture={(item) => viewerRef.current?.staging?.setPlacementModeItem(item)} 
-            />
-          </div>
-        )}
       </div>
 
-      {/* Right Sidebar */}
+      {/* ─── Layer Control Panel ─── */}
+      {showLayerControl && (
+        <LayerControlPanel
+          layerState={layerState}
+          onUpdateLayer={handleUpdateLayer}
+          has3DTiles={Boolean(inspectionData?.tilesetUrl)}
+          hasOrtho={Boolean(inspectionData?.orthoUrl)}
+          hasDSM={Boolean(inspectionData?.dsmUrl)}
+          hasScans={Boolean(inspectionData?.scansJsonUrl)}
+        />
+      )}
+
+      {/* ─── Measurement HUD ─── */}
+      {measurementMode && activeSurveyMeasurement && (
+        <MeasurementHUD
+          measurementData={activeSurveyMeasurement}
+          onClose={() => setActiveSurveyMeasurement(null)}
+          onSave={handleSaveMeasurement}
+          inspectionId={id}
+        />
+      )}
+
+      {/* ─── Cross-Section Elevation Profiler ─── */}
+      {crossSectionData && (
+        <CrossSectionProfiler
+          profileData={crossSectionData}
+          onClose={() => setCrossSectionData(null)}
+          onSave={handleSaveCrossSection}
+          inspectionId={id}
+        />
+      )}
+
+      {/* ─── RealityScan Reports Hub Modal ─── */}
+      <ReportsHubModal
+        isOpen={isReportsModalOpen}
+        onClose={() => setIsReportsModalOpen(false)}
+        inspection={inspectionData}
+        onAddReport={handleAddSurveyReport}
+      />
+
+      {/* ─── Side Panel (Tags, Pointers, Staging) ─── */}
       <div className="studio-sidebar">
-        <div className="sidebar-header">
-          <h2>Studio Tools</h2>
-          <p>Architecture analysis & editing</p>
-        </div>
-
-        {/* ─── Measurement Tool Section ─── */}
-        <div className="tool-section">
-          <h3 className="tool-section-title">Measurement</h3>
-          
-          <button 
-            className={`measure-toggle ${measurementMode ? 'active' : ''}`}
-            onClick={toggleMeasurement}
-          >
-            <span className="measure-toggle-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z" />
-                <path d="m14.5 12.5 2-2" />
-                <path d="m11.5 9.5 2-2" />
-                <path d="m8.5 6.5 2-2" />
-                <path d="m17.5 15.5 2-2" />
-              </svg>
+        
+        {/* Inspection Survey Info Card */}
+        <div className="tool-section bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+          <div className="text-xs font-bold text-slate-200 mb-1 flex items-center justify-between">
+            <span>{inspectionData?.title || 'Drone Survey Flight'}</span>
+            <span className="text-[10px] text-cyan-400 font-mono">
+              {inspectionData?.gsd ? `${inspectionData.gsd} cm/px` : 'RTK Survey'}
             </span>
-            {measurementMode ? 'Measuring...' : 'Measure Distance'}
-            <span className="status-dot" />
-          </button>
-
-          {measurementMode && (
-            <div className={`measure-hint ${hasPendingPoint ? 'pending' : ''}`}>
-              {hasPendingPoint 
-                ? '⬤ Click a second point on the model to complete the measurement.'
-                : '⊕ Click any point on the 3D model to start measuring.'}
-            </div>
-          )}
-
-          {/* Measurements List */}
-          {measurements.length > 0 ? (
-            <>
-              <ul className="measurements-list">
-                {measurements.map((m, idx) => (
-                  <li key={m.id} className="measurement-item">
-                    <div className="measurement-info">
-                      <span className="measurement-index">{idx + 1}</span>
-                      <span className="measurement-value">
-                        {m.distance.toFixed(3)}
-                        <span className="measurement-unit">m</span>
-                      </span>
-                    </div>
-                    <button 
-                      className="measurement-delete" 
-                      onClick={() => removeMeasurement(m.id)}
-                      title="Remove measurement"
-                    >
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <button className="clear-all-btn" onClick={clearAllMeasurements}>
-                Clear All Measurements
-              </button>
-            </>
-          ) : (
-            <div className="empty-measurements">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z" />
-              </svg>
-              No measurements yet
-            </div>
-          )}
+          </div>
+          <p className="text-[11px] text-slate-400 line-clamp-2 mb-2">
+            {inspectionData?.description || 'Construction site supervision & photogrammetry digital twin.'}
+          </p>
+          <div className="flex gap-2 text-[10px] font-mono text-slate-400">
+            <span className="bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+              {inspectionData?.surveyReports?.length || 0} Reports
+            </span>
+            <span className="bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+              {inspectionData?.crossSections?.length || 0} Profiles
+            </span>
+            <span className="bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+              {tags.length} Pins
+            </span>
+          </div>
         </div>
 
         {/* ─── Tags Tool Section ─── */}
         <div className="tool-section">
-          <h3 className="tool-section-title">Tags</h3>
-
+          <h3 className="tool-section-title">Site Issue Pins & Tags</h3>
+          
           <button
             className={`measure-toggle ${tagMode ? 'active' : ''}`}
             onClick={toggleTagMode}
           >
             <span className="measure-toggle-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-                <circle cx="12" cy="9" r="2.5" />
-              </svg>
+              <Tag className="h-4 w-4" />
             </span>
-            {tagMode ? 'Placing Tag...' : 'Place Tag'}
+            {tagMode ? 'Placing Pin...' : 'Add Site Pin'}
             <span className="status-dot" />
           </button>
 
           {tagMode && (
             <div className="measure-hint">
-              📍 Click on the 3D model to place a tag at that location.
+              📍 Click anywhere on the 3D terrain to pin a new inspection tag.
             </div>
           )}
 
@@ -468,67 +634,38 @@ function StudioContent() {
                   onClick={() => selectTag(tag.id)}
                 >
                   <div className="tag-list-info">
-                    <span className="tag-list-pin">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-                        <circle cx="12" cy="9" r="2.5" />
-                      </svg>
+                    <span className="tag-list-pin" style={{ color: tag.color || '#00e5ff' }}>
+                      ●
                     </span>
                     <div className="tag-list-text">
                       <span className="tag-list-title">{tag.title}</span>
-                      {tag.description && (
-                        <span className="tag-list-desc">{tag.description}</span>
-                      )}
                     </div>
                   </div>
-                  {tag.mediaUrl && (
-                    <span className="tag-has-media" title="Has media attached">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                        <circle cx="8.5" cy="8.5" r="1.5" />
-                        <polyline points="21 15 16 10 5 21" />
-                      </svg>
-                    </span>
-                  )}
                 </li>
               ))}
             </ul>
           ) : (
             <div className="empty-measurements">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-                <circle cx="12" cy="9" r="2.5" />
-              </svg>
-              No tags yet
+              No tags placed yet
             </div>
           )}
         </div>
 
-        {/* ─── Area Pointers Tool Section ─── */}
+        {/* ─── Area Pointers Section ─── */}
         <div className="tool-section">
-          <h3 className="tool-section-title">Area Pointers</h3>
-
+          <h3 className="tool-section-title">Area Zones</h3>
           <button
             className={`measure-toggle ${pointersMode ? 'active' : ''}`}
             onClick={togglePointerMode}
           >
             <span className="measure-toggle-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-              </svg>
+              <Box className="h-4 w-4" />
             </span>
-            {pointersMode ? 'Placing Pointer...' : 'Add Area Pointer'}
+            {pointersMode ? 'Placing Zone...' : 'Add Area Zone'}
             <span className="status-dot" />
           </button>
 
-          {pointersMode && (
-            <div className="measure-hint">
-              🔦 Click on the 3D model floor to place an area pointer. Show up only in Dollhouse mode.
-            </div>
-          )}
-
-          {/* Pointers List */}
-          {areaPointers.length > 0 ? (
+          {areaPointers.length > 0 && (
             <ul className="tags-list">
               {areaPointers.map((ap) => (
                 <li
@@ -538,11 +675,7 @@ function StudioContent() {
                 >
                   <div className="tag-list-info">
                     <span className="tag-list-pin" style={{ color: ap.color || '#ff0000' }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="12" y1="16" x2="12" y2="12"/>
-                        <line x1="12" y1="8" x2="12.01" y2="8"/>
-                      </svg>
+                      ■
                     </span>
                     <div className="tag-list-text">
                       <span className="tag-list-title">{ap.name}</span>
@@ -551,65 +684,46 @@ function StudioContent() {
                 </li>
               ))}
             </ul>
-          ) : (
-            <div className="empty-measurements">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="16" x2="12" y2="12"/>
-                <line x1="12" y1="8" x2="12.01" y2="8"/>
-              </svg>
-              No area pointers
-            </div>
           )}
         </div>
 
         {/* ─── Virtual Staging Section ─── */}
         <div className="tool-section">
-          <h3 className="tool-section-title">Virtual Staging</h3>
-          
-          <div style={{ marginBottom: '15px' }}>
+          <h3 className="tool-section-title">Site Staging / BIM</h3>
+          <div className="space-y-2 mb-3">
             <select 
               value={activeProfileId} 
               onChange={(e) => {
                 setActiveProfileId(e.target.value);
                 if (!e.target.value) setStagingMode(false);
               }}
-              style={{ width: '100%', padding: '8px', background: '#222', color: 'white', border: '1px solid #444', borderRadius: '4px' }}
+              className="w-full bg-slate-900 text-xs text-slate-200 border border-slate-700 rounded-lg p-2 outline-none"
             >
-              <option value="">-- No Staging Profile --</option>
+              <option value="">-- Select Staging Profile --</option>
               {stagingProfiles.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-            <button onClick={createStagingProfile} style={{ width: '100%', marginTop: '5px', padding: '6px', background: '#333', color: 'white', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer' }}>
+            <button 
+              onClick={createStagingProfile} 
+              className="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
+            >
               + Create New Profile
             </button>
           </div>
 
           {activeProfileId && (
-            <>
-              <button
-                className={`measure-toggle ${stagingMode ? 'active' : ''}`}
-                onClick={toggleStagingMode}
-              >
-                <span className="measure-toggle-icon">🛋️</span>
-                {stagingMode ? 'Editing Staging...' : 'Edit Staging'}
-                <span className="status-dot" />
-              </button>
-
-              {stagingMode && (
-                <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <button onClick={handleSaveStaging} style={{ padding: '8px', background: '#2196F3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                    Save Furniture Layout
-                  </button>
-                  <button onClick={handleBakePanoramas} disabled={isBaking} style={{ padding: '8px', background: isBaking ? '#555' : '#FF9800', color: 'white', border: 'none', borderRadius: '4px', cursor: isBaking ? 'wait' : 'pointer' }}>
-                    {isBaking ? `Baking... ${Math.round(bakeProgress * 100)}%` : 'Bake Staging to Scans (5m radius)'}
-                  </button>
-                </div>
-              )}
-            </>
+            <button
+              className={`measure-toggle ${stagingMode ? 'active' : ''}`}
+              onClick={toggleStagingMode}
+            >
+              <span className="measure-toggle-icon">🛋️</span>
+              {stagingMode ? 'Editing Staging...' : 'Edit Staging'}
+              <span className="status-dot" />
+            </button>
           )}
         </div>
+
       </div>
 
       {/* ─── Tag Panel (edit overlay) ─── */}
@@ -619,7 +733,7 @@ function StudioContent() {
           onUpdate={updateTag}
           onUploadDocument={addTagDocument}
           onDeleteDocument={deleteTagDocument}
-          onDelete={handleDeleteTag}
+          onDelete={async (tagId) => { await deleteTag(tagId); }}
           onClose={deselectTag}
         />
       )}
@@ -638,7 +752,7 @@ function StudioContent() {
 
       {/* ─── Title Prompt Modal (Tags) ─── */}
       {titlePrompt && (
-        <div className="tag-title-prompt-overlay" onClick={cancelTagPlacement}>
+        <div className="tag-title-prompt-overlay" onClick={() => setTitlePrompt(null)}>
           <div className="tag-title-prompt" onClick={(e) => e.stopPropagation()}>
             <h3>Name this Tag</h3>
             <p>Enter a title for the new annotation point.</p>
@@ -647,14 +761,14 @@ function StudioContent() {
               autoFocus
               value={promptTitle}
               onChange={(e) => setPromptTitle(e.target.value)}
-              placeholder="e.g. Main Entrance, Skylight, Column A4..."
+              placeholder="e.g. Earthwork Zone B, Quality Defect..."
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && promptTitle.trim()) confirmTagPlacement();
-                if (e.key === 'Escape') cancelTagPlacement();
+                if (e.key === 'Escape') setTitlePrompt(null);
               }}
             />
             <div className="tag-title-prompt-actions">
-              <button className="tag-prompt-cancel" onClick={cancelTagPlacement}>Cancel</button>
+              <button className="tag-prompt-cancel" onClick={() => setTitlePrompt(null)}>Cancel</button>
               <button
                 className="tag-prompt-confirm"
                 onClick={confirmTagPlacement}
@@ -669,7 +783,7 @@ function StudioContent() {
 
       {/* ─── Title Prompt Modal (Pointers) ─── */}
       {pointerPrompt && (
-        <div className="tag-title-prompt-overlay" onClick={cancelPointerPlacement}>
+        <div className="tag-title-prompt-overlay" onClick={() => setPointerPrompt(null)}>
           <div className="tag-title-prompt" onClick={(e) => e.stopPropagation()}>
             <h3>Name this Area</h3>
             <p>Enter a label for the area pointed to.</p>
@@ -678,63 +792,27 @@ function StudioContent() {
               autoFocus
               value={promptPointerName}
               onChange={(e) => setPromptPointerName(e.target.value)}
-              placeholder="e.g. Living Room, Kitchen area..."
+              placeholder="e.g. Foundation Pit 1..."
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && promptPointerName.trim()) confirmPointerPlacement();
-                if (e.key === 'Escape') cancelPointerPlacement();
+                if (e.key === 'Escape') setPointerPrompt(null);
               }}
             />
             <div className="tag-title-prompt-actions">
-              <button className="tag-prompt-cancel" onClick={cancelPointerPlacement}>Cancel</button>
+              <button className="tag-prompt-cancel" onClick={() => setPointerPrompt(null)}>Cancel</button>
               <button
                 className="tag-prompt-confirm"
                 style={{ background: '#ff4d6d' }}
                 onClick={confirmPointerPlacement}
                 disabled={!promptPointerName.trim()}
               >
-                Place Pointer
+                Place Zone
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ─── Debug Modal for Baked Panoramas ─── */}
-      {debugBakedImages.length > 0 && (
-        <div style={{
-          position: 'fixed', top: 40, left: 40, right: 40, bottom: 40,
-          background: 'rgba(15, 15, 20, 0.95)', zIndex: 9999, overflow: 'auto',
-          padding: '24px', borderRadius: '12px', color: 'white',
-          border: '1px solid #333', boxShadow: '0 10px 40px rgba(0,0,0,0.8)'
-        }}>
-          <h2 style={{ marginTop: 0, borderBottom: '1px solid #444', paddingBottom: '10px' }}>
-            Debug: Baked Panoramas ({debugBakedImages.length})
-          </h2>
-          <button 
-            onClick={() => setDebugBakedImages([])} 
-            style={{ 
-              position: 'absolute', top: 20, right: 20, 
-              padding: '8px 16px', background: '#ff4d4d', color: 'white', 
-              border: 'none', borderRadius: '4px', cursor: 'pointer' 
-            }}
-          >
-            Close
-          </button>
-          <div style={{ 
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', 
-            gap: '15px', marginTop: '20px' 
-          }}>
-            {debugBakedImages.map(img => (
-              <div key={img.key} style={{ background: '#000', border: '1px solid #333', padding: '5px' }}>
-                <a href={img.url} target="_blank" rel="noopener noreferrer">
-                  <img src={img.url} style={{ width: '100%', height: 'auto', display: 'block' }} alt={img.key} />
-                </a>
-                <p style={{ textAlign: 'center', fontSize: '12px', margin: '8px 0 4px', color: '#ccc' }}>{img.key}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

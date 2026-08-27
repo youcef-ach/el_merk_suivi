@@ -6,9 +6,10 @@ import { disposeScene } from '../utils/threeCleanup';
 
 /**
  * Initializes the core Three.js components and manages the render loop.
+ * Matching the exact tested configuration from 3d_tiles test for 3D Tiles rendering.
  * 
  * @param {Array<THREE.Texture>} preserveTextures - Optional textures to not dispose on unmount.
- * @returns {Object} { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef }
+ * @returns {Object} { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, beforeRenderCallbacksRef }
  */
 export const useThreeScene = (preserveTextures = []) => {
   const mountRef = useRef(null);
@@ -18,6 +19,7 @@ export const useThreeScene = (preserveTextures = []) => {
   const controlsRef = useRef(null);
   const rafRef = useRef(null);
   const keyboardEnabledRef = useRef(true);
+  const beforeRenderCallbacksRef = useRef([]);
   const [sceneReady, setSceneReady] = useState(false);
 
   useEffect(() => {
@@ -25,52 +27,66 @@ export const useThreeScene = (preserveTextures = []) => {
 
     // 1. Scene Setup
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x202020);
+    scene.background = new THREE.Color(0x0b1120);
+    scene.fog = new THREE.FogExp2(0x0b1120, 0.0012);
     sceneRef.current = scene;
     setSceneReady(true);
 
     const width = mountRef.current.clientWidth || window.innerWidth;
     const height = mountRef.current.clientHeight || window.innerHeight;
 
-    // 2. Camera Setup
-    // Tightened near (0.15) and far (300) planes drastically improve GPU depth buffer precision 
-    // to eliminate Z-fighting on overlapping meshes and increase raycast depth accuracy.
-    const camera = new THREE.PerspectiveCamera(75, width / height, 0.15, 300);
-    camera.up.set(0, 0, 1);
-    camera.position.set(5, 5, 5);
+    // 2. Camera Setup (Standard Y-up matching 3d_tiles test)
+    const aspect = width / height;
+    const camera = new THREE.PerspectiveCamera(50, aspect, 0.5, 4000);
+    camera.up.set(0, 1, 0);
+    camera.position.set(0, 140, 220);
     cameraRef.current = camera;
 
-    // 3. Renderer Setup
+    // 3. Renderer Setup (Natural balanced exposure matching 3d_tiles test)
     const renderer = new THREE.WebGLRenderer({ 
-      antialias: false,
-      powerPreference: "high-performance"
+      antialias: true,
+      powerPreference: "high-performance",
+      preserveDrawingBuffer: true
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = false;
-    renderer.toneMapping = THREE.NoToneMapping; // Prevents LDR panoramas from becoming washed out or overly bright
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.toneMappingExposure = 1.0;
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // 4. Lighting
-    // const ambientLight = new THREE.AmbientLight(0xffffff, 10);
-    // scene.add(ambientLight);
+    // 4. Natural True-Color Ambient Lighting (Matching Cesium color fidelity)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    scene.add(ambientLight);
 
-    // 5. Controls
+    const sunLight = new THREE.DirectionalLight(0xffffff, 0.35);
+    sunLight.position.set(100, 250, 100);
+    scene.add(sunLight);
+
+    // 5. OrbitControls (Configured for smooth natural GIS drag)
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+    controls.dampingFactor = 0.08;
+    controls.screenSpacePanning = true;
+    controls.rotateSpeed = -0.9;
+    controls.panSpeed = 1.0;
+    controls.zoomSpeed = 1.2;
+    controls.maxPolarAngle = Math.PI / 2 - 0.01;
+    controls.minDistance = 2.0;
+    controls.maxDistance = 2500;
+    controls.target.set(0, 4, 0);
     controlsRef.current = controls;
 
-    // 6. Keyboard Free Movement
+    // 6. Keyboard Movement
     const keysPressed = new Set();
-    const MOVE_SPEED = 14.0;   // units per second
-    const FAST_MULT = 2.5;    // shift multiplier
+    const MOVE_SPEED = 30.0;
+    const FAST_MULT = 3.0;
     let lastTime = performance.now();
 
     const onKeyDown = (e) => {
       if (!keyboardEnabledRef.current) return;
-      // Ignore if user is typing in an input
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
       keysPressed.add(e.code);
     };
@@ -80,45 +96,35 @@ export const useThreeScene = (preserveTextures = []) => {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    // 7. Animation Loop
+    // 7. Continuous Animation Loop with beforeRender hooks
     const _forward = new THREE.Vector3();
     const _right = new THREE.Vector3();
     const _moveDir = new THREE.Vector3();
-    
-    const lastPos = new THREE.Vector3();
-    const lastQuat = new THREE.Quaternion();
-    let framesToRender = 30; // Force first ~0.5s to render to ensure loading states show up
 
     const animate = () => {
       rafRef.current = requestAnimationFrame(animate);
 
       const now = performance.now();
-      const dt = Math.min((now - lastTime) / 1000, 0.1); // cap at 100ms
+      const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
-      // Apply keyboard movement
+      // Keyboard navigation
       if (keyboardEnabledRef.current && keysPressed.size > 0) {
         const speed = MOVE_SPEED * (keysPressed.has('ShiftLeft') || keysPressed.has('ShiftRight') ? FAST_MULT : 1);
 
-        // Get camera's forward direction (projected onto XY plane for horizontal movement)
         camera.getWorldDirection(_forward);
-        _forward.z = 0;
+        _forward.y = 0;
         _forward.normalize();
 
-        // Right vector = forward × up
         _right.crossVectors(_forward, camera.up).normalize();
 
         _moveDir.set(0, 0, 0);
-
-        // WASD + Arrow keys
         if (keysPressed.has('KeyW') || keysPressed.has('ArrowUp'))    _moveDir.add(_forward);
         if (keysPressed.has('KeyS') || keysPressed.has('ArrowDown'))  _moveDir.sub(_forward);
         if (keysPressed.has('KeyA') || keysPressed.has('ArrowLeft'))  _moveDir.sub(_right);
         if (keysPressed.has('KeyD') || keysPressed.has('ArrowRight')) _moveDir.add(_right);
-
-        // Q/E or Space/Ctrl for vertical
-        if (keysPressed.has('KeyE') || keysPressed.has('Space'))      _moveDir.z += 1;
-        if (keysPressed.has('KeyQ') || keysPressed.has('ControlLeft') || keysPressed.has('ControlRight')) _moveDir.z -= 1;
+        if (keysPressed.has('KeyE') || keysPressed.has('Space'))      _moveDir.y += 1;
+        if (keysPressed.has('KeyQ') || keysPressed.has('ControlLeft') || keysPressed.has('ControlRight')) _moveDir.y -= 1;
 
         if (_moveDir.lengthSq() > 0) {
           _moveDir.normalize().multiplyScalar(speed * dt);
@@ -129,71 +135,53 @@ export const useThreeScene = (preserveTextures = []) => {
 
       controls.update();
 
-      // Smart Render Loop: Only render if something changed
-      let needsRender = false;
-
-      if (framesToRender > 0) {
-        needsRender = true;
-        framesToRender--;
+      // Execute beforeRender callbacks (e.g. tilesRenderer.update())
+      const cbs = beforeRenderCallbacksRef.current;
+      for (let i = 0; i < cbs.length; i++) {
+        try {
+          cbs[i]();
+        } catch (e) {
+          console.error("beforeRender error:", e);
+        }
       }
 
-      if (keysPressed.size > 0) {
-        needsRender = true;
-      }
-
-      if (!camera.position.equals(lastPos) || !camera.quaternion.equals(lastQuat)) {
-        needsRender = true;
-        lastPos.copy(camera.position);
-        lastQuat.copy(camera.quaternion);
-      }
-
-      if (gsap.globalTimeline && gsap.globalTimeline.isActive()) {
-        needsRender = true;
-      }
-
-      if (needsRender) {
-        renderer.render(scene, camera);
-      }
+      renderer.render(scene, camera);
     };
     animate();
 
     // 8. Resize Handler
     const handleResize = () => {
       if (!mountRef.current || !camera || !renderer) return;
-      camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
+      const w = mountRef.current.clientWidth;
+      const h = mountRef.current.clientHeight;
+      camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+      renderer.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
 
-    // 9. Cleanup on Unmount
     return () => {
-      window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-      }
-
-      if (rendererRef.current && rendererRef.current.domElement) {
-        // Remove canvas from DOM
-        const domElement = rendererRef.current.domElement;
-        if (domElement.parentNode) {
-          domElement.parentNode.removeChild(domElement);
-        }
-        rendererRef.current.dispose();
-      }
-
-      if (controlsRef.current) {
-        controlsRef.current.dispose();
-      }
-
-      if (sceneRef.current) {
-        disposeScene(sceneRef.current, preserveTextures);
+      window.removeEventListener('resize', handleResize);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      controls.dispose();
+      disposeScene(scene, preserveTextures);
+      renderer.dispose();
+      if (mountRef.current && renderer.domElement) {
+        mountRef.current.removeChild(renderer.domElement);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // VERY IMPORTANT: Leave empty! preserveTextures inline array was causing re-renders!
+  }, []);
 
-  return { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, sceneReady };
+  return {
+    mountRef,
+    sceneRef,
+    cameraRef,
+    rendererRef,
+    controlsRef,
+    keyboardEnabledRef,
+    beforeRenderCallbacksRef,
+    sceneReady,
+  };
 };

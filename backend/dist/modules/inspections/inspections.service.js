@@ -16,6 +16,7 @@ const storage_service_1 = require("../storage/storage.service");
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
+const zlib = require("zlib");
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 const client_1 = require("@prisma/client");
@@ -25,12 +26,14 @@ let InspectionsService = class InspectionsService {
         this.storageService = storageService;
     }
     async create(projectId, createInspectionDto, userEnterpriseId) {
-        return this.prisma.inspection.create({
-            data: {
-                ...createInspectionDto,
-                projectId,
-            },
-        });
+        const data = {
+            ...createInspectionDto,
+            projectId,
+        };
+        if (createInspectionDto.surveyDate) {
+            data.surveyDate = new Date(createInspectionDto.surveyDate);
+        }
+        return this.prisma.inspection.create({ data });
     }
     async findAll(projectId, user) {
         if (!user) {
@@ -60,6 +63,9 @@ let InspectionsService = class InspectionsService {
                 tags: { include: { documents: true } },
                 panoramas: true,
                 areaPointers: true,
+                surveyReports: true,
+                crossSections: true,
+                siteMeasurements: true,
                 authorizedViewers: true,
                 stagingProfiles: {
                     include: {
@@ -602,6 +608,251 @@ let InspectionsService = class InspectionsService {
             });
         }
         return this.getStagingProfile(inspectionId, profileId);
+    }
+    async updateSurveyMeta(inspectionId, dto, userId, role) {
+        const inspection = await this.prisma.inspection.findUnique({
+            where: { id: inspectionId },
+            include: { project: true },
+        });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        const updateData = { ...dto };
+        if (dto.surveyDate) {
+            updateData.surveyDate = new Date(dto.surveyDate);
+        }
+        return this.prisma.inspection.update({
+            where: { id: inspectionId },
+            data: updateData,
+            include: {
+                surveyReports: true,
+                crossSections: true,
+                siteMeasurements: true,
+            },
+        });
+    }
+    async createSurveyReport(inspectionId, dto, userId, role) {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        return this.prisma.surveyReport.create({
+            data: {
+                inspectionId,
+                title: dto.title,
+                reportType: dto.reportType,
+                summary: dto.summary,
+                fileUrl: dto.fileUrl,
+            },
+        });
+    }
+    async getSurveyReports(inspectionId, userId, role) {
+        return this.prisma.surveyReport.findMany({
+            where: { inspectionId },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+    async deleteSurveyReport(inspectionId, reportId, userId, role) {
+        return this.prisma.surveyReport.delete({
+            where: { id: reportId },
+        });
+    }
+    async createCrossSection(inspectionId, dto, userId, role) {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        return this.prisma.crossSection.create({
+            data: {
+                inspectionId,
+                name: dto.name,
+                startPoint: dto.startPoint,
+                endPoint: dto.endPoint,
+                sampleData: dto.sampleData,
+                length: dto.length,
+                minElev: dto.minElev,
+                maxElev: dto.maxElev,
+                slope: dto.slope,
+            },
+        });
+    }
+    async getCrossSections(inspectionId, userId, role) {
+        return this.prisma.crossSection.findMany({
+            where: { inspectionId },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+    async deleteCrossSection(inspectionId, sectionId, userId, role) {
+        return this.prisma.crossSection.delete({
+            where: { id: sectionId },
+        });
+    }
+    async createSiteMeasurement(inspectionId, dto, userId, role) {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        return this.prisma.siteMeasurement.create({
+            data: {
+                inspectionId,
+                type: dto.type,
+                points: dto.points,
+                values: dto.values,
+                label: dto.label,
+            },
+        });
+    }
+    async getSiteMeasurements(inspectionId, userId, role) {
+        return this.prisma.siteMeasurement.findMany({
+            where: { inspectionId },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+    async deleteSiteMeasurement(inspectionId, measurementId, userId, role) {
+        return this.prisma.siteMeasurement.delete({
+            where: { id: measurementId },
+        });
+    }
+    async processTileset(id, userEnterpriseId, role) {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the creator or admin can process 3D tiles for this inspection');
+        }
+        const bucket = 'virtual-inspections';
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tileset-'));
+        const zipPath = path.join(tempDir, 'tileset.zip');
+        try {
+            await this.storageService.downloadFile(bucket, `inspections/${id}/tileset.zip`, zipPath);
+            const AdmZip = require('adm-zip');
+            const zip = new AdmZip(zipPath);
+            const extractDir = path.join(tempDir, 'extracted');
+            zip.extractAllTo(extractDir, true);
+            let rootJsonDir = extractDir;
+            let rootJsonName = 'tileset.json';
+            let foundJsonPath = null;
+            const searchForTilesetJson = (dir) => {
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    const full = path.join(dir, entry.name);
+                    if (!entry.isDirectory() && entry.name.toLowerCase().endsWith('.json')) {
+                        try {
+                            const content = fs.readFileSync(full, 'utf-8');
+                            const parsed = JSON.parse(content);
+                            if (parsed.asset || parsed.root || parsed.geometricError !== undefined) {
+                                foundJsonPath = full;
+                                rootJsonDir = dir;
+                                rootJsonName = entry.name;
+                                return;
+                            }
+                        }
+                        catch (e) {
+                        }
+                    }
+                    if (entry.isDirectory()) {
+                        searchForTilesetJson(full);
+                        if (foundJsonPath)
+                            return;
+                    }
+                }
+            };
+            searchForTilesetJson(extractDir);
+            if (!foundJsonPath) {
+                const findAnyJson = (dir) => {
+                    const entries = fs.readdirSync(dir, { withFileTypes: true });
+                    for (const entry of entries) {
+                        const full = path.join(dir, entry.name);
+                        if (!entry.isDirectory() && entry.name.toLowerCase().endsWith('.json')) {
+                            foundJsonPath = full;
+                            rootJsonDir = dir;
+                            rootJsonName = entry.name;
+                            return;
+                        }
+                        if (entry.isDirectory()) {
+                            findAnyJson(full);
+                            if (foundJsonPath)
+                                return;
+                        }
+                    }
+                };
+                findAnyJson(extractDir);
+            }
+            console.log(`[processTileset] Located 3D Tiles root at: ${rootJsonDir}, primary file: ${rootJsonName}`);
+            const uploadRecursive = async (currDir, relPath = '') => {
+                const entries = fs.readdirSync(currDir, { withFileTypes: true });
+                for (const entry of entries) {
+                    const fullPath = path.join(currDir, entry.name);
+                    const s3Rel = relPath ? `${relPath}/${entry.name}` : entry.name;
+                    if (entry.isDirectory()) {
+                        await uploadRecursive(fullPath, s3Rel);
+                    }
+                    else {
+                        if (entry.name.endsWith('.b3dm') || entry.name.endsWith('.pnts') || entry.name.endsWith('.i3dm')) {
+                            try {
+                                const buf = fs.readFileSync(fullPath);
+                                if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+                                    const decompressed = zlib.gunzipSync(buf);
+                                    fs.writeFileSync(fullPath, decompressed);
+                                    console.log(`[processTileset] Auto-decompressed gzip tile: ${entry.name} (${buf.length} -> ${decompressed.length} bytes)`);
+                                }
+                            }
+                            catch (e) {
+                                console.warn(`[processTileset] Gzip check error on ${entry.name}:`, e.message);
+                            }
+                        }
+                        if (entry.name.endsWith('.json')) {
+                            try {
+                                const buf = fs.readFileSync(fullPath);
+                                const json = JSON.parse(buf.toString('utf-8'));
+                                if (json.root) {
+                                    const normalizeNode = (node) => {
+                                        if (!node)
+                                            return;
+                                        if (node.content) {
+                                            if (node.content.url && !node.content.uri) {
+                                                node.content.uri = node.content.url;
+                                            }
+                                        }
+                                        if (Array.isArray(node.children)) {
+                                            node.children.forEach(normalizeNode);
+                                        }
+                                    };
+                                    normalizeNode(json.root);
+                                    fs.writeFileSync(fullPath, JSON.stringify(json, null, 2));
+                                }
+                            }
+                            catch (e) { }
+                        }
+                        const s3Dest = `inspections/${id}/tileset/${s3Rel}`;
+                        let contentType = 'application/octet-stream';
+                        if (entry.name.endsWith('.json'))
+                            contentType = 'application/json';
+                        else if (entry.name.endsWith('.b3dm'))
+                            contentType = 'application/octet-stream';
+                        else if (entry.name.endsWith('.glb'))
+                            contentType = 'model/gltf-binary';
+                        else if (entry.name.endsWith('.pnts'))
+                            contentType = 'application/octet-stream';
+                        await this.storageService.uploadFile(bucket, s3Dest, fullPath, contentType);
+                        if (currDir === rootJsonDir && entry.name === rootJsonName && rootJsonName !== 'tileset.json') {
+                            await this.storageService.uploadFile(bucket, `inspections/${id}/tileset/tileset.json`, fullPath, 'application/json');
+                        }
+                    }
+                }
+            };
+            await uploadRecursive(rootJsonDir);
+            const relativeTilesetUrl = `inspections/${id}/tileset/${rootJsonName}`;
+            await this.prisma.inspection.update({
+                where: { id },
+                data: { tilesetUrl: relativeTilesetUrl },
+            });
+            console.log(`[processTileset] 3D Tileset unpacked successfully. tilesetUrl = ${relativeTilesetUrl}`);
+            return { status: 'SUCCESS', tilesetUrl: relativeTilesetUrl };
+        }
+        catch (err) {
+            console.error(`[processTileset] Error:`, err);
+            throw new common_1.InternalServerErrorException(`Failed to unpack 3D Tileset: ${err.message}`);
+        }
+        finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
     }
 };
 exports.InspectionsService = InspectionsService;

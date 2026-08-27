@@ -6,7 +6,7 @@ import { useTourData } from '../hooks/useTourData';
 import { executeFlightAnimation, toggleBoxFading, toggleModelFading } from '../utils/tourAnimations';
 import { useStaging } from '../hooks/useStaging';
 
-const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect, onPointerDragStart, onPointerDragMove, onPointerDragEnd }, ref) => {
+const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect, onPointerDragStart, onPointerDragMove, onPointerDragEnd, volumeMode, onVolumeClick }, ref) => {
   // --- Persistent dummy texture to prevent shader recompilation lag ---
   const dummyTex = useMemo(() => {
     const tex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat);
@@ -14,28 +14,141 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     return tex;
   }, []);
 
-  const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, sceneReady } = useThreeScene([dummyTex]);
+  const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, beforeRenderCallbacksRef, sceneReady } = useThreeScene([dummyTex]);
   const { 
-    modelRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
-    scanSpheres, loadPanoramaTextures, isDataLoaded, scansData 
-  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId);
+    modelRef, tilesetEngineRef, orthoLayerRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
+    scanSpheres, loadPanoramaTextures, isDataLoaded, scansData, tourDetails 
+  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, beforeRenderCallbacksRef);
 
   // ─── Staging Hook ───
   const staging = useStaging(
     sceneRef, cameraRef, rendererRef, controlsRef, modelRef, isDataLoaded, tourId, activeProfileId
   );
 
-  // Expose Three.js internals and staging methods to parent
+  // ─── Drone GIS Helper Methods ───
+  const setTopView = () => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    gsap.to(cameraRef.current.position, {
+      x: 0,
+      y: 350,
+      z: 0.5,
+      duration: 1.2,
+      ease: "power2.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+    gsap.to(controlsRef.current.target, {
+      x: 0,
+      y: 4,
+      z: 0,
+      duration: 1.2,
+      ease: "power2.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+  };
+
+  const setIsoView = () => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    gsap.to(cameraRef.current.position, {
+      x: 160,
+      y: 140,
+      z: 200,
+      duration: 1.2,
+      ease: "power2.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+    gsap.to(controlsRef.current.target, {
+      x: 0,
+      y: 4,
+      z: 0,
+      duration: 1.2,
+      ease: "power2.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+  };
+
+  const sampleCrossSection = (p1, p2, numSamples = 60) => {
+    const points = [];
+    const start = new THREE.Vector3(p1.x, p1.y, p1.z);
+    const end = new THREE.Vector3(p2.x, p2.y, p2.z);
+    const totalDist = start.distanceTo(end);
+    
+    const raycaster = new THREE.Raycaster();
+    const downVec = new THREE.Vector3(0, -1, 0);
+    
+    const targets = [];
+    if (tilesetEngineRef.current && tilesetEngineRef.current.getGroup()) {
+      targets.push(tilesetEngineRef.current.getGroup());
+    }
+    if (modelRef.current) {
+      targets.push(modelRef.current);
+    }
+
+    let minElev = Infinity;
+    let maxElev = -Infinity;
+
+    for (let i = 0; i <= numSamples; i++) {
+      const t = i / numSamples;
+      const interp = new THREE.Vector3().lerpVectors(start, end, t);
+      
+      const rayOrigin = new THREE.Vector3(interp.x, Math.max(interp.y, 50) + 150, interp.z);
+      raycaster.set(rayOrigin, downVec);
+      
+      let surfaceY = interp.y;
+      if (targets.length > 0) {
+        const hits = raycaster.intersectObjects(targets, true);
+        if (hits.length > 0) {
+          surfaceY = hits[0].point.y;
+        }
+      }
+
+      if (surfaceY < minElev) minElev = surfaceY;
+      if (surfaceY > maxElev) maxElev = surfaceY;
+
+      points.push({
+        x: interp.x,
+        y: surfaceY,
+        z: interp.z,
+        elevation: surfaceY,
+        distance: (t * totalDist).toFixed(2),
+      });
+    }
+
+    if (minElev === Infinity) minElev = 0;
+    if (maxElev === -Infinity) maxElev = 0;
+
+    const deltaElev = maxElev - minElev;
+    const slope = totalDist > 0 ? (deltaElev / totalDist) * 100 : 0;
+
+    return {
+      samples: points,
+      length: totalDist,
+      minElev,
+      maxElev,
+      deltaElev,
+      slope,
+      startPoint: p1,
+      endPoint: p2,
+    };
+  };
+
+  // Expose Three.js internals and GIS methods to parent
   useImperativeHandle(ref, () => ({
     sceneRef,
     cameraRef,
     rendererRef,
     modelRef,
+    tilesetEngineRef,
+    get tilesetEngine() { return tilesetEngineRef.current; },
     controlsRef,
     scansData,
     scanSpheres,
-    staging, // expose the entire staging object
-  }), [sceneRef, cameraRef, rendererRef, modelRef, controlsRef, scansData, scanSpheres, staging]);
+    staging,
+    orthoLayer: orthoLayerRef.current,
+    tourDetails,
+    setTopView,
+    setIsoView,
+    sampleCrossSection,
+  }), [sceneRef, cameraRef, rendererRef, modelRef, controlsRef, scansData, scanSpheres, staging, tourDetails]);
 
   // Track measurement mode state in a ref for the click handler
   const measurementModeRef = useRef(false);
@@ -63,6 +176,11 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
   onPointerDragStartRef.current = onPointerDragStart;
   onPointerDragMoveRef.current = onPointerDragMove;
   onPointerDragEndRef.current = onPointerDragEnd;
+
+  const volumeModeRef = useRef(false);
+  const onVolumeClickRef = useRef(null);
+  volumeModeRef.current = volumeMode;
+  onVolumeClickRef.current = onVolumeClick;
 
   // Active state trackers
   const activeBoxIndexRef = useRef(1);
@@ -186,6 +304,28 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     updateVisibility();
     return () => cancelAnimationFrame(rafId);
   }, [isDataLoaded, scanSpheres, cameraRef, isInscan, isMeshView]);
+
+  // ─── Continuous 3D Tiles Update Loop ───
+  useEffect(() => {
+    let tilesRafId;
+    const updateTiles = () => {
+      tilesRafId = requestAnimationFrame(updateTiles);
+      if (tilesetEngineRef.current) {
+        tilesetEngineRef.current.update();
+      }
+    };
+    updateTiles();
+    return () => cancelAnimationFrame(tilesRafId);
+  }, []);
+
+  // Auto-frame camera for Drone 3D Tiles & Ortho when loaded
+  useEffect(() => {
+    if ((tourDetails?.tilesetUrl || tourDetails?.orthoUrl) && !isInscan && cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.set(0, 140, 220);
+      controlsRef.current.target.set(0, 4, 0);
+      controlsRef.current.update();
+    }
+  }, [tourDetails, isInscan]);
 
   // --- Click Event & Raycasting ---
   useEffect(() => {
@@ -397,6 +537,12 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
         return;
       }
 
+      // If volume mode is active, delegate to volume handler
+      if (volumeModeRef.current && onVolumeClickRef.current) {
+        onVolumeClickRef.current(event);
+        return;
+      }
+
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -556,39 +702,41 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
         </>
       )}
 
-      {/* Floor Plan Button */}
-      <button 
-        onClick={(e) => { e.stopPropagation(); handleFloorPlanView(); }}
-        style={{
-          position: 'absolute',
-          top: 30,
-          right: 30,
-          zIndex: 1000,
-          padding: '12px 24px',
-          background: 'rgba(15, 15, 15, 0.85)',
-          color: '#fff',
-          border: '1px solid rgba(255,255,255,0.2)',
-          borderRadius: '30px',
-          cursor: 'pointer',
-          backdropFilter: 'blur(8px)',
-          fontWeight: 'bold',
-          fontSize: '14px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-          transition: 'background 0.2s ease',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(40, 40, 40, 0.95)'}
-        onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(15, 15, 15, 0.85)'}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-          <line x1="3" y1="9" x2="21" y2="9"></line>
-          <line x1="9" y1="21" x2="9" y2="9"></line>
-        </svg>
-        Floor Plan View
-      </button>
+      {/* Floor Plan Button (Only in Matterport/360 GLB mode) */}
+      {!tourDetails?.tilesetUrl && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); handleFloorPlanView(); }}
+          style={{
+            position: 'absolute',
+            top: 30,
+            right: 30,
+            zIndex: 1000,
+            padding: '12px 24px',
+            background: 'rgba(15, 15, 15, 0.85)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '30px',
+            cursor: 'pointer',
+            backdropFilter: 'blur(8px)',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            transition: 'background 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(40, 40, 40, 0.95)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(15, 15, 15, 0.85)'}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="3" y1="9" x2="21" y2="9"></line>
+            <line x1="9" y1="21" x2="9" y2="9"></line>
+          </svg>
+          Floor Plan View
+        </button>
+      )}
 
       {/* Model Loading Overlay */}
       {staging?.loadingModelId && (
