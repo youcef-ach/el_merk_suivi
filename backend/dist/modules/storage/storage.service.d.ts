@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 export declare class StorageService implements OnModuleInit {
     private configService;
     private minioClient;
+    private internalOrigin;
+    private publicOrigin;
     constructor(configService: ConfigService);
     onModuleInit(): Promise<void>;
     getPresignedPutUrl(bucket: string, fileName: string): Promise<string>;
