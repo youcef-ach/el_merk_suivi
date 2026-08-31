@@ -2,6 +2,82 @@ import * as THREE from 'three';
 import { TilesRenderer } from '3d-tiles-renderer';
 
 /**
+ * Converts Earth-Centered Earth-Fixed (ECEF) Cartesian coordinates to WGS84 Geodetic (Lat, Lon, Alt)
+ */
+export function ecefToLatLonAlt(x, y, z) {
+  const a = 6378137.0; // WGS84 semi-major axis in meters
+  const f = 1 / 298.257223563; // flattening
+  const b = a * (1 - f); // semi-minor axis
+  const e2 = (a * a - b * b) / (a * a); // first eccentricity squared
+  const ep2 = (a * a - b * b) / (b * b); // second eccentricity squared
+
+  const p = Math.hypot(x, y);
+  const theta = Math.atan2(z * a, p * b);
+
+  const lon = (Math.atan2(y, x) * 180) / Math.PI;
+  const lat = (Math.atan2(
+    z + ep2 * b * Math.pow(Math.sin(theta), 3),
+    p - e2 * a * Math.pow(Math.cos(theta), 3)
+  ) * 180) / Math.PI;
+
+  const sinLat = Math.sin((lat * Math.PI) / 180);
+  const N = a / Math.sqrt(1 - e2 * sinLat * sinLat);
+  const alt = p / Math.cos((lat * Math.PI) / 180) - N;
+
+  return { lat, lon, alt, source: 'ecef' };
+}
+
+/**
+ * Extracts GPS Coordinates from Cesium 3D Tiles root boundingVolume / transform / header
+ */
+export function extract3DTilesGPS(rootOrTileset) {
+  if (!rootOrTileset) return null;
+  const root = rootOrTileset.root || rootOrTileset;
+
+  // 1. Check root boundingVolume.region [west, south, east, north, minHeight, maxHeight] in radians
+  if (root.boundingVolume?.region && Array.isArray(root.boundingVolume.region)) {
+    const [west, south, east, north, minHeight, maxHeight] = root.boundingVolume.region;
+    const lon = (((west + east) * 0.5) * 180) / Math.PI;
+    const lat = (((south + north) * 0.5) * 180) / Math.PI;
+    const alt = (minHeight + maxHeight) * 0.5;
+    return { lat, lon, alt, source: 'region' };
+  }
+
+  // 2. Check root transform (ECEF 4x4 matrix)
+  const transform = root.transform;
+  if (transform && (Array.isArray(transform) || transform.elements)) {
+    const el = transform.elements || transform;
+    const x = el[12];
+    const y = el[13];
+    const z = el[14];
+    const magnitude = Math.hypot(x, y, z);
+    if (magnitude > 6000000 && magnitude < 6500000) {
+      return ecefToLatLonAlt(x, y, z);
+    }
+  }
+
+  // 3. Check boundingVolume.sphere [x, y, z, radius]
+  if (root.boundingVolume?.sphere && Array.isArray(root.boundingVolume.sphere)) {
+    const [x, y, z] = root.boundingVolume.sphere;
+    const magnitude = Math.hypot(x, y, z);
+    if (magnitude > 6000000 && magnitude < 6500000) {
+      return ecefToLatLonAlt(x, y, z);
+    }
+  }
+
+  // 4. Check boundingVolume.box (center is at box[0], box[1], box[2])
+  if (root.boundingVolume?.box && Array.isArray(root.boundingVolume.box)) {
+    const [x, y, z] = root.boundingVolume.box;
+    const magnitude = Math.hypot(x, y, z);
+    if (magnitude > 6000000 && magnitude < 6500000) {
+      return ecefToLatLonAlt(x, y, z);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Manages Cesium 3D Tiles rendering inside Three.js scene using 3d-tiles-renderer
  */
 export class TilesetEngine {
@@ -12,9 +88,12 @@ export class TilesetEngine {
     this.tilesRenderer = null;
     this.currentOrientationMode = 'rotX_neg90';
     this.floorOffsetY = 0.0;
+    this.groundSnapOffset = 0.0;
     this.isLoaded = false;
     this.initialOriented = false;
     this.onLoadCallbacks = [];
+    this.onGeoCoordinatesCallbacks = [];
+    this.geographicCoordinates = null;
 
     // Hypsometric Elevation Colormap Shader Uniforms (Calibrated from RealityScan DSM: 95.67m -> 103.92m ASL)
     this.heatmapUniforms = {
@@ -79,8 +158,35 @@ export class TilesetEngine {
       console.log('[TilesetEngine] 3D Tileset root loaded successfully. Event:', e?.type || 'load');
       this.applyTransform();
       this.isLoaded = true;
+
+      // Extract real-world georeferenced GPS coordinates from root bounding volume
+      const geo = this.getGeographicCoordinates();
+      if (geo) {
+        this.geographicCoordinates = geo;
+        console.log(`[TilesetEngine] Detected 3D Tiles GPS: Lat ${geo.lat.toFixed(6)}° N, Lon ${geo.lon.toFixed(6)}° E (${geo.source})`);
+        this.onGeoCoordinatesCallbacks.forEach(cb => cb(geo));
+      }
+
+      this.alignLowestPointToZero();
       this.onLoadCallbacks.forEach((cb) => cb(this.tilesRenderer));
     };
+
+    // Pre-fetch tileset.json for immediate instant GPS extraction
+    if (typeof tilesetUrl === 'string' && tilesetUrl.endsWith('.json')) {
+      fetch(tilesetUrl)
+        .then(res => res.ok ? res.json() : null)
+        .then(json => {
+          if (json) {
+            const geo = extract3DTilesGPS(json);
+            if (geo && !this.geographicCoordinates) {
+              this.geographicCoordinates = geo;
+              console.log(`[TilesetEngine] Instant Prefetched GPS: Lat ${geo.lat.toFixed(6)}° N, Lon ${geo.lon.toFixed(6)}° E (${geo.source})`);
+              this.onGeoCoordinatesCallbacks.forEach(cb => cb(geo));
+            }
+          }
+        })
+        .catch(err => console.warn('[TilesetEngine] Prefetch GPS notice:', err.message));
+    }
 
     // Support both 3d-tiles-renderer v0.5.x and v0.3.x events
     this.tilesRenderer.addEventListener('load-root-tileset', onTilesetLoaded);
@@ -379,6 +485,9 @@ export class TilesetEngine {
           }
         }
       });
+
+      // Align ground on streaming tile load
+      this.alignLowestPointToZero();
     });
 
     this.scene.add(this.tilesRenderer.group);
@@ -529,11 +638,45 @@ export class TilesetEngine {
     finalTransform.decompose(position, quaternion, scale);
 
     this.tilesRenderer.group.position.copy(position);
-    this.tilesRenderer.group.position.y += this.floorOffsetY;
+    this.tilesRenderer.group.position.y += (this.floorOffsetY + this.groundSnapOffset);
     this.tilesRenderer.group.quaternion.copy(quaternion);
     this.tilesRenderer.group.scale.copy(scale);
 
     console.log('[TilesetEngine] Transform applied. Group position:', this.tilesRenderer.group.position);
+  }
+
+  /**
+   * Aligns the lowest point of all loaded 3D Tiles geometry precisely to height Y = 0 (ground plane)
+   */
+  alignLowestPointToZero() {
+    if (!this.tilesRenderer || !this.tilesRenderer.group) return;
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    this.tilesRenderer.group.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+        const box = child.geometry.boundingBox.clone().applyMatrix4(child.matrixWorld);
+        if (isFinite(box.min.y)) {
+          minY = Math.min(minY, box.min.y);
+          maxY = Math.max(maxY, box.max.y);
+        }
+      }
+    });
+
+    if (isFinite(minY) && Math.abs(minY) > 0.005) {
+      const deltaY = -minY;
+      this.groundSnapOffset += deltaY;
+      this.tilesRenderer.group.position.y += deltaY;
+      this.tilesRenderer.group.updateMatrixWorld(true);
+
+      console.log(`[TilesetEngine] Auto-snapped mesh ground level: shifted by ${deltaY >= 0 ? '+' : ''}${deltaY.toFixed(3)}m (lowest vertex now at Y = 0.00m)`);
+
+      // Calibrate elevation colormap to match 0.00m ground level
+      this.heatmapUniforms.uMinElevation.value = 0.0;
+      this.heatmapUniforms.uMaxElevation.value = Math.max(1.0, maxY + deltaY);
+    }
   }
 
   setWireframe(wireframe) {
@@ -575,6 +718,26 @@ export class TilesetEngine {
     return this.tilesRenderer?.group;
   }
 
+  getGeographicCoordinates() {
+    if (this.geographicCoordinates) return this.geographicCoordinates;
+    if (this.tilesRenderer?.root) {
+      const geo = extract3DTilesGPS(this.tilesRenderer.root);
+      if (geo) {
+        this.geographicCoordinates = geo;
+        return geo;
+      }
+    }
+    return null;
+  }
+
+  onGeoCoordinates(callback) {
+    if (this.geographicCoordinates) {
+      callback(this.geographicCoordinates);
+    } else {
+      this.onGeoCoordinatesCallbacks.push(callback);
+    }
+  }
+
   onLoad(callback) {
     if (this.isLoaded && this.tilesRenderer) {
       callback(this.tilesRenderer);
@@ -603,5 +766,7 @@ export class TilesetEngine {
     this.isLoaded = false;
     this.initialOriented = false;
     this.onLoadCallbacks = [];
+    this.onGeoCoordinatesCallbacks = [];
+    this.geographicCoordinates = null;
   }
 }

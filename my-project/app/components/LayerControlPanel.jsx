@@ -11,7 +11,8 @@ import {
   Tag, 
   Activity,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Globe2
 } from 'lucide-react';
 
 export default function LayerControlPanel({
@@ -191,6 +192,43 @@ export default function LayerControlPanel({
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Layer 6: 3D Satellite World Basemap */}
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-200 flex items-center gap-2">
+                <Globe2 className="h-3.5 w-3.5 text-emerald-400" />
+                3D Satellite Basemap
+              </span>
+              <button 
+                onClick={() => onUpdateLayer('basemapVisible', !layerState.basemapVisible)}
+                className={`p-1 rounded-md transition ${layerState.basemapVisible ? 'text-emerald-400 hover:bg-emerald-500/20' : 'text-slate-500 hover:bg-slate-800'}`}
+                title="Toggle Satellite Ground Plane"
+              >
+                {layerState.basemapVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </button>
+            </div>
+
+            {layerState.basemapVisible && (
+              <div className="space-y-2 pt-1 border-t border-slate-800/60">
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Opacity:</span>
+                  <span className="font-mono text-emerald-400">
+                    {Math.round((layerState.basemapOpacity ?? 0.92) * 100)}%
+                  </span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="1" 
+                  step="0.05"
+                  value={layerState.basemapOpacity ?? 0.92}
+                  onChange={(e) => onUpdateLayer('basemapOpacity', Number(e.target.value))}
+                  className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-emerald-500"
+                />
               </div>
             )}
           </div>

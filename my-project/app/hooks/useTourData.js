@@ -9,6 +9,7 @@ import { createTagSpriteMaterial } from './useTags';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { TilesetEngine } from '../utils/TilesetEngine';
 import { OrthomosaicLayer } from '../utils/OrthomosaicLayer';
+import { SatelliteBasemapLayer } from '../utils/SatelliteBasemapLayer';
 import { API_URL, MINIO_URL } from '../config/api';
 
 // Inject BVH methods into Three.js prototypes
@@ -25,6 +26,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
   const modelRef = useRef(null);
   const tilesetEngineRef = useRef(null);
   const orthoLayerRef = useRef(null);
+  const satelliteBasemapRef = useRef(null);
 
   // Dual Box Refs for 360 Panoramas
   const box1Ref = useRef(null);
@@ -106,12 +108,38 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
         return;
       }
 
+      // Initialize Satellite Basemap Ground Plane Layer
+      const satelliteBasemap = new SatelliteBasemapLayer(scene);
+      satelliteBasemapRef.current = satelliteBasemap;
+      satelliteBasemap.load({
+        lat: 31.9056,
+        lon: 9.1489,
+        zoom: 17,
+        gridRadius: 2,
+        providerKey: 'esri-satellite',
+        elevationOffsetY: -0.15,
+        opacity: 0.92,
+        visible: false
+      });
+
+      // Initialize Orthomosaic Layer
+      orthoLayerRef.current = new OrthomosaicLayer(scene);
+
       // ─── 1. Load Cesium 3D Tiles if configured ───
       if (tilesetUrl) {
         console.log('[useTourData] Pure 3D Tileset loading via TilesetEngine:', tilesetUrl);
         const engine = new TilesetEngine(scene, cameraRef.current, rendererRef.current);
         engine.loadTileset(tilesetUrl, 'rotX_neg90');
         tilesetEngineRef.current = engine;
+
+        // Auto-extract GPS from 3D Tiles bounding volume and sync satellite basemap
+        engine.onGeoCoordinates((geo) => {
+          if (geo && geo.lat && geo.lon) {
+            console.log(`[useTourData] Automatically applying 3D Tiles GPS: ${geo.lat.toFixed(6)}° N, ${geo.lon.toFixed(6)}° E`);
+            satelliteBasemapRef.current?.setCoordinates(geo.lat, geo.lon);
+            setTourDetails(prev => prev ? { ...prev, latitude: geo.lat, longitude: geo.lon } : { latitude: geo.lat, longitude: geo.lon });
+          }
+        });
 
         // Register continuous update in main Three.js render frame
         if (beforeRenderCallbacksRef && beforeRenderCallbacksRef.current) {
@@ -179,6 +207,14 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
                 }
               }
             });
+            // Automatically snap lowest point of GLB model to Y = 0 on ground plane
+            const glbBox = new THREE.Box3().setFromObject(gltf.scene);
+            if (isFinite(glbBox.min.y) && Math.abs(glbBox.min.y) > 0.001) {
+              gltf.scene.position.y -= glbBox.min.y;
+              gltf.scene.updateMatrixWorld(true);
+              console.log(`[useTourData] Snapped GLB model ground level to Y = 0.00m (offset: ${(-glbBox.min.y).toFixed(3)}m)`);
+            }
+
             scene.add(gltf.scene);
             modelRef.current = gltf.scene;
           }
@@ -327,6 +363,10 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
         orthoLayerRef.current.dispose();
         orthoLayerRef.current = null;
       }
+      if (satelliteBasemapRef.current) {
+        satelliteBasemapRef.current.dispose();
+        satelliteBasemapRef.current = null;
+      }
     };
   }, [sceneRef, dummyTex, tourId, sceneReady]);
 
@@ -375,6 +415,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
     modelRef,
     tilesetEngineRef,
     orthoLayerRef,
+    satelliteBasemapRef,
     box1Ref,
     panoramaGroup1Ref,
     box2Ref,

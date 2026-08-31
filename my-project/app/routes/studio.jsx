@@ -65,6 +65,8 @@ function StudioContent() {
     wireframe: false,
     orthoVisible: true,
     orthoOpacity: 1.0,
+    basemapVisible: false,
+    basemapOpacity: 0.92,
     scansVisible: true,
     tagsVisible: true,
     contoursVisible: false,
@@ -184,6 +186,17 @@ function StudioContent() {
       orthoLayer?.setVisible(value);
     } else if (key === 'orthoOpacity') {
       orthoLayer?.setOpacity(value);
+    } else if (key === 'basemapVisible') {
+      const basemap = viewerRef.current?.satelliteBasemapLayer;
+      if (basemap) {
+        if (value && !basemap.isLoaded) {
+          basemap.load({ visible: true, opacity: layerState.basemapOpacity ?? 0.92 });
+        } else {
+          basemap.setVisible(value);
+        }
+      }
+    } else if (key === 'basemapOpacity') {
+      viewerRef.current?.satelliteBasemapLayer?.setOpacity(value);
     } else if (key === 'scansVisible') {
       const rings = scene?.getObjectByName('isScanRings') || scene?.children.find(c => c.userData?.isScanRings);
       if (rings) rings.visible = value;

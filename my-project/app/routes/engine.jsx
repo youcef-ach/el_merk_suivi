@@ -8,6 +8,7 @@ import TagPanel from '../components/TagPanel';
 import VolumeHUD from '../components/VolumeHUD';
 import SurveyReportModal from '../components/SurveyReportModal';
 import OrthoLayerDrawer from '../components/OrthoLayerDrawer';
+import SatelliteBasemapDrawer from '../components/SatelliteBasemapDrawer';
 import TimelineComparisonBar from '../components/TimelineComparisonBar';
 import PointCloudDrawer from '../components/PointCloudDrawer';
 import { useMeasurement } from '../hooks/useMeasurement';
@@ -86,6 +87,19 @@ export default function EnginePage() {
   const [orthoOpacity, setOrthoOpacity] = useState(0.85);
   const [orthoOffset, setOrthoOffset] = useState(0.05);
 
+  // ─── 3D Satellite World Basemap State ───
+  const [isBasemapDrawerOpen, setIsBasemapDrawerOpen] = useState(false);
+  const [basemapEnabled, setBasemapEnabled] = useState(false);
+  const [basemapOpacity, setBasemapOpacity] = useState(0.92);
+  const [basemapElevation, setBasemapElevation] = useState(-0.15);
+  const [basemapRotation, setBasemapRotation] = useState(0);
+  const [basemapOffsetX, setBasemapOffsetX] = useState(0);
+  const [basemapOffsetZ, setBasemapOffsetZ] = useState(0);
+  const [basemapProvider, setBasemapProvider] = useState('esri-satellite');
+  const [basemapZoom, setBasemapZoom] = useState(17);
+  const [basemapRadius, setBasemapRadius] = useState(2);
+  const [coordinates, setCoordinates] = useState({ lat: 31.9056, lon: 9.1489 });
+
   // ─── 4D Timeline Comparison State ───
   const [isTimelineOpen, setIsTimelineOpen] = useState(false);
   const [activeFlightId, setActiveFlightId] = useState('flight-3');
@@ -103,7 +117,7 @@ export default function EnginePage() {
   const [isLayersMenuOpen, setIsLayersMenuOpen] = useState(false);
   const layersMenuRef = useRef(null);
 
-  const activeLayersCount = (heatmapEnabled ? 1 : 0) + (slopeEnabled ? 1 : 0) + (pointCloudActive ? 1 : 0) + (orthoEnabled ? 1 : 0);
+  const activeLayersCount = (heatmapEnabled ? 1 : 0) + (slopeEnabled ? 1 : 0) + (pointCloudActive ? 1 : 0) + (orthoEnabled ? 1 : 0) + (basemapEnabled ? 1 : 0);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -173,6 +187,87 @@ export default function EnginePage() {
   const handleChangeOrthoOffset = (val) => {
     setOrthoOffset(val);
     viewerRef.current?.orthoLayer?.setElevationOffset?.(val);
+  };
+
+  const handleToggleBasemap = () => {
+    const next = !basemapEnabled;
+    setBasemapEnabled(next);
+    const basemapLayer = viewerRef.current?.satelliteBasemapLayer;
+    if (basemapLayer) {
+      if (next && !basemapLayer.isLoaded) {
+        basemapLayer.load({
+          lat: coordinates.lat,
+          lon: coordinates.lon,
+          zoom: basemapZoom,
+          gridRadius: basemapRadius,
+          providerKey: basemapProvider,
+          elevationOffsetY: basemapElevation,
+          opacity: basemapOpacity,
+          visible: true
+        });
+      } else {
+        basemapLayer.setVisible(next);
+      }
+    }
+  };
+
+  const handleChangeBasemapOpacity = (val) => {
+    setBasemapOpacity(val);
+    viewerRef.current?.satelliteBasemapLayer?.setOpacity?.(val);
+  };
+
+  const handleChangeBasemapElevation = (val) => {
+    setBasemapElevation(val);
+    viewerRef.current?.satelliteBasemapLayer?.setElevation?.(val);
+  };
+
+  const handleChangeBasemapProvider = (providerKey) => {
+    setBasemapProvider(providerKey);
+    viewerRef.current?.satelliteBasemapLayer?.setProvider?.(providerKey);
+  };
+
+  const handleChangeBasemapZoom = (zoom) => {
+    setBasemapZoom(zoom);
+    viewerRef.current?.satelliteBasemapLayer?.load?.({
+      lat: coordinates.lat,
+      lon: coordinates.lon,
+      zoom,
+      gridRadius: basemapRadius,
+      providerKey: basemapProvider,
+      elevationOffsetY: basemapElevation,
+      opacity: basemapOpacity,
+      visible: basemapEnabled
+    });
+  };
+
+  const handleChangeBasemapRadius = (radius) => {
+    setBasemapRadius(radius);
+    viewerRef.current?.satelliteBasemapLayer?.load?.({
+      lat: coordinates.lat,
+      lon: coordinates.lon,
+      zoom: basemapZoom,
+      gridRadius: radius,
+      providerKey: basemapProvider,
+      elevationOffsetY: basemapElevation,
+      opacity: basemapOpacity,
+      visible: basemapEnabled
+    });
+  };
+
+  const handleChangeCoordinates = (lat, lon) => {
+    setCoordinates({ lat, lon });
+    viewerRef.current?.satelliteBasemapLayer?.setCoordinates?.(lat, lon, basemapZoom);
+  };
+
+  const handleChangeBasemapRotation = (deg) => {
+    setBasemapRotation(deg);
+    viewerRef.current?.satelliteBasemapLayer?.setRotation?.(deg);
+  };
+
+  const handleChangeBasemapOffset = (x, z) => {
+    setBasemapOffsetX(x);
+    setBasemapOffsetZ(z);
+    viewerRef.current?.satelliteBasemapLayer?.setManualOffset?.(x, z);
   };
 
   const handleSelectFlight = (flightId) => {
@@ -297,6 +392,18 @@ export default function EnginePage() {
       .then(data => setInspectionData(data))
       .catch(err => console.error(err));
   }, [id]);
+
+  // Sync Coordinates with 3D Tiles GPS Auto-Detection
+  useEffect(() => {
+    const engine = viewerRef.current?.tilesetEngine;
+    if (engine) {
+      engine.onGeoCoordinates((geo) => {
+        if (geo && geo.lat && geo.lon) {
+          setCoordinates({ lat: geo.lat, lon: geo.lon });
+        }
+      });
+    }
+  }, [viewerRef.current?.tilesetEngine]);
 
   // Live Cursor Elevation Raycasting
   const handlePointerMove = useCallback((e) => {
@@ -778,6 +885,19 @@ export default function EnginePage() {
                   </div>
                   <span className={`engine-switch-dot ${orthoEnabled ? 'on' : ''}`} />
                 </button>
+
+                {/* 5. 3D Satellite World Basemap */}
+                <button 
+                  onClick={() => { setIsBasemapDrawerOpen(true); setIsLayersMenuOpen(false); }}
+                  className={`engine-dropdown-item ${basemapEnabled ? 'active' : ''}`}
+                >
+                  <Globe2 style={{ width: 14, height: 14, color: '#34d399' }} />
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontWeight: 600 }}>3D Satellite Basemap</div>
+                    <div style={{ fontSize: 10, color: '#94a3b8' }}>Real-world geographic ground terrain</div>
+                  </div>
+                  <span className={`engine-switch-dot ${basemapEnabled ? 'on' : ''}`} />
+                </button>
               </div>
             )}
           </div>
@@ -942,6 +1062,31 @@ export default function EnginePage() {
         onChangeOrthoOpacity={handleChangeOrthoOpacity}
         orthoOffset={orthoOffset}
         onChangeOrthoOffset={handleChangeOrthoOffset}
+      />
+
+      {/* 6. 3D Satellite World Basemap Drawer */}
+      <SatelliteBasemapDrawer
+        isOpen={isBasemapDrawerOpen}
+        onClose={() => setIsBasemapDrawerOpen(false)}
+        basemapEnabled={basemapEnabled}
+        onToggleBasemap={handleToggleBasemap}
+        basemapOpacity={basemapOpacity}
+        onChangeBasemapOpacity={handleChangeBasemapOpacity}
+        basemapElevation={basemapElevation}
+        onChangeBasemapElevation={handleChangeBasemapElevation}
+        basemapRotation={basemapRotation}
+        onChangeBasemapRotation={handleChangeBasemapRotation}
+        basemapOffsetX={basemapOffsetX}
+        basemapOffsetZ={basemapOffsetZ}
+        onChangeBasemapOffset={handleChangeBasemapOffset}
+        basemapProvider={basemapProvider}
+        onChangeBasemapProvider={handleChangeBasemapProvider}
+        basemapZoom={basemapZoom}
+        onChangeBasemapZoom={handleChangeBasemapZoom}
+        basemapRadius={basemapRadius}
+        onChangeBasemapRadius={handleChangeBasemapRadius}
+        coordinates={coordinates}
+        onChangeCoordinates={handleChangeCoordinates}
       />
 
       {/* 6. 4D Multi-Temporal Survey Timeline Bar */}

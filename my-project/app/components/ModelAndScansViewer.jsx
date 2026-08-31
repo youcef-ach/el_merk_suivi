@@ -17,7 +17,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
 
   const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, beforeRenderCallbacksRef, sceneReady } = useThreeScene([dummyTex]);
   const { 
-    modelRef, tilesetEngineRef, orthoLayerRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
+    modelRef, tilesetEngineRef, orthoLayerRef, satelliteBasemapRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
     scanSpheres, loadPanoramaTextures, isDataLoaded, scansData, tourDetails 
   } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, beforeRenderCallbacksRef);
 
@@ -145,6 +145,8 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     scanSpheres,
     staging,
     orthoLayer: orthoLayerRef.current,
+    satelliteBasemap: satelliteBasemapRef.current,
+    get satelliteBasemapLayer() { return satelliteBasemapRef.current; },
     tourDetails,
     setTopView,
     setIsoView,
