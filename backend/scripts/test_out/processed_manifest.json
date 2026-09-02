@@ -1,0 +1,85 @@
+{
+  "total_scans": 10,
+  "scans": [
+    {
+      "scan_id": "scan_0",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_0_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_0_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_0_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_1",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_1_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_1_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_1_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_2",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_2_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_2_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_2_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_3",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_3_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_3_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_3_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_4",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_4_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_4_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_4_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_5",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_5_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_5_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_5_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_6",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_6_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_6_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_6_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_7",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_7_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_7_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_7_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_8",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_8_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_8_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_8_512.ktx2"
+      }
+    },
+    {
+      "scan_id": "scan_9",
+      "equirect_low": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\equirect_low\\scan_9_equirect_low.jpg",
+      "lods": {
+        "256": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_9_256.ktx2",
+        "512": "C:\\Users\\achou\\Documents\\GitHub\\el_merk_suivi\\backend\\scripts\\test_out\\ktx2\\scan_9_512.ktx2"
+      }
+    }
+  ]
+}

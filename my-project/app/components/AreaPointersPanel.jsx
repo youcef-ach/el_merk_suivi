@@ -2,13 +2,21 @@ import { useState } from 'react';
 import './TagPanel.css'; // Let's reuse the styling base
 
 export default function AreaPointersPanel({
+  isOpen,
   pointersMode,
   setPointersMode,
   selectedPointer,
+  activePointer,
   deselectPointer,
+  onClose,
   updatePointer,
-  deletePointer
+  onUpdate,
+  deletePointer,
+  onDelete
 }) {
+  const pointer = selectedPointer || activePointer;
+  const isVisible = isOpen !== undefined ? (isOpen && Boolean(pointer)) : Boolean(pointer);
+
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState('');
@@ -20,40 +28,57 @@ export default function AreaPointersPanel({
   const [editWallHeight, setEditWallHeight] = useState(3.0);
 
   // When selection changes, reset edit state
-  if (selectedPointer && !isEditing) {
-    setEditName(selectedPointer.name);
-    setEditColor(selectedPointer.color || '#ff0000');
-    setEditHeight(selectedPointer.height ?? 15.0);
-    setEditThickness(selectedPointer.thickness ?? 0.04);
-    setEditLabelSize(selectedPointer.labelSize ?? 1.0);
-    setEditSizeX(selectedPointer.sizeX ?? 3.0);
-    setEditSizeY(selectedPointer.sizeY ?? 3.0);
-    setEditWallHeight(selectedPointer.wallHeight ?? 3.0);
+  if (pointer && !isEditing) {
+    setEditName(pointer.name || 'Safety Boundary');
+    setEditColor(pointer.color || '#ff0000');
+    setEditHeight(pointer.height ?? 15.0);
+    setEditThickness(pointer.thickness ?? 0.04);
+    setEditLabelSize(pointer.labelSize ?? 1.0);
+    setEditSizeX(pointer.sizeX ?? 3.0);
+    setEditSizeY(pointer.sizeY ?? 3.0);
+    setEditWallHeight(pointer.wallHeight ?? 3.0);
     setIsEditing(true);
-  } else if (!selectedPointer && isEditing) {
+  } else if (!pointer && isEditing) {
     setIsEditing(false);
   }
 
+  if (!isVisible || !pointer) {
+    return null;
+  }
+
+  const handleClose = () => {
+    setIsEditing(false);
+    if (deselectPointer) deselectPointer();
+    if (onClose) onClose();
+  };
+
   const handleSave = () => {
-    updatePointer(selectedPointer.id, { 
-      name: editName, 
-      color: editColor,
-      height: parseFloat(editHeight),
-      thickness: parseFloat(editThickness),
-      labelSize: parseFloat(editLabelSize),
-      sizeX: parseFloat(editSizeX),
-      sizeY: parseFloat(editSizeY),
-      wallHeight: parseFloat(editWallHeight)
-    });
+    const updateFn = updatePointer || onUpdate;
+    if (updateFn) {
+      updateFn(pointer.id, { 
+        name: editName, 
+        color: editColor,
+        height: parseFloat(editHeight),
+        thickness: parseFloat(editThickness),
+        labelSize: parseFloat(editLabelSize),
+        sizeX: parseFloat(editSizeX),
+        sizeY: parseFloat(editSizeY),
+        wallHeight: parseFloat(editWallHeight)
+      });
+    }
+    handleClose();
   };
 
   const handleDelete = () => {
-    deletePointer(selectedPointer.id);
-    setIsEditing(false);
+    const deleteFn = deletePointer || onDelete;
+    if (deleteFn) {
+      deleteFn(pointer.id);
+    }
+    handleClose();
   };
 
   return (
-    <div className="tag-panel-overlay" onClick={deselectPointer}>
+    <div className="tag-panel-overlay" onClick={handleClose}>
       <div className="tag-panel" onClick={(e) => e.stopPropagation()}>
         <div className="tag-panel-header" style={{ borderColor: 'rgba(255, 0, 100, 0.3)' }}>
           <div className="tag-panel-header-info">
@@ -66,7 +91,7 @@ export default function AreaPointersPanel({
             </div>
             <span className="tag-panel-title-label">Area Pointer Config</span>
           </div>
-          <button className="tag-panel-close" onClick={deselectPointer}>✕</button>
+          <button className="tag-panel-close" onClick={handleClose}>✕</button>
         </div>
 
         <div className="tag-panel-body">

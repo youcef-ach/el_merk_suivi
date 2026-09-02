@@ -17,8 +17,6 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const zlib = require("zlib");
-const child_process_1 = require("child_process");
-const util_1 = require("util");
 const client_1 = require("@prisma/client");
 let InspectionsService = class InspectionsService {
     constructor(prisma, storageService) {
@@ -357,51 +355,6 @@ let InspectionsService = class InspectionsService {
             },
         });
         return { success: true, s3Path, rawScansS3Path, rawCsvS3Path };
-    }
-    async processGlb(id, userEnterpriseId, role) {
-        const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
-        if (!inspection)
-            throw new common_1.NotFoundException('Inspection not found');
-        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
-            throw new common_1.ForbiddenException('Only the creator or admin can process this inspection');
-        }
-        if (!inspection.glbModelUrl) {
-            throw new common_1.NotFoundException('No GLB model found to process');
-        }
-        const execAsync = (0, util_1.promisify)(child_process_1.exec);
-        const tmpDir = os.tmpdir();
-        const inputPath = path.join(tmpDir, `${id}_input.glb`);
-        const outputPath = path.join(tmpDir, `${id}_opt.glb`);
-        process.env.PATH = process.env.PATH + ';C:\\Program Files\\KTX-Software\\bin';
-        try {
-            await this.storageService.downloadFile('virtual-inspections', inspection.glbModelUrl, inputPath);
-            const gltfpackPath = path.join(process.cwd(), 'gltfpack.exe');
-            let command = `"${gltfpackPath}" -i "${inputPath}" -o "${outputPath}" -cc -mm`;
-            try {
-                await execAsync(`"${gltfpackPath}" -i "${inputPath}" -o "${outputPath}" -cc -tc -mm`);
-            }
-            catch (err) {
-                console.warn('gltfpack -tc failed (likely missing toktx). Falling back to geometry-only compression:', err.message);
-                await execAsync(command);
-            }
-            const newS3Path = `inspections/${id}/optimized_final.glb`;
-            await this.storageService.uploadFile('virtual-inspections', newS3Path, outputPath, 'model/gltf-binary');
-            await this.prisma.inspection.update({
-                where: { id },
-                data: { glbModelUrl: newS3Path },
-            });
-            return { success: true, optimizedUrl: newS3Path };
-        }
-        catch (error) {
-            console.error('Failed to process GLB:', error);
-            throw new common_1.InternalServerErrorException('Failed to optimize GLB model');
-        }
-        finally {
-            if (fs.existsSync(inputPath))
-                fs.unlinkSync(inputPath);
-            if (fs.existsSync(outputPath))
-                fs.unlinkSync(outputPath);
-        }
     }
     async createTag(inspectionId, dto, userEnterpriseId, role) {
         const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId }, include: { project: true } });
@@ -855,6 +808,209 @@ let InspectionsService = class InspectionsService {
         catch (err) {
             console.error(`[processTileset] Error:`, err);
             throw new common_1.InternalServerErrorException(`Failed to unpack 3D Tileset: ${err.message}`);
+        }
+        finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    }
+    async processGlb(id, userEnterpriseId, role, uploadedFileName = 'model.glb') {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the creator or admin can process 3D models for this inspection');
+        }
+        const bucket = 'virtual-inspections';
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-opt-'));
+        try {
+            const candidateNames = [uploadedFileName, 'model.zip', 'model.obj', 'model.glb', 'model.gltf'];
+            let downloadedPath = '';
+            let downloadedName = '';
+            for (const name of candidateNames) {
+                if (!name)
+                    continue;
+                const targetPath = path.join(tempDir, name);
+                try {
+                    await this.storageService.downloadFile(bucket, `inspections/${id}/${name}`, targetPath);
+                    if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 0) {
+                        downloadedPath = targetPath;
+                        downloadedName = name;
+                        break;
+                    }
+                }
+                catch (e) {
+                }
+            }
+            if (!downloadedPath) {
+                throw new common_1.NotFoundException(`No uploaded 3D model found in inspections/${id}/`);
+            }
+            console.log(`[processGlb] Downloaded ${downloadedName} (${fs.statSync(downloadedPath).size} bytes)`);
+            const extractDir = path.join(tempDir, 'extracted');
+            fs.mkdirSync(extractDir, { recursive: true });
+            let sourceGlbPath = '';
+            if (downloadedName.toLowerCase().endsWith('.zip')) {
+                const AdmZip = require('adm-zip');
+                const zip = new AdmZip(downloadedPath);
+                zip.extractAllTo(extractDir, true);
+                let foundObj = null;
+                let foundGlb = null;
+                const findModel = (dir) => {
+                    const entries = fs.readdirSync(dir, { withFileTypes: true });
+                    for (const entry of entries) {
+                        const full = path.join(dir, entry.name);
+                        if (entry.isDirectory()) {
+                            findModel(full);
+                        }
+                        else {
+                            const lower = entry.name.toLowerCase();
+                            if (lower.endsWith('.obj') && !foundObj)
+                                foundObj = full;
+                            if ((lower.endsWith('.glb') || lower.endsWith('.gltf')) && !foundGlb)
+                                foundGlb = full;
+                        }
+                    }
+                };
+                findModel(extractDir);
+                if (foundObj) {
+                    console.log(`[processGlb] Converting extracted OBJ to GLB: ${foundObj}`);
+                    const obj2gltf = require('obj2gltf');
+                    const tempGlbBuffer = await obj2gltf(foundObj, { binary: true });
+                    sourceGlbPath = path.join(tempDir, 'converted.glb');
+                    fs.writeFileSync(sourceGlbPath, tempGlbBuffer);
+                }
+                else if (foundGlb) {
+                    sourceGlbPath = foundGlb;
+                }
+                else {
+                    throw new Error('No .obj or .glb found inside uploaded ZIP archive');
+                }
+            }
+            else if (downloadedName.toLowerCase().endsWith('.obj')) {
+                console.log(`[processGlb] Converting OBJ to GLB: ${downloadedPath}`);
+                const obj2gltf = require('obj2gltf');
+                const tempGlbBuffer = await obj2gltf(downloadedPath, { binary: true });
+                sourceGlbPath = path.join(tempDir, 'converted.glb');
+                fs.writeFileSync(sourceGlbPath, tempGlbBuffer);
+            }
+            else {
+                sourceGlbPath = downloadedPath;
+            }
+            console.log(`[processGlb] Optimizing & Draco compressing: ${sourceGlbPath}`);
+            const { NodeIO } = require('@gltf-transform/core');
+            const { KHRONOS_EXTENSIONS } = require('@gltf-transform/extensions');
+            const { weld, dedup, prune, textureCompress, draco } = require('@gltf-transform/functions');
+            const draco3d = require('draco3dgltf');
+            const sharp = require('sharp');
+            const encoder = await draco3d.createEncoderModule();
+            const decoder = await draco3d.createDecoderModule();
+            const io = new NodeIO()
+                .registerExtensions(KHRONOS_EXTENSIONS)
+                .registerDependencies({
+                'draco3d.encoder': encoder,
+                'draco3d.decoder': decoder,
+            });
+            const document = await io.read(sourceGlbPath);
+            await document.transform(dedup(), prune(), weld({ tolerance: 0.0001 }), textureCompress({ encoder: sharp, resize: [1024, 1024] }), draco({ method: 'edgebreaker' }));
+            const finalGlbPath = path.join(tempDir, 'model.glb');
+            await io.write(finalGlbPath, document);
+            const optimizedSize = fs.statSync(finalGlbPath).size;
+            console.log(`[processGlb] Optimization complete! Final Draco GLB size: ${(optimizedSize / 1024 / 1024).toFixed(2)} MB`);
+            const s3Dest = `inspections/${id}/model.glb`;
+            await this.storageService.uploadFile(bucket, s3Dest, finalGlbPath, 'model/gltf-binary');
+            await this.prisma.inspection.update({
+                where: { id },
+                data: { glbModelUrl: s3Dest },
+            });
+            return {
+                status: 'SUCCESS',
+                glbModelUrl: s3Dest,
+                fileSizeMb: parseFloat((optimizedSize / 1024 / 1024).toFixed(2)),
+            };
+        }
+        catch (err) {
+            console.error(`[processGlb] Error processing 3D model:`, err);
+            throw new common_1.InternalServerErrorException(`Failed to process 3D model: ${err.message}`);
+        }
+        finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    }
+    async processPanoramas(id, userEnterpriseId, role) {
+        const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        if (inspection.project.enterpriseId !== userEnterpriseId && role !== client_1.Role.ADMIN) {
+            throw new common_1.ForbiddenException('Only the creator or admin can process panoramas for this inspection');
+        }
+        const bucket = 'virtual-inspections';
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'panos-'));
+        const zipPath = path.join(tempDir, 'panoramas.zip');
+        try {
+            console.log(`[processPanoramas] Downloading panoramas.zip for inspection ${id}...`);
+            await this.storageService.downloadFile(bucket, `inspections/${id}/panoramas.zip`, zipPath);
+            const AdmZip = require('adm-zip');
+            const zip = new AdmZip(zipPath);
+            const extractDir = path.join(tempDir, 'extracted');
+            fs.mkdirSync(extractDir, { recursive: true });
+            zip.extractAllTo(extractDir, true);
+            const scriptPath = path.resolve(process.cwd(), 'scripts/process_panoramas.py');
+            const wasmtimePath = path.resolve(process.cwd(), 'bin/wasmtime.exe');
+            const basisuWasmPath = path.resolve(process.cwd(), 'bin/basisu_st.wasm');
+            if (fs.existsSync(scriptPath)) {
+                console.log(`[processPanoramas] Executing KTX2 & LOD generator: ${scriptPath}`);
+                const { spawnSync } = require('child_process');
+                const res = spawnSync('python', [
+                    scriptPath,
+                    '--input_dir', extractDir,
+                    '--output_dir', extractDir,
+                    '--wasmtime_bin', wasmtimePath,
+                    '--basisu_wasm', basisuWasmPath,
+                    '--sizes', '256', '512', '1024', '2048',
+                ], { stdio: 'inherit' });
+                if (res.error) {
+                    console.warn(`[processPanoramas] Python runner warning:`, res.error);
+                }
+            }
+            else {
+                console.warn(`[processPanoramas] Script not found at ${scriptPath}, skipping KTX2 generation.`);
+            }
+            let uploadedCount = 0;
+            const uploadRecursive = async (currDir, relPath = '') => {
+                const entries = fs.readdirSync(currDir, { withFileTypes: true });
+                for (const entry of entries) {
+                    const fullPath = path.join(currDir, entry.name);
+                    const s3Rel = relPath ? `${relPath}/${entry.name}` : entry.name;
+                    if (entry.isDirectory()) {
+                        await uploadRecursive(fullPath, s3Rel);
+                    }
+                    else {
+                        let contentType = 'image/jpeg';
+                        const lower = entry.name.toLowerCase();
+                        if (lower.endsWith('.png'))
+                            contentType = 'image/png';
+                        else if (lower.endsWith('.json'))
+                            contentType = 'application/json';
+                        else if (lower.endsWith('.ktx2'))
+                            contentType = 'image/ktx2';
+                        const s3Dest = `inspections/${id}/${s3Rel.replace(/\\/g, '/')}`;
+                        await this.storageService.uploadFile(bucket, s3Dest, fullPath, contentType);
+                        uploadedCount++;
+                        if (entry.name === 'scans.json' && !inspection.scansJsonUrl) {
+                            await this.prisma.inspection.update({
+                                where: { id },
+                                data: { scansJsonUrl: s3Dest },
+                            });
+                        }
+                    }
+                }
+            };
+            await uploadRecursive(extractDir);
+            console.log(`[processPanoramas] Unpacked & generated ${uploadedCount} panorama files to inspections/${id}/`);
+            return { status: 'SUCCESS', filesCount: uploadedCount };
+        }
+        catch (err) {
+            console.error(`[processPanoramas] Error:`, err);
+            throw new common_1.InternalServerErrorException(`Failed to unpack & generate panoramas: ${err.message}`);
         }
         finally {
             fs.rmSync(tempDir, { recursive: true, force: true });

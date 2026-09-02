@@ -31,15 +31,16 @@ export declare class SurveyDataController {
         }[];
         siteMeasurements: {
             id: string;
+            type: string;
             createdAt: Date;
             inspectionId: string;
-            type: string;
             points: import("@prisma/client/runtime/library").JsonValue;
             values: import("@prisma/client/runtime/library").JsonValue;
             label: string | null;
         }[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -134,27 +135,27 @@ export declare class SurveyDataController {
     }>;
     addMeasurement(inspectionId: string, dto: CreateSiteMeasurementDto, user: any): Promise<{
         id: string;
+        type: string;
         createdAt: Date;
         inspectionId: string;
-        type: string;
         points: import("@prisma/client/runtime/library").JsonValue;
         values: import("@prisma/client/runtime/library").JsonValue;
         label: string | null;
     }>;
     getMeasurements(inspectionId: string, user: any): Promise<{
         id: string;
+        type: string;
         createdAt: Date;
         inspectionId: string;
-        type: string;
         points: import("@prisma/client/runtime/library").JsonValue;
         values: import("@prisma/client/runtime/library").JsonValue;
         label: string | null;
     }[]>;
     deleteMeasurement(inspectionId: string, measurementId: string, user: any): Promise<{
         id: string;
+        type: string;
         createdAt: Date;
         inspectionId: string;
-        type: string;
         points: import("@prisma/client/runtime/library").JsonValue;
         values: import("@prisma/client/runtime/library").JsonValue;
         label: string | null;

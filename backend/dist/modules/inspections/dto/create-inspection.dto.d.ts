@@ -1,5 +1,6 @@
-import { Visibility } from '@prisma/client';
+import { Visibility, InspectionType } from '@prisma/client';
 export declare class CreateInspectionDto {
+    type?: InspectionType;
     title: string;
     description?: string;
     visibility?: Visibility;

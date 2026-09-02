@@ -21,6 +21,7 @@ export declare class InspectionsService {
     constructor(prisma: PrismaService, storageService: StorageService);
     create(projectId: string, createInspectionDto: CreateInspectionDto, userEnterpriseId: string): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -52,6 +53,7 @@ export declare class InspectionsService {
         role: Role;
     }): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -177,9 +179,9 @@ export declare class InspectionsService {
         }[];
         siteMeasurements: {
             id: string;
+            type: string;
             createdAt: Date;
             inspectionId: string;
-            type: string;
             points: import("@prisma/client/runtime/library").JsonValue;
             values: import("@prisma/client/runtime/library").JsonValue;
             label: string | null;
@@ -187,8 +189,8 @@ export declare class InspectionsService {
         stagingProfiles: ({
             stagedItems: {
                 id: string;
-                color: string | null;
                 type: string | null;
+                color: string | null;
                 isPolyHaven: boolean;
                 isSketchfab: boolean;
                 polyHavenId: string | null;
@@ -221,6 +223,7 @@ export declare class InspectionsService {
         })[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -345,9 +348,9 @@ export declare class InspectionsService {
         }[];
         siteMeasurements: {
             id: string;
+            type: string;
             createdAt: Date;
             inspectionId: string;
-            type: string;
             points: import("@prisma/client/runtime/library").JsonValue;
             values: import("@prisma/client/runtime/library").JsonValue;
             label: string | null;
@@ -355,8 +358,8 @@ export declare class InspectionsService {
         stagingProfiles: ({
             stagedItems: {
                 id: string;
-                color: string | null;
                 type: string | null;
+                color: string | null;
                 isPolyHaven: boolean;
                 isSketchfab: boolean;
                 polyHavenId: string | null;
@@ -389,6 +392,7 @@ export declare class InspectionsService {
         })[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -417,6 +421,7 @@ export declare class InspectionsService {
     }>;
     clone(id: string, userEnterpriseId: string, role: Role): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -478,6 +483,7 @@ export declare class InspectionsService {
         }[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -506,6 +512,7 @@ export declare class InspectionsService {
     }>;
     remove(id: string, userEnterpriseId: string, role: Role): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -534,6 +541,7 @@ export declare class InspectionsService {
     }>;
     update(id: string, dto: any, enterpriseId: string, role: Role): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -569,10 +577,6 @@ export declare class InspectionsService {
         s3Path: string;
         rawScansS3Path: string;
         rawCsvS3Path: string;
-    }>;
-    processGlb(id: string, userEnterpriseId: string, role: Role): Promise<{
-        success: boolean;
-        optimizedUrl: string;
     }>;
     createTag(inspectionId: string, dto: CreateTagDto, userEnterpriseId: string, role: Role): Promise<{
         documents: {
@@ -700,8 +704,8 @@ export declare class InspectionsService {
     getStagingProfile(inspectionId: string, profileId: string): Promise<{
         stagedItems: {
             id: string;
-            color: string | null;
             type: string | null;
+            color: string | null;
             isPolyHaven: boolean;
             isSketchfab: boolean;
             polyHavenId: string | null;
@@ -735,8 +739,8 @@ export declare class InspectionsService {
     saveStagedItems(inspectionId: string, profileId: string, items: any[], userEnterpriseId: string, role: Role): Promise<{
         stagedItems: {
             id: string;
-            color: string | null;
             type: string | null;
+            color: string | null;
             isPolyHaven: boolean;
             isSketchfab: boolean;
             polyHavenId: string | null;
@@ -770,8 +774,8 @@ export declare class InspectionsService {
     saveBakedPanoramas(inspectionId: string, profileId: string, panoramas: any[], userEnterpriseId: string, role: Role): Promise<{
         stagedItems: {
             id: string;
-            color: string | null;
             type: string | null;
+            color: string | null;
             isPolyHaven: boolean;
             isSketchfab: boolean;
             polyHavenId: string | null;
@@ -827,15 +831,16 @@ export declare class InspectionsService {
         }[];
         siteMeasurements: {
             id: string;
+            type: string;
             createdAt: Date;
             inspectionId: string;
-            type: string;
             points: import("@prisma/client/runtime/library").JsonValue;
             values: import("@prisma/client/runtime/library").JsonValue;
             label: string | null;
         }[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -930,27 +935,27 @@ export declare class InspectionsService {
     }>;
     createSiteMeasurement(inspectionId: string, dto: CreateSiteMeasurementDto, userId: string, role: Role): Promise<{
         id: string;
+        type: string;
         createdAt: Date;
         inspectionId: string;
-        type: string;
         points: import("@prisma/client/runtime/library").JsonValue;
         values: import("@prisma/client/runtime/library").JsonValue;
         label: string | null;
     }>;
     getSiteMeasurements(inspectionId: string, userId: string, role: Role): Promise<{
         id: string;
+        type: string;
         createdAt: Date;
         inspectionId: string;
-        type: string;
         points: import("@prisma/client/runtime/library").JsonValue;
         values: import("@prisma/client/runtime/library").JsonValue;
         label: string | null;
     }[]>;
     deleteSiteMeasurement(inspectionId: string, measurementId: string, userId: string, role: Role): Promise<{
         id: string;
+        type: string;
         createdAt: Date;
         inspectionId: string;
-        type: string;
         points: import("@prisma/client/runtime/library").JsonValue;
         values: import("@prisma/client/runtime/library").JsonValue;
         label: string | null;
@@ -958,5 +963,14 @@ export declare class InspectionsService {
     processTileset(id: string, userEnterpriseId: string, role: Role): Promise<{
         status: string;
         tilesetUrl: string;
+    }>;
+    processGlb(id: string, userEnterpriseId: string, role: Role, uploadedFileName?: string): Promise<{
+        status: string;
+        glbModelUrl: string;
+        fileSizeMb: number;
+    }>;
+    processPanoramas(id: string, userEnterpriseId: string, role: Role): Promise<{
+        status: string;
+        filesCount: number;
     }>;
 }

@@ -16,6 +16,11 @@ class CreateInspectionDto {
 }
 exports.CreateInspectionDto = CreateInspectionDto;
 __decorate([
+    (0, class_validator_1.IsEnum)(client_1.InspectionType),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], CreateInspectionDto.prototype, "type", void 0);
+__decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], CreateInspectionDto.prototype, "title", void 0);

@@ -1,7 +1,11 @@
 import { IsEnum, IsOptional, IsString, IsNumber, IsDateString } from 'class-validator';
-import { Visibility } from '@prisma/client';
+import { Visibility, InspectionType } from '@prisma/client';
 
 export class CreateInspectionDto {
+  @IsEnum(InspectionType)
+  @IsOptional()
+  type?: InspectionType;
+
   @IsString()
   title: string;
 

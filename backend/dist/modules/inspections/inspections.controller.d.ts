@@ -9,6 +9,7 @@ export declare class InspectionsController {
     constructor(inspectionsService: InspectionsService);
     create(projectId: string, createInspectionDto: CreateInspectionDto, user: any): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -37,6 +38,7 @@ export declare class InspectionsController {
     }>;
     findAll(projectId: string, user: any): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -158,9 +160,9 @@ export declare class InspectionsController {
         }[];
         siteMeasurements: {
             id: string;
+            type: string;
             createdAt: Date;
             inspectionId: string;
-            type: string;
             points: import("@prisma/client/runtime/library").JsonValue;
             values: import("@prisma/client/runtime/library").JsonValue;
             label: string | null;
@@ -168,8 +170,8 @@ export declare class InspectionsController {
         stagingProfiles: ({
             stagedItems: {
                 id: string;
-                color: string | null;
                 type: string | null;
+                color: string | null;
                 isPolyHaven: boolean;
                 isSketchfab: boolean;
                 polyHavenId: string | null;
@@ -202,6 +204,7 @@ export declare class InspectionsController {
         })[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -323,9 +326,9 @@ export declare class InspectionsController {
         }[];
         siteMeasurements: {
             id: string;
+            type: string;
             createdAt: Date;
             inspectionId: string;
-            type: string;
             points: import("@prisma/client/runtime/library").JsonValue;
             values: import("@prisma/client/runtime/library").JsonValue;
             label: string | null;
@@ -333,8 +336,8 @@ export declare class InspectionsController {
         stagingProfiles: ({
             stagedItems: {
                 id: string;
-                color: string | null;
                 type: string | null;
+                color: string | null;
                 isPolyHaven: boolean;
                 isSketchfab: boolean;
                 polyHavenId: string | null;
@@ -367,6 +370,7 @@ export declare class InspectionsController {
         })[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -395,6 +399,7 @@ export declare class InspectionsController {
     }>;
     clone(id: string, user: any): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -450,6 +455,7 @@ export declare class InspectionsController {
         }[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -478,6 +484,7 @@ export declare class InspectionsController {
     }>;
     updateInspection(id: string, dto: any, user: any): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -506,6 +513,7 @@ export declare class InspectionsController {
     }>;
     remove(id: string, user: any): Promise<{
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -542,12 +550,17 @@ export declare class InspectionsController {
         rawScansS3Path: string;
         rawCsvS3Path: string;
     }>;
-    processGlb(id: string, user: any): Promise<{
-        success: boolean;
-        optimizedUrl: string;
+    processGlb(id: string, fileName: string, user: any): Promise<{
+        status: string;
+        glbModelUrl: string;
+        fileSizeMb: number;
     }>;
     processTileset(id: string, user: any): Promise<{
         status: string;
         tilesetUrl: string;
+    }>;
+    processPanoramas(id: string, user: any): Promise<{
+        status: string;
+        filesCount: number;
     }>;
 }

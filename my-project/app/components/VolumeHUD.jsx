@@ -23,50 +23,61 @@ const DENSITY_PRESETS = [
 ];
 
 export default function VolumeHUD({
-  polygonPoints,
-  isDrawing,
+  polygonPoints = [],
+  points,
+  isDrawing = false,
   volumeResult,
-  isCalculating,
-  baseMethod,
-  customBaseAsl,
-  density,
+  result,
+  isCalculating = false,
+  baseMethod = 'min',
+  customBaseAsl = 99.31,
+  density = 1.65,
   onComplete,
   onClear,
   onBaseMethodChange,
   onCustomBaseAslChange,
   onDensityChange,
-  onClose
+  onClose,
+  isVisible = true,
+  soilType,
+  onSoilChange
 }) {
-  const pointsCount = polygonPoints.length;
+  const actualPoints = polygonPoints && polygonPoints.length ? polygonPoints : (points || []);
+  const actualResult = volumeResult || result;
+  const pointsCount = actualPoints.length;
+
+  if (isVisible === false && !actualResult && pointsCount === 0) {
+    return null;
+  }
 
   const exportCSV = () => {
-    if (!volumeResult) return;
+    if (!actualResult) return;
     const csvRows = [
       ['RealityScan 3D GIS - Stockpile Volume & Earthwork Report'],
-      ['Timestamp', volumeResult.timestamp],
-      ['Perimeter Points Count', volumeResult.pointsCount],
-      ['Base Plane Reference Method', volumeResult.baseMethod],
-      ['2D Footprint Plan Area (m2)', volumeResult.area2D.toFixed(2)],
-      ['3D Topographic Surface Area (m2)', volumeResult.surfaceArea3D.toFixed(2)],
-      ['Stockpile / Fill Volume (m3)', volumeResult.fillVolume.toFixed(2)],
-      ['Cut / Excavation Volume (m3)', volumeResult.cutVolume.toFixed(2)],
-      ['Net Earthwork Volume (m3)', volumeResult.netVolume.toFixed(2)],
+      ['Timestamp', actualResult.timestamp || new Date().toISOString()],
+      ['Perimeter Points Count', actualResult.pointsCount || pointsCount],
+      ['Base Plane Reference Method', actualResult.baseMethod || baseMethod],
+      ['2D Footprint Plan Area (m2)', (actualResult.area2D ?? 0).toFixed(2)],
+      ['3D Topographic Surface Area (m2)', (actualResult.surfaceArea3D ?? 0).toFixed(2)],
+      ['Stockpile / Fill Volume (m3)', (actualResult.fillVolume ?? 0).toFixed(2)],
+      ['Cut / Excavation Volume (m3)', (actualResult.cutVolume ?? 0).toFixed(2)],
+      ['Net Earthwork Volume (m3)', (actualResult.netVolume ?? 0).toFixed(2)],
       ['Material Density (t/m3)', density],
-      ['Estimated Material Mass (Metric Tons)', volumeResult.estimatedMassTons.toFixed(2)],
-      ['Max Pile Height Above Base (m)', volumeResult.maxPileHeight.toFixed(2)],
-      ['Lowest Perimeter Elevation (m ASL)', volumeResult.minPerimeterAsl.toFixed(2)],
-      ['Mean Perimeter Elevation (m ASL)', volumeResult.meanPerimeterAsl.toFixed(2)],
-      ['Highest Perimeter Elevation (m ASL)', volumeResult.maxPerimeterAsl.toFixed(2)],
-      ['Sampled Inspection Points Grid', volumeResult.sampledPointsCount],
+      ['Estimated Material Mass (Metric Tons)', (actualResult.estimatedMassTons ?? 0).toFixed(2)],
+      ['Max Pile Height Above Base (m)', (actualResult.maxPileHeight ?? 0).toFixed(2)],
+      ['Lowest Perimeter Elevation (m ASL)', (actualResult.minPerimeterAsl ?? 0).toFixed(2)],
+      ['Mean Perimeter Elevation (m ASL)', (actualResult.meanPerimeterAsl ?? 0).toFixed(2)],
+      ['Highest Perimeter Elevation (m ASL)', (actualResult.maxPerimeterAsl ?? 0).toFixed(2)],
+      ['Sampled Inspection Points Grid', actualResult.sampledPointsCount ?? 0],
       [''],
       ['Perimeter Polygon Vertices (Local Three.js Coordinates)'],
       ['Index', 'X (m)', 'Y (m)', 'Z (m)', 'Elevation ASL (m)'],
-      ...polygonPoints.map((pt, idx) => [
+      ...actualPoints.map((pt, idx) => [
         idx + 1,
-        pt.x.toFixed(3),
-        pt.y.toFixed(3),
-        pt.z.toFixed(3),
-        (pt.y + 99.31).toFixed(2)
+        (pt.x ?? 0).toFixed(3),
+        (pt.y ?? 0).toFixed(3),
+        (pt.z ?? 0).toFixed(3),
+        ((pt.y ?? 0) + 99.31).toFixed(2)
       ])
     ];
 
@@ -93,7 +104,7 @@ export default function VolumeHUD({
             <div className="engine-volume-subtitle">
               {isCalculating 
                 ? 'Integrating 3D Mesh Topography...' 
-                : volumeResult 
+                : actualResult 
                   ? 'Volumetric Analysis Ready' 
                   : `Drawing Perimeter (${pointsCount} Points)`}
             </div>
@@ -110,7 +121,7 @@ export default function VolumeHUD({
       </div>
 
       {/* ─── Mode 1: Drawing Polygon ─── */}
-      {!volumeResult && (
+      {!actualResult && (
         <div className="engine-volume-drawing-pane">
           <div className="engine-volume-guide-pill">
             <Activity style={{ width: 13, height: 13, color: '#f59e0b', animation: 'pulse 1.5s infinite' }} />
@@ -153,7 +164,7 @@ export default function VolumeHUD({
       )}
 
       {/* ─── Mode 2: Calculated Volume Results ─── */}
-      {volumeResult && (
+      {actualResult && (
         <div className="engine-volume-results-pane">
           {/* Primary Volume & Mass Hero Grid */}
           <div className="engine-volume-hero-grid">
@@ -163,7 +174,7 @@ export default function VolumeHUD({
                 Stockpile / Fill
               </div>
               <div className="engine-volume-hero-val emerald">
-                {volumeResult.fillVolume.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                {(actualResult.fillVolume ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 <span className="unit">m³</span>
               </div>
             </div>
@@ -174,7 +185,7 @@ export default function VolumeHUD({
                 Estimated Mass
               </div>
               <div className="engine-volume-hero-val amber">
-                {volumeResult.estimatedMassTons.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                {(actualResult.estimatedMassTons ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 <span className="unit">Tons</span>
               </div>
             </div>
@@ -184,21 +195,21 @@ export default function VolumeHUD({
           <div className="engine-volume-secondary-grid">
             <div className="engine-volume-stat-box">
               <div className="label">Cut / Excavation</div>
-              <div className="val">{volumeResult.cutVolume.toFixed(1)} m³</div>
+              <div className="val">{(actualResult.cutVolume ?? 0).toFixed(1)} m³</div>
             </div>
             <div className="engine-volume-stat-box">
               <div className="label">Net Earthwork</div>
-              <div className="val" style={{ color: volumeResult.netVolume >= 0 ? '#34d399' : '#f87171' }}>
-                {volumeResult.netVolume >= 0 ? '+' : ''}{volumeResult.netVolume.toFixed(1)} m³
+              <div className="val" style={{ color: (actualResult.netVolume ?? 0) >= 0 ? '#34d399' : '#f87171' }}>
+                {(actualResult.netVolume ?? 0) >= 0 ? '+' : ''}{(actualResult.netVolume ?? 0).toFixed(1)} m³
               </div>
             </div>
             <div className="engine-volume-stat-box">
               <div className="label">2D Footprint</div>
-              <div className="val">{volumeResult.area2D.toFixed(1)} m²</div>
+              <div className="val">{(actualResult.area2D ?? 0).toFixed(1)} m²</div>
             </div>
             <div className="engine-volume-stat-box">
               <div className="label">3D Surface Area</div>
-              <div className="val">{volumeResult.surfaceArea3D.toFixed(1)} m²</div>
+              <div className="val">{(actualResult.surfaceArea3D ?? 0).toFixed(1)} m²</div>
             </div>
           </div>
 
@@ -210,7 +221,7 @@ export default function VolumeHUD({
             </div>
             <select
               value={density}
-              onChange={(e) => onDensityChange(e.target.value)}
+              onChange={(e) => onDensityChange?.(e.target.value)}
               className="engine-volume-select"
             >
               {DENSITY_PRESETS.map((p, i) => (
@@ -227,28 +238,28 @@ export default function VolumeHUD({
             </div>
             <div className="engine-volume-btn-group">
               <button
-                onClick={() => onBaseMethodChange('tin')}
+                onClick={() => onBaseMethodChange?.('tin')}
                 className={`engine-volume-toggle-btn ${baseMethod === 'tin' ? 'active' : ''}`}
                 title="Interpolated natural ground underneath pile"
               >
                 TIN Base
               </button>
               <button
-                onClick={() => onBaseMethodChange('lowest')}
+                onClick={() => onBaseMethodChange?.('lowest')}
                 className={`engine-volume-toggle-btn ${baseMethod === 'lowest' ? 'active' : ''}`}
                 title="Horizontal plane at lowest perimeter point"
               >
-                Lowest ({volumeResult.minPerimeterAsl.toFixed(1)}m)
+                Lowest ({(actualResult.minPerimeterAsl ?? 0).toFixed(1)}m)
               </button>
               <button
-                onClick={() => onBaseMethodChange('mean')}
+                onClick={() => onBaseMethodChange?.('mean')}
                 className={`engine-volume-toggle-btn ${baseMethod === 'mean' ? 'active' : ''}`}
                 title="Horizontal plane at average perimeter height"
               >
-                Mean ({volumeResult.meanPerimeterAsl.toFixed(1)}m)
+                Mean ({(actualResult.meanPerimeterAsl ?? 0).toFixed(1)}m)
               </button>
               <button
-                onClick={() => onBaseMethodChange('custom')}
+                onClick={() => onBaseMethodChange?.('custom')}
                 className={`engine-volume-toggle-btn ${baseMethod === 'custom' ? 'active' : ''}`}
                 title="Custom target elevation ASL"
               >

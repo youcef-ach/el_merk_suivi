@@ -66,11 +66,14 @@ let InspectionsController = class InspectionsController {
     async processAndUploadScans(id, body, user) {
         return this.inspectionsService.processAndUploadScans(id, body.mpData, body.rcData, user.enterpriseId, user.role);
     }
-    async processGlb(id, user) {
-        return this.inspectionsService.processGlb(id, user.enterpriseId, user.role);
+    async processGlb(id, fileName, user) {
+        return this.inspectionsService.processGlb(id, user.enterpriseId, user.role, fileName);
     }
     async processTileset(id, user) {
         return this.inspectionsService.processTileset(id, user.enterpriseId, user.role);
+    }
+    async processPanoramas(id, user) {
+        return this.inspectionsService.processPanoramas(id, user.enterpriseId, user.role);
     }
 };
 exports.InspectionsController = InspectionsController;
@@ -185,9 +188,10 @@ __decorate([
 __decorate([
     (0, common_1.Post)(':id/process-glb'),
     __param(0, (0, common_1.Param)('id')),
-    __param(1, (0, get_user_decorator_1.GetUser)()),
+    __param(1, (0, common_1.Body)('fileName')),
+    __param(2, (0, get_user_decorator_1.GetUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, String, Object]),
     __metadata("design:returntype", Promise)
 ], InspectionsController.prototype, "processGlb", null);
 __decorate([
@@ -198,6 +202,14 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], InspectionsController.prototype, "processTileset", null);
+__decorate([
+    (0, common_1.Post)(':id/process-panoramas'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], InspectionsController.prototype, "processPanoramas", null);
 exports.InspectionsController = InspectionsController = __decorate([
     (0, common_1.Controller)('projects/:projectId/inspections'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, roles_guard_1.RolesGuard),

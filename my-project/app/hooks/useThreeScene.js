@@ -11,7 +11,7 @@ import { disposeScene } from '../utils/threeCleanup';
  * @param {Array<THREE.Texture>} preserveTextures - Optional textures to not dispose on unmount.
  * @returns {Object} { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, beforeRenderCallbacksRef }
  */
-export const useThreeScene = (preserveTextures = []) => {
+export const useThreeScene = (preserveTextures = [], isZUp = false) => {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -28,21 +28,31 @@ export const useThreeScene = (preserveTextures = []) => {
     // 1. Scene Setup
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b1120);
-    scene.fog = new THREE.FogExp2(0x0b1120, 0.0012);
+    if (!isZUp) {
+      scene.fog = new THREE.FogExp2(0x0b1120, 0.0012);
+    }
     sceneRef.current = scene;
     setSceneReady(true);
 
     const width = mountRef.current.clientWidth || window.innerWidth;
     const height = mountRef.current.clientHeight || window.innerHeight;
 
-    // 2. Camera Setup (Standard Y-up matching 3d_tiles test)
+    // 2. Camera Setup (Z-up for Virtual Tour, Y-up for Drone GIS)
     const aspect = width / height;
-    const camera = new THREE.PerspectiveCamera(50, aspect, 0.5, 4000);
-    camera.up.set(0, 1, 0);
-    camera.position.set(0, 140, 220);
+    const camera = isZUp 
+      ? new THREE.PerspectiveCamera(75, aspect, 0.15, 800)
+      : new THREE.PerspectiveCamera(50, aspect, 0.5, 4000);
+
+    if (isZUp) {
+      camera.up.set(0, 0, 1);
+      camera.position.set(5, 5, 5);
+    } else {
+      camera.up.set(0, 1, 0);
+      camera.position.set(0, 140, 220);
+    }
     cameraRef.current = camera;
 
-    // 3. Renderer Setup (Natural balanced exposure matching 3d_tiles test)
+    // 3. Renderer Setup
     const renderer = new THREE.WebGLRenderer({ 
       antialias: true,
       powerPreference: "high-performance",
@@ -50,33 +60,44 @@ export const useThreeScene = (preserveTextures = []) => {
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.enabled = !isZUp;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.toneMappingExposure = 1.0;
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // 4. Natural True-Color Ambient Lighting (Matching Cesium color fidelity)
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    // 4. Ambient & Directional Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, isZUp ? 1.0 : 0.85);
     scene.add(ambientLight);
 
-    const sunLight = new THREE.DirectionalLight(0xffffff, 0.35);
-    sunLight.position.set(100, 250, 100);
-    scene.add(sunLight);
+    if (!isZUp) {
+      const sunLight = new THREE.DirectionalLight(0xffffff, 0.35);
+      sunLight.position.set(100, 250, 100);
+      scene.add(sunLight);
+    }
 
-    // 5. OrbitControls (Configured for smooth natural GIS drag)
+    // 5. OrbitControls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
+    controls.dampingFactor = 0.05;
     controls.screenSpacePanning = true;
-    controls.rotateSpeed = -0.9;
+    controls.rotateSpeed = 1.0;
     controls.panSpeed = 1.0;
     controls.zoomSpeed = 1.2;
-    controls.maxPolarAngle = Math.PI / 2 - 0.01;
-    controls.minDistance = 2.0;
-    controls.maxDistance = 2500;
-    controls.target.set(0, 4, 0);
+    controls.enableKeys = false;
+    controls.keys = { LEFT: '', UP: '', RIGHT: '', BOTTOM: '' };
+    
+    if (isZUp) {
+      controls.maxPolarAngle = Math.PI - 0.01;
+      controls.minDistance = 0.2;
+      controls.maxDistance = 500;
+      controls.target.set(0, 0, 0);
+    } else {
+      controls.maxPolarAngle = Math.PI / 2 - 0.01;
+      controls.minDistance = 2.0;
+      controls.maxDistance = 2500;
+      controls.target.set(0, 4, 0);
+    }
     controlsRef.current = controls;
 
     // 6. Keyboard Movement
@@ -113,7 +134,11 @@ export const useThreeScene = (preserveTextures = []) => {
         const speed = MOVE_SPEED * (keysPressed.has('ShiftLeft') || keysPressed.has('ShiftRight') ? FAST_MULT : 1);
 
         camera.getWorldDirection(_forward);
-        _forward.y = 0;
+        if (camera.up.z === 1) {
+          _forward.z = 0;
+        } else {
+          _forward.y = 0;
+        }
         _forward.normalize();
 
         _right.crossVectors(_forward, camera.up).normalize();
@@ -123,8 +148,13 @@ export const useThreeScene = (preserveTextures = []) => {
         if (keysPressed.has('KeyS') || keysPressed.has('ArrowDown'))  _moveDir.sub(_forward);
         if (keysPressed.has('KeyA') || keysPressed.has('ArrowLeft'))  _moveDir.sub(_right);
         if (keysPressed.has('KeyD') || keysPressed.has('ArrowRight')) _moveDir.add(_right);
-        if (keysPressed.has('KeyE') || keysPressed.has('Space'))      _moveDir.y += 1;
-        if (keysPressed.has('KeyQ') || keysPressed.has('ControlLeft') || keysPressed.has('ControlRight')) _moveDir.y -= 1;
+        if (camera.up.z === 1) {
+          if (keysPressed.has('KeyE') || keysPressed.has('Space'))      _moveDir.z += 1;
+          if (keysPressed.has('KeyQ') || keysPressed.has('ControlLeft') || keysPressed.has('ControlRight')) _moveDir.z -= 1;
+        } else {
+          if (keysPressed.has('KeyE') || keysPressed.has('Space'))      _moveDir.y += 1;
+          if (keysPressed.has('KeyQ') || keysPressed.has('ControlLeft') || keysPressed.has('ControlRight')) _moveDir.y -= 1;
+        }
 
         if (_moveDir.lengthSq() > 0) {
           _moveDir.normalize().multiplyScalar(speed * dt);

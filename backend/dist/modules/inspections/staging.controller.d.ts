@@ -14,8 +14,8 @@ export declare class StagingController {
     getProfile(inspectionId: string, profileId: string): Promise<{
         stagedItems: {
             id: string;
-            color: string | null;
             type: string | null;
+            color: string | null;
             isPolyHaven: boolean;
             isSketchfab: boolean;
             polyHavenId: string | null;
@@ -51,8 +51,8 @@ export declare class StagingController {
     }, req: any): Promise<{
         stagedItems: {
             id: string;
-            color: string | null;
             type: string | null;
+            color: string | null;
             isPolyHaven: boolean;
             isSketchfab: boolean;
             polyHavenId: string | null;
@@ -88,8 +88,8 @@ export declare class StagingController {
     }, req: any): Promise<{
         stagedItems: {
             id: string;
-            color: string | null;
             type: string | null;
+            color: string | null;
             isPolyHaven: boolean;
             isSketchfab: boolean;
             polyHavenId: string | null;

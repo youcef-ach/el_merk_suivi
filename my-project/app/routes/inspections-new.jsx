@@ -14,28 +14,31 @@ import {
   Upload, 
   ArrowRight, 
   CheckCircle2, 
-  Sparkles,
-  Sliders,
-  X,
-  Check,
-  CircleDot,
-  Radio,
+  Sparkles, 
+  Sliders, 
+  X, 
+  Check, 
+  Radio, 
+  ChevronRight, 
+  Building2, 
+  Plane, 
+  ShieldCheck,
+  Cpu,
   Image as ImageIcon,
-  ChevronRight,
-  Video,
-  Eye,
-  FolderOpen
+  Boxes,
+  FileCheck
 } from 'lucide-react';
 import './new-inspection.css';
 import { API_URL, MINIO_URL } from '../config/api';
 
 export function meta() {
   return [
-    { title: "New Drone Survey Flight | VirtualTwin SaaS" },
+    { title: "New Digital Twin Mission | VirtualTwin SaaS" },
   ];
 }
 
 const createInspectionSchema = z.object({
+  type: z.enum(['VIRTUAL_TOUR', 'DRONE_SURVEY']),
   title: z.string().min(3, { message: "Title requires a minimum of 3 characters" }).max(100),
   description: z.string().optional(),
   visibility: z.enum(['PUBLIC', 'PRIVATE']),
@@ -49,6 +52,7 @@ const createInspectionSchema = z.object({
 function NewInspectionContent() {
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const [selectedType, setSelectedType] = useState('VIRTUAL_TOUR');
   const [apiError, setApiError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdInspectionData, setCreatedInspectionData] = useState(null);
@@ -63,18 +67,18 @@ function NewInspectionContent() {
   const [dsmFile, setDsmFile] = useState(null);
   const [reportFile, setReportFile] = useState(null);
   const [glbFile, setGlbFile] = useState(null);
+  const [panoramasZipFile, setPanoramasZipFile] = useState(null);
   const [jsonFile, setJsonFile] = useState(null);
   const [rcJsonFile, setRcJsonFile] = useState(null);
-  const [imageFiles, setImageFiles] = useState([]);
   const [thumbnailFile, setThumbnailFile] = useState(null);
-  const [videoFile, setVideoFile] = useState(null);
 
-  const { register, handleSubmit, formState: { errors } } = useForm({
+  const { register, handleSubmit, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(createInspectionSchema),
     defaultValues: {
+      type: 'VIRTUAL_TOUR',
       title: '',
       description: '',
-      visibility: 'PUBLIC',
+      visibility: 'PRIVATE',
       surveyDate: new Date().toISOString().split('T')[0],
       droneModel: 'DJI Mavic 3 Enterprise RTK',
       gsd: '1.45',
@@ -82,6 +86,11 @@ function NewInspectionContent() {
       coordinateSystem: 'WGS84 / UTM zone 31N (EPSG:32631)',
     }
   });
+
+  const handleSelectType = (type) => {
+    setSelectedType(type);
+    setValue('type', type);
+  };
 
   const formatFileSize = (bytes) => {
     if (!bytes) return '0 B';
@@ -98,15 +107,19 @@ function NewInspectionContent() {
     try {
       const token = localStorage.getItem('access_token');
       const payload = {
+        type: data.type || selectedType,
         title: data.title,
         visibility: data.visibility || 'PRIVATE',
       };
       if (data.description && data.description.trim()) payload.description = data.description.trim();
-      if (data.surveyDate) payload.surveyDate = new Date(data.surveyDate).toISOString();
-      if (data.droneModel && data.droneModel.trim()) payload.droneModel = data.droneModel.trim();
-      if (data.gsd && !isNaN(parseFloat(data.gsd))) payload.gsd = parseFloat(data.gsd);
-      if (data.flightAltitude && !isNaN(parseFloat(data.flightAltitude))) payload.flightAltitude = parseFloat(data.flightAltitude);
-      if (data.coordinateSystem && data.coordinateSystem.trim()) payload.coordinateSystem = data.coordinateSystem.trim();
+
+      if (data.type === 'DRONE_SURVEY') {
+        if (data.surveyDate) payload.surveyDate = new Date(data.surveyDate).toISOString();
+        if (data.droneModel && data.droneModel.trim()) payload.droneModel = data.droneModel.trim();
+        if (data.gsd && !isNaN(parseFloat(data.gsd))) payload.gsd = parseFloat(data.gsd);
+        if (data.flightAltitude && !isNaN(parseFloat(data.flightAltitude))) payload.flightAltitude = parseFloat(data.flightAltitude);
+        if (data.coordinateSystem && data.coordinateSystem.trim()) payload.coordinateSystem = data.coordinateSystem.trim();
+      }
 
       const response = await fetch(`${API_URL}/projects/${projectId}/inspections`, {
         method: 'POST',
@@ -167,17 +180,17 @@ function NewInspectionContent() {
         dsmFile,
         reportFile,
         glbFile,
+        panoramasZipFile,
         jsonFile,
-        thumbnailFile,
-        videoFile
+        thumbnailFile
       ].filter(Boolean);
 
-      let totalFiles = singleFiles.length + (imageFiles ? imageFiles.length : 0);
+      let totalFiles = singleFiles.length;
       let completed = 0;
-      
+
       if (totalFiles === 0) {
-         navigate(`/studio/${inspectionId}`);
-         return;
+        navigate(`/engine/${inspectionId}`);
+        return;
       }
 
       const incrementProgress = (status) => {
@@ -195,13 +208,10 @@ function NewInspectionContent() {
             setUploadStatusText('Uploading 3D Tileset bundle (.zip)...');
             await uploadFileToMinio(inspectionId, tilesetFile, 'tileset.zip');
             setUploadStatusText('Extracting 3D Tileset LODs on server...');
-            const procRes = await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-tileset`, {
+            await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-tileset`, {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (!procRes.ok) {
-              console.error("Failed to unpack tileset zip");
-            }
           } else {
             setUploadStatusText('Uploading 3D Tileset...');
             await uploadFileToMinio(inspectionId, tilesetFile, `tileset_${tilesetFile.name}`);
@@ -218,66 +228,88 @@ function NewInspectionContent() {
       // 2. Orthomosaic
       if (orthoFile) {
         tasks.push((async () => {
-          setUploadStatusText('Uploading Orthoprojection...');
+          setUploadStatusText('Uploading Orthomosaic...');
           await uploadFileToMinio(inspectionId, orthoFile, `ortho_${orthoFile.name}`);
           await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ orthoUrl: `inspections/${inspectionId}/ortho_${orthoFile.name}` })
           });
-          incrementProgress('Orthomosaic uploaded');
+          incrementProgress('Orthomosaic ready');
         })());
       }
 
       // 3. DSM
       if (dsmFile) {
         tasks.push((async () => {
-          setUploadStatusText('Uploading DSM elevation model...');
+          setUploadStatusText('Uploading DSM elevation raster...');
           await uploadFileToMinio(inspectionId, dsmFile, `dsm_${dsmFile.name}`);
           await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ dsmUrl: `inspections/${inspectionId}/dsm_${dsmFile.name}` })
           });
-          incrementProgress('DSM uploaded');
+          incrementProgress('DSM ready');
         })());
       }
 
       // 4. RealityScan Report
       if (reportFile) {
         tasks.push((async () => {
-          setUploadStatusText('Attaching RealityScan report...');
+          setUploadStatusText('Attaching Survey Report...');
           await uploadFileToMinio(inspectionId, reportFile, `reports/${reportFile.name}`);
           await fetch(`${API_URL}/inspections/${inspectionId}/survey/reports`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({
-              title: `RealityScan Report (${reportFile.name})`,
+              title: `Survey Report (${reportFile.name})`,
               reportType: 'ALIGNMENT',
               fileUrl: `${MINIO_URL}/virtual-inspections/${inspectionId}/reports/${reportFile.name}`
             })
           });
-          incrementProgress('Report linked');
+          incrementProgress('Report attached');
         })());
       }
 
-      // 5. GLB Architecture Model
+      // 5. 3D Architecture Model (GLB / OBJ / ZIP)
       if (glbFile) {
         tasks.push((async () => {
-          setUploadStatusText('Uploading GLB model...');
-          await uploadFileToMinio(inspectionId, glbFile, 'ultimate_final.glb');
+          const isZip = glbFile.name.endsWith('.zip');
+          const isObj = glbFile.name.endsWith('.obj');
+          const isGltf = glbFile.name.endsWith('.gltf');
+          const targetName = isZip ? 'model.zip' : (isObj ? 'model.obj' : (isGltf ? 'model.gltf' : 'model.glb'));
+
+          setUploadStatusText(`Uploading 3D model (${glbFile.name})...`);
+          await uploadFileToMinio(inspectionId, glbFile, targetName);
+
+          setUploadStatusText('Converting OBJ / Applying Draco mesh compression on server...');
           await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ fileName: targetName })
+          });
+          incrementProgress('3D model converted, Draco compressed & ready');
+        })());
+      }
+
+      // 6. 360° Panoramas & Cubemaps (panoramas.zip)
+      if (panoramasZipFile) {
+        tasks.push((async () => {
+          setUploadStatusText('Uploading 360° Panoramas & Cubemaps package...');
+          await uploadFileToMinio(inspectionId, panoramasZipFile, 'panoramas.zip');
+          setUploadStatusText('Unpacking 360° cubemaps & transition panoramas on server...');
+          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-panoramas`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
           });
-          incrementProgress('3D model ready');
+          incrementProgress('360° Panoramas ready');
         })());
       }
 
       // 6. 360 Scan Telemetry Coordinates JSON
       if (jsonFile && rcJsonFile) {
         tasks.push((async () => {
-          setUploadStatusText('Processing 360 scan coordinate mapping...');
+          setUploadStatusText('Aligning Matterport and RealityCapture scan coordinates...');
           const mpText = await jsonFile.text();
           const rcText = await rcJsonFile.text();
           await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
@@ -285,15 +317,15 @@ function NewInspectionContent() {
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ mpData: JSON.parse(mpText), rcData: JSON.parse(rcText) })
           });
-          incrementProgress('360 Scan registration ready');
+          incrementProgress('360 Scans aligned');
         })());
       } else if (jsonFile) {
         tasks.push(
-          uploadFileToMinio(inspectionId, jsonFile, 'scans.json').then(() => incrementProgress('360 Scans telemetry uploaded'))
+          uploadFileToMinio(inspectionId, jsonFile, 'scans.json').then(() => incrementProgress('360 Scans uploaded'))
         );
       }
 
-      // 7. Thumbnail Cover
+      // 7. Thumbnail
       if (thumbnailFile) {
         tasks.push((async () => {
           await uploadFileToMinio(inspectionId, thumbnailFile, `thumb_${thumbnailFile.name}`);
@@ -306,43 +338,14 @@ function NewInspectionContent() {
         })());
       }
 
-      // 8. Site Video Tour
-      if (videoFile) {
-        tasks.push((async () => {
-          setUploadStatusText('Uploading Site Tour video...');
-          await uploadFileToMinio(inspectionId, videoFile, `video_${videoFile.name}`);
-          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ videoUrl: `inspections/${inspectionId}/video_${videoFile.name}` })
-          });
-          incrementProgress('Video tour ready');
-        })());
-      }
-
-      // Execute single file tasks
       await Promise.all(tasks);
-
-      // 9. Batch upload 360 Panorama Cubemaps (20 parallel requests at a time)
-      if (imageFiles && imageFiles.length > 0) {
-        setUploadStatusText(`Uploading ${imageFiles.length} 360° Panorama cubemaps...`);
-        const CONCURRENCY = 20;
-        const filesArray = Array.from(imageFiles);
-        for (let i = 0; i < filesArray.length; i += CONCURRENCY) {
-          const batch = filesArray.slice(i, i + CONCURRENCY);
-          await Promise.all(batch.map(async (file) => {
-            await uploadFileToMinio(inspectionId, file, `images/${file.name}`);
-            incrementProgress();
-          }));
-        }
-      }
-
-      // Navigate straight to Survey Studio!
-      navigate(`/studio/${inspectionId}`);
+      setUploadStatusText('Ingestion Complete! Redirecting to Digital Twin Engine...');
+      setTimeout(() => {
+        navigate(`/engine/${inspectionId}`);
+      }, 1200);
 
     } catch (err) {
-      setApiError(err.message || 'Upload encountered an issue');
-    } finally {
+      setApiError(err.message);
       setIsSubmitting(false);
     }
   };
@@ -358,26 +361,9 @@ function NewInspectionContent() {
           <div className="survey-breadcrumbs">
             <button onClick={() => navigate('/projects')}>Projects</button>
             <ChevronRight className="h-3.5 w-3.5" />
-            <button onClick={() => navigate(`/projects/${projectId}`)}>Chantier Site</button>
+            <button onClick={() => navigate(`/projects/${projectId}`)}>Project Inspections</button>
             <ChevronRight className="h-3.5 w-3.5" />
-            <span className="text-cyan-400 font-medium">New Survey Ingestion</span>
-          </div>
-        </div>
-
-        {/* Hero Card */}
-        <div className="survey-hero-card">
-          <div>
-            <div className="survey-hero-title">
-              <Camera className="h-6 w-6 text-cyan-400" />
-              New Drone Survey & RealityScan Mission
-            </div>
-            <p className="survey-hero-subtitle">
-              Ingest photogrammetry deliverables (3D Tiles, Orthomosaics, DSM, 360 Scans, QA Reports) into the digital twin platform.
-            </p>
-          </div>
-          <div className="survey-badge-rtk">
-            <Radio className="h-3.5 w-3.5 text-cyan-400" />
-            RTK &bull; Photogrammetry
+            <span className="text-cyan-400 font-medium">New Digital Twin Mission</span>
           </div>
         </div>
 
@@ -387,12 +373,12 @@ function NewInspectionContent() {
             <span className="wizard-step-number">
               {!createdInspectionData ? '1' : <Check className="h-3.5 w-3.5" />}
             </span>
-            <span>Mission Telemetry</span>
+            <span>Mission Specification</span>
           </div>
           <ChevronRight className="h-4 w-4 text-slate-700" />
           <div className={`wizard-step-item ${createdInspectionData ? 'active' : ''}`}>
             <span className="wizard-step-number">2</span>
-            <span>Spatial & 360 Deliverables</span>
+            <span>Deliverables & 3D Assets</span>
           </div>
         </div>
 
@@ -403,11 +389,87 @@ function NewInspectionContent() {
           </div>
         )}
 
-        {/* ─── STEP 1: Telemetry Form ─── */}
+        {/* ─── STEP 1: Purpose Selection & Mission Overview ─── */}
         {!createdInspectionData && (
           <form onSubmit={handleSubmit(onSubmit)}>
             
-            {/* Mission Overview */}
+            {/* 1. PURPOSE SELECTOR CARDS */}
+            <div style={{ marginBottom: '28px' }}>
+              <label className="field-label" style={{ marginBottom: '14px', fontSize: '14px' }}>
+                Select Mission Purpose & Technology Stack
+              </label>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                
+                {/* Card A: Industrial Virtual Tour */}
+                <div 
+                  onClick={() => handleSelectType('VIRTUAL_TOUR')}
+                  style={{
+                    padding: '24px',
+                    borderRadius: '16px',
+                    cursor: 'pointer',
+                    background: selectedType === 'VIRTUAL_TOUR' ? 'rgba(6, 182, 212, 0.12)' : 'rgba(15, 23, 42, 0.6)',
+                    border: selectedType === 'VIRTUAL_TOUR' ? '2px solid #06b6d4' : '1px solid rgba(255, 255, 255, 0.08)',
+                    boxShadow: selectedType === 'VIRTUAL_TOUR' ? '0 0 25px rgba(6, 182, 212, 0.2)' : 'none',
+                    transition: 'all 0.2s',
+                    position: 'relative'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                    <div style={{ padding: '10px', borderRadius: '12px', background: 'rgba(6, 182, 212, 0.2)', color: '#38bdf8' }}>
+                      <Building2 className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#ffffff' }}>Industrial Virtual Tour</h4>
+                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>Factories, Plants & Indoor Facilities</span>
+                    </div>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#cbd5e1', lineHeight: '1.5' }}>
+                    Matterport-style 360° tour with projective mesh transitions, equipment tags, safety zones, and 3D indoor measurements.
+                  </p>
+                  {selectedType === 'VIRTUAL_TOUR' && (
+                    <div style={{ position: 'absolute', top: '16px', right: '16px', color: '#06b6d4' }}>
+                      <CheckCircle2 className="h-5 w-5" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Card B: Drone Photogrammetry & Site Survey */}
+                <div 
+                  onClick={() => handleSelectType('DRONE_SURVEY')}
+                  style={{
+                    padding: '24px',
+                    borderRadius: '16px',
+                    cursor: 'pointer',
+                    background: selectedType === 'DRONE_SURVEY' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(15, 23, 42, 0.6)',
+                    border: selectedType === 'DRONE_SURVEY' ? '2px solid #10b981' : '1px solid rgba(255, 255, 255, 0.08)',
+                    boxShadow: selectedType === 'DRONE_SURVEY' ? '0 0 25px rgba(16, 185, 129, 0.2)' : 'none',
+                    transition: 'all 0.2s',
+                    position: 'relative'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                    <div style={{ padding: '10px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399' }}>
+                      <Plane className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#ffffff' }}>Drone Photogrammetry & GIS</h4>
+                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>Construction Sites & Earthworks</span>
+                    </div>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#cbd5e1', lineHeight: '1.5' }}>
+                    Reality capture with Cesium 3D Tiles, 2D Orthomosaics, elevation heatmaps, slope stability, and earthwork cut/fill calculation.
+                  </p>
+                  {selectedType === 'DRONE_SURVEY' && (
+                    <div style={{ position: 'absolute', top: '16px', right: '16px', color: '#10b981' }}>
+                      <CheckCircle2 className="h-5 w-5" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Mission Overview Fields */}
             <div className="survey-section-card">
               <div className="survey-section-header">
                 <div className="survey-section-icon">
@@ -415,18 +477,18 @@ function NewInspectionContent() {
                 </div>
                 <div>
                   <h3 className="survey-section-title">Mission Overview</h3>
-                  <p className="survey-section-desc">Identification and general notes for this drone survey flight</p>
+                  <p className="survey-section-desc">Identification and general parameters for this inspection</p>
                 </div>
               </div>
 
               <div className="form-grid-2">
                 <div className="field-group">
                   <label className="field-label">
-                    <span>Flight / Survey Title <span className="req">*</span></span>
+                    <span>Title <span className="req">*</span></span>
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. Flight 04 - Sector A Excavation & Foundations"
+                    placeholder={selectedType === 'VIRTUAL_TOUR' ? "e.g. Factory Hall A - Turbines & Assembly Line" : "e.g. Sector B Excavation & Foundation Survey"}
                     {...register('title')}
                     className="field-input"
                   />
@@ -435,500 +497,296 @@ function NewInspectionContent() {
 
                 <div className="field-group">
                   <label className="field-label">
-                    <span>Survey Flight Date</span>
+                    <span>Access Visibility</span>
                   </label>
-                  <input
-                    type="date"
-                    {...register('surveyDate')}
-                    className="field-input"
-                  />
+                  <select {...register('visibility')} className="field-select">
+                    <option value="PRIVATE">Private (Enterprise Members Only)</option>
+                    <option value="PUBLIC">Public (Accessible via link)</option>
+                  </select>
                 </div>
               </div>
 
               <div className="field-group" style={{ marginBottom: '18px' }}>
                 <label className="field-label">
-                  <span>Scope Description & Survey Objectives</span>
+                  <span>Scope Description & Objectives</span>
                 </label>
                 <textarea
                   rows="2"
-                  placeholder="e.g. Earthwork progress verification, stockpile cut/fill volume calculation and weekly orthomosaic mapping."
+                  placeholder={selectedType === 'VIRTUAL_TOUR' ? "e.g. High-definition spatial digital twin for equipment maintenance tracking and safety training." : "e.g. Weekly earthwork cut/fill volume calculation and orthomosaic verification."}
                   {...register('description')}
                   className="field-textarea"
                 />
               </div>
-
-              <div className="field-group" style={{ maxWidth: '280px' }}>
-                <label className="field-label">
-                  <span>Access Visibility</span>
-                </label>
-                <select {...register('visibility')} className="field-select">
-                  <option value="PRIVATE">Private (Enterprise Members Only)</option>
-                  <option value="PUBLIC">Public (Accessible via share link)</option>
-                </select>
-              </div>
             </div>
 
-            {/* Hardware & Georeference Specifications */}
-            <div className="survey-section-card">
-              <div className="survey-section-header">
-                <div className="survey-section-icon amber">
-                  <Compass className="h-5 w-5" />
+            {/* Drone Specific Specifications */}
+            {selectedType === 'DRONE_SURVEY' && (
+              <div className="survey-section-card">
+                <div className="survey-section-header">
+                  <div className="survey-section-icon amber">
+                    <Compass className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="survey-section-title">Drone Hardware & Georeferencing</h3>
+                    <p className="survey-section-desc">Camera sampling parameters, flight altitude and spatial datum</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="survey-section-title">Drone Hardware & Georeferencing</h3>
-                  <p className="survey-section-desc">Camera sampling parameters, flight altitude and spatial datum</p>
+
+                <div className="form-grid-2">
+                  <div className="field-group">
+                    <label className="field-label">Drone Hardware</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. DJI Mavic 3 Enterprise RTK"
+                      {...register('droneModel')}
+                      className="field-input"
+                    />
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label">Ground Sampling Distance (GSD cm/px)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="1.45"
+                      {...register('gsd')}
+                      className="field-input"
+                    />
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label">Flight Altitude (AGL meters)</label>
+                    <input
+                      type="number"
+                      placeholder="85"
+                      {...register('flightAltitude')}
+                      className="field-input"
+                    />
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label">Coordinate Reference System</label>
+                    <input
+                      type="text"
+                      placeholder="WGS84 / UTM zone 31N (EPSG:32631)"
+                      {...register('coordinateSystem')}
+                      className="field-input"
+                    />
+                  </div>
                 </div>
               </div>
+            )}
 
-              <div className="form-grid-2">
-                <div className="field-group">
-                  <label className="field-label">Drone Hardware</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. DJI Mavic 3 Enterprise RTK"
-                    {...register('droneModel')}
-                    className="field-input"
-                  />
-                </div>
-
-                <div className="field-group">
-                  <label className="field-label">Ground Sampling Distance (GSD cm/px)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="1.45"
-                    {...register('gsd')}
-                    className="field-input font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="form-grid-2">
-                <div className="field-group">
-                  <label className="field-label">Flight Altitude AGL (meters)</label>
-                  <input
-                    type="number"
-                    step="1"
-                    placeholder="85"
-                    {...register('flightAltitude')}
-                    className="field-input font-mono"
-                  />
-                </div>
-
-                <div className="field-group">
-                  <label className="field-label">Coordinate Reference System (CRS)</label>
-                  <input
-                    type="text"
-                    placeholder="WGS84 / UTM zone 31N (EPSG:32631)"
-                    {...register('coordinateSystem')}
-                    className="field-input font-mono"
-                  />
-                </div>
-              </div>
+            {/* Submit Button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className="btn-primary-gradient"
+                style={{ padding: '12px 28px', fontSize: '15px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+              >
+                <span>Continue to 3D Deliverables</span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
             </div>
-
-            <button type="submit" disabled={isSubmitting} className="survey-submit-btn">
-              <span>{isSubmitting ? 'Creating Mission Record...' : 'Proceed to Deliverables Upload'}</span>
-              <ArrowRight className="h-4 w-4" />
-            </button>
           </form>
         )}
 
-        {/* ─── STEP 2: Spatial Deliverables Ingestion ─── */}
+        {/* ─── STEP 2: Deliverables Upload Dropzones ─── */}
         {createdInspectionData && (
-          <div className="space-y-8">
-            
-            {/* ── Group 1: Drone GIS & Photogrammetry ── */}
-            <div className="survey-section-card">
+          <div>
+            <div className="survey-section-card" style={{ marginBottom: '24px' }}>
               <div className="survey-section-header">
-                <div className="survey-section-icon purple">
-                  <Layers className="h-5 w-5" />
+                <div className="survey-section-icon cyan">
+                  <Upload className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="survey-section-title">1. Drone GIS & Photogrammetry Deliverables</h3>
-                  <p className="survey-section-desc">RealityScan 3D tilesets, high-resolution orthomosaics, DSM elevation rasters and alignment QA reports</p>
+                  <h3 className="survey-section-title">
+                    {selectedType === 'VIRTUAL_TOUR' ? 'Upload 3D Factory Assets' : 'Upload Photogrammetry Deliverables'}
+                  </h3>
+                  <p className="survey-section-desc">
+                    Attach deliverables for <strong>{createdInspectionData.title}</strong>
+                  </p>
                 </div>
               </div>
 
-              <div className="dropzone-grid">
-                
-                {/* 1. Cesium 3D Tiles / GLB */}
-                <div className={`dropzone-card ${tilesetFile || glbFile ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    accept=".json,.glb,.gltf,.zip"
-                    onChange={(e) => {
-                      const file = e.target.files[0];
-                      if (file?.name.endsWith('.glb') || file?.name.endsWith('.gltf')) {
-                        setGlbFile(file);
-                      } else {
-                        setTilesetFile(file);
-                      }
-                    }}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon">
-                        <Sparkles className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">.json / .glb</span>
+              {/* ─── VIRTUAL TOUR DELIVERABLES ─── */}
+              {selectedType === 'VIRTUAL_TOUR' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  
+                  {/* 1. 3D Building Mesh (GLB / OBJ / ZIP) */}
+                  <div className="upload-dropzone-box">
+                    <div className="dropzone-icon-circle">
+                      <Boxes className="h-6 w-6 text-cyan-400" />
                     </div>
-                    <h4 className="dropzone-title">3D Reality Mesh / 3D Tiles</h4>
-                    <p className="dropzone-desc">Cesium 3D Tiles (`tileset.json` / LODs) or GLB architecture model.</p>
+                    <h4 className="dropzone-title">3D Building Mesh (.glb, .obj, .zip)</h4>
+                    <p className="dropzone-desc">Matterport OBJ/ZIP or GLB (Auto-converted & Draco compressed)</p>
+                    <input 
+                      type="file" 
+                      accept=".glb,.gltf,.obj,.zip"
+                      onChange={(e) => setGlbFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {glbFile && <div className="file-ready-badge">{glbFile.name} ({formatFileSize(glbFile.size)})</div>}
                   </div>
 
-                  <div className="dropzone-file-status">
-                    {tilesetFile || glbFile ? (
-                      <>
-                        <span className="dropzone-filename">{(tilesetFile || glbFile).name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize((tilesetFile || glbFile).size)}</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select 3D Tiles</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 2. Orthoprojection / Orthomosaic */}
-                <div className={`dropzone-card ${orthoFile ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    accept=".jpg,.jpeg,.png,.tif,.tiff"
-                    onChange={(e) => setOrthoFile(e.target.files[0])}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon emerald">
-                        <Map className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">.tif / .jpg / .png</span>
+                  {/* 2. 360° Panoramas & Cubemaps Package (panoramas.zip) */}
+                  <div className="upload-dropzone-box">
+                    <div className="dropzone-icon-circle">
+                      <Camera className="h-6 w-6 text-emerald-400" />
                     </div>
-                    <h4 className="dropzone-title">Orthoprojection Map</h4>
-                    <p className="dropzone-desc">High-resolution georeferenced 2D Orthomosaic map layer.</p>
+                    <h4 className="dropzone-title">360° Panoramas & Cubemaps (.zip)</h4>
+                    <p className="dropzone-desc">Extracted cubemaps & transition panoramas package</p>
+                    <input 
+                      type="file" 
+                      accept=".zip"
+                      onChange={(e) => setPanoramasZipFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {panoramasZipFile && <div className="file-ready-badge">{panoramasZipFile.name} ({formatFileSize(panoramasZipFile.size)})</div>}
                   </div>
 
-                  <div className="dropzone-file-status">
-                    {orthoFile ? (
-                      <>
-                        <span className="dropzone-filename">{orthoFile.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(orthoFile.size)}</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select Ortho</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 3. Digital Surface Model (DSM) */}
-                <div className={`dropzone-card ${dsmFile ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    accept=".tif,.tiff,.png,.jpg"
-                    onChange={(e) => setDsmFile(e.target.files[0])}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon purple">
-                        <Layers className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">.tif / .png</span>
+                  {/* 3. Scans Telemetry JSON / CSV */}
+                  <div className="upload-dropzone-box">
+                    <div className="dropzone-icon-circle">
+                      <FileCheck className="h-6 w-6 text-indigo-400" />
                     </div>
-                    <h4 className="dropzone-title">Digital Surface Model</h4>
-                    <p className="dropzone-desc">Elevation surface raster for hypsometric heatmaps and cross-sections.</p>
+                    <h4 className="dropzone-title">Scan Telemetry (scans.json)</h4>
+                    <p className="dropzone-desc">E57 / Matterport scanner coordinates & quaternions</p>
+                    <input 
+                      type="file" 
+                      accept=".json,.csv"
+                      onChange={(e) => setJsonFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {jsonFile && <div className="file-ready-badge">{jsonFile.name} ({formatFileSize(jsonFile.size)})</div>}
                   </div>
 
-                  <div className="dropzone-file-status">
-                    {dsmFile ? (
-                      <>
-                        <span className="dropzone-filename">{dsmFile.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(dsmFile.size)}</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select DSM</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 4. RealityScan Alignment & QA Report */}
-                <div className={`dropzone-card ${reportFile ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    accept=".pdf,.html,.htm,.png,.jpg"
-                    onChange={(e) => setReportFile(e.target.files[0])}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon blue">
-                        <FileText className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">.pdf / .html</span>
+                  {/* 4. Thumbnail Cover */}
+                  <div className="upload-dropzone-box">
+                    <div className="dropzone-icon-circle">
+                      <ImageIcon className="h-6 w-6 text-amber-400" />
                     </div>
-                    <h4 className="dropzone-title">Alignment & QA Report</h4>
-                    <p className="dropzone-desc">Photogrammetry alignment report, tie points error & calibration PDF.</p>
-                  </div>
-
-                  <div className="dropzone-file-status">
-                    {reportFile ? (
-                      <>
-                        <span className="dropzone-filename">{reportFile.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(reportFile.size)}</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select Report</span>
-                      </span>
-                    )}
+                    <h4 className="dropzone-title">Cover Thumbnail (.jpg / .png)</h4>
+                    <p className="dropzone-desc">Preview image for the project dashboard</p>
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      onChange={(e) => setThumbnailFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {thumbnailFile && <div className="file-ready-badge">{thumbnailFile.name}</div>}
                   </div>
                 </div>
+              )}
 
-              </div>
-            </div>
-
-            {/* ── Group 2: 360° Ground Survey & Virtual Tour ── */}
-            <div className="survey-section-card">
-              <div className="survey-section-header">
-                <div className="survey-section-icon" style={{ background: 'rgba(244, 63, 94, 0.15)', color: '#fb7185', borderColor: 'rgba(244, 63, 94, 0.3)' }}>
-                  <CircleDot className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="survey-section-title">2. 360° Ground Survey & Virtual Tour (Red Scan Rings)</h3>
-                  <p className="survey-section-desc">Ground camera 360 cubemaps and scan telemetry registration for seamless teleportation rings</p>
-                </div>
-              </div>
-
-              <div className="dropzone-grid">
-                
-                {/* 5. Scan Telemetry Coordinates JSON */}
-                <div className={`dropzone-card ${jsonFile ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={(e) => setJsonFile(e.target.files[0])}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon rose">
-                        <CircleDot className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">scans.json</span>
+              {/* ─── DRONE SURVEY DELIVERABLES ─── */}
+              {selectedType === 'DRONE_SURVEY' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  
+                  {/* Cesium 3D Tileset */}
+                  <div className="upload-dropzone-box">
+                    <div className="dropzone-icon-circle">
+                      <Layers className="h-6 w-6 text-cyan-400" />
                     </div>
-                    <h4 className="dropzone-title">Scan Coordinates Telemetry</h4>
-                    <p className="dropzone-desc">`scans.json` containing 3D coordinates (x, y, alt) for red scan rings.</p>
+                    <h4 className="dropzone-title">Cesium 3D Tiles (tileset.zip)</h4>
+                    <p className="dropzone-desc">RealityScan / Pix4D continuous LOD mesh</p>
+                    <input 
+                      type="file" 
+                      accept=".zip,.json"
+                      onChange={(e) => setTilesetFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {tilesetFile && <div className="file-ready-badge">{tilesetFile.name} ({formatFileSize(tilesetFile.size)})</div>}
                   </div>
 
-                  <div className="dropzone-file-status">
-                    {jsonFile ? (
-                      <>
-                        <span className="dropzone-filename">{jsonFile.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(jsonFile.size)}</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select scans.json</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 6. RealityCapture Scan Registration File (Optional) */}
-                <div className={`dropzone-card ${rcJsonFile ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={(e) => setRcJsonFile(e.target.files[0])}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon amber">
-                        <Compass className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">rc_scans.json</span>
+                  {/* 2D Orthomosaic */}
+                  <div className="upload-dropzone-box">
+                    <div className="dropzone-icon-circle">
+                      <Map className="h-6 w-6 text-emerald-400" />
                     </div>
-                    <h4 className="dropzone-title">RC Registration Matrix (Optional)</h4>
-                    <p className="dropzone-desc">RealityCapture scan alignment coordinates for auto-calibration.</p>
+                    <h4 className="dropzone-title">2D Orthomosaic (.tif / .png)</h4>
+                    <p className="dropzone-desc">High-resolution georeferenced orthoprojection</p>
+                    <input 
+                      type="file" 
+                      accept=".tif,.tiff,.png,.jpg"
+                      onChange={(e) => setOrthoFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {orthoFile && <div className="file-ready-badge">{orthoFile.name} ({formatFileSize(orthoFile.size)})</div>}
                   </div>
 
-                  <div className="dropzone-file-status">
-                    {rcJsonFile ? (
-                      <>
-                        <span className="dropzone-filename">{rcJsonFile.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(rcJsonFile.size)}</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select RC JSON</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 7. 360° Cubemap Panorama Images (Multiple Files) */}
-                <div className={`dropzone-card ${imageFiles && imageFiles.length > 0 ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={(e) => setImageFiles(Array.from(e.target.files))}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon blue">
-                        <FolderOpen className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">Multiple .jpg</span>
+                  {/* DSM / DTM Elevation GeoTIFF */}
+                  <div className="upload-dropzone-box">
+                    <div className="dropzone-icon-circle">
+                      <Sparkles className="h-6 w-6 text-amber-400" />
                     </div>
-                    <h4 className="dropzone-title">360° Panorama Cubemaps</h4>
-                    <p className="dropzone-desc">Select all 6-face cubemap images (`&lt;scanId&gt;_face.jpg`) for 360 view.</p>
+                    <h4 className="dropzone-title">DSM / DTM Elevation Model</h4>
+                    <p className="dropzone-desc">Digital surface/terrain raster GeoTIFF</p>
+                    <input 
+                      type="file" 
+                      accept=".tif,.tiff"
+                      onChange={(e) => setDsmFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {dsmFile && <div className="file-ready-badge">{dsmFile.name}</div>}
                   </div>
 
-                  <div className="dropzone-file-status">
-                    {imageFiles && imageFiles.length > 0 ? (
-                      <>
-                        <span className="dropzone-filename">{imageFiles.length} Cubemap files selected</span>
-                        <span className="text-[10px] text-emerald-400 font-bold">✓ Ready</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select Panoramas</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            {/* ── Group 3: Media & Presentation ── */}
-            <div className="survey-section-card">
-              <div className="survey-section-header">
-                <div className="survey-section-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
-                  <ImageIcon className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="survey-section-title">3. Media & Presentation</h3>
-                  <p className="survey-section-desc">Thumbnail image and optional video walkthrough for dashboard previews</p>
-                </div>
-              </div>
-
-              <div className="dropzone-grid">
-                
-                {/* 8. Thumbnail Cover */}
-                <div className={`dropzone-card ${thumbnailFile ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setThumbnailFile(e.target.files[0])}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon">
-                        <ImageIcon className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">.jpg / .png</span>
+                  {/* Survey Quality Report */}
+                  <div className="upload-dropzone-box">
+                    <div className="dropzone-icon-circle">
+                      <FileText className="h-6 w-6 text-purple-400" />
                     </div>
-                    <h4 className="dropzone-title">Mission Cover Image</h4>
-                    <p className="dropzone-desc">Preview thumbnail image for project cards and dashboard.</p>
-                  </div>
-
-                  <div className="dropzone-file-status">
-                    {thumbnailFile ? (
-                      <>
-                        <span className="dropzone-filename">{thumbnailFile.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(thumbnailFile.size)}</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select Image</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 9. Video Tour */}
-                <div className={`dropzone-card ${videoFile ? 'has-file' : ''}`}>
-                  <input
-                    type="file"
-                    accept="video/*,.mp4,.mov,.webm"
-                    onChange={(e) => setVideoFile(e.target.files[0])}
-                    className="dropzone-input"
-                  />
-                  <div>
-                    <div className="dropzone-top">
-                      <div className="dropzone-icon emerald">
-                        <Video className="h-5 w-5" />
-                      </div>
-                      <span className="dropzone-format-tag">.mp4 / .mov</span>
-                    </div>
-                    <h4 className="dropzone-title">Site Walkthrough Video</h4>
-                    <p className="dropzone-desc">Optional drone flight recording or walkthrough video.</p>
-                  </div>
-
-                  <div className="dropzone-file-status">
-                    {videoFile ? (
-                      <>
-                        <span className="dropzone-filename">{videoFile.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(videoFile.size)}</span>
-                      </>
-                    ) : (
-                      <span className="dropzone-upload-btn">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>Select Video</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Progress Box */}
-              {isSubmitting && (
-                <div className="survey-progress-box">
-                  <div className="flex justify-between items-center text-xs font-mono">
-                    <span className="text-cyan-400 font-medium">{uploadStatusText || 'Ingesting spatial deliverables...'}</span>
-                    <span className="text-white font-bold">{uploadProgress}%</span>
-                  </div>
-                  <div className="progress-bar-track">
-                    <div className="progress-bar-fill" style={{ width: `${uploadProgress}%` }} />
+                    <h4 className="dropzone-title">Flight Report (.pdf)</h4>
+                    <p className="dropzone-desc">Photogrammetry alignment & quality stats</p>
+                    <input 
+                      type="file" 
+                      accept=".pdf"
+                      onChange={(e) => setReportFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {reportFile && <div className="file-ready-badge">{reportFile.name}</div>}
                   </div>
                 </div>
               )}
             </div>
 
-            <button
-              onClick={executeUploadPhase}
-              disabled={isSubmitting}
-              className="survey-submit-btn"
-              style={{ background: 'linear-gradient(135deg, #10b981 0%, #06b6d4 100%)' }}
-            >
-              <Upload className="h-4 w-4" />
-              <span>{isSubmitting ? 'Uploading Survey Package...' : 'Upload & Launch Survey Studio'}</span>
-            </button>
+            {/* Progress Bar & Launch Button */}
+            {isSubmitting && (
+              <div style={{ marginBottom: '24px', padding: '16px', background: 'rgba(15, 23, 42, 0.8)', borderRadius: '12px', border: '1px solid rgba(6, 182, 212, 0.3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px', color: '#38bdf8' }}>
+                  <span>{uploadStatusText || 'Uploading assets...'}</span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{ width: `${uploadProgress}%`, height: '100%', background: '#06b6d4', transition: 'width 0.3s ease' }} />
+                </div>
+              </div>
+            )}
 
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button
+                type="button"
+                onClick={() => navigate(`/engine/${createdInspectionData.id}`)}
+                className="engine-btn"
+                style={{ padding: '12px 20px', cursor: 'pointer' }}
+              >
+                Skip Uploads & Launch Engine
+              </button>
+
+              <button
+                type="button"
+                onClick={executeUploadPhase}
+                disabled={isSubmitting}
+                className="btn-primary-gradient"
+                style={{ padding: '12px 28px', fontSize: '15px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+              >
+                <span>Upload & Launch Digital Twin</span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         )}
-
       </main>
     </div>
   );

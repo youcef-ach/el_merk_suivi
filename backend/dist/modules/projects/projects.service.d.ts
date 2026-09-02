@@ -4,8 +4,8 @@ export declare class ProjectsService {
     private prisma;
     constructor(prisma: PrismaService);
     create(createProjectDto: CreateProjectDto, userId: string, enterpriseId: string): Promise<{
-        id: string;
         enterpriseId: string;
+        id: string;
         createdAt: Date;
         name: string;
         description: string | null;
@@ -16,8 +16,8 @@ export declare class ProjectsService {
             inspections: number;
         };
     } & {
-        id: string;
         enterpriseId: string;
+        id: string;
         createdAt: Date;
         name: string;
         description: string | null;
@@ -29,14 +29,9 @@ export declare class ProjectsService {
             createdAt: Date;
             description: string | null;
             updatedAt: Date;
+            type: import(".prisma/client").$Enums.InspectionType;
             title: string;
             visibility: import(".prisma/client").$Enums.Visibility;
-            glbModelUrl: string | null;
-            scansJsonUrl: string | null;
-            rawScansJsonUrl: string | null;
-            rawCsvJsonUrl: string | null;
-            thumbnailUrl: string | null;
-            videoUrl: string | null;
             surveyDate: Date | null;
             droneModel: string | null;
             gsd: number | null;
@@ -47,22 +42,28 @@ export declare class ProjectsService {
             orthoBounds: import("@prisma/client/runtime/library").JsonValue | null;
             dsmUrl: string | null;
             dtmUrl: string | null;
+            contoursUrl: string | null;
             dsmMinElevation: number | null;
             dsmMaxElevation: number | null;
-            contoursUrl: string | null;
+            glbModelUrl: string | null;
+            scansJsonUrl: string | null;
+            rawScansJsonUrl: string | null;
+            rawCsvJsonUrl: string | null;
+            thumbnailUrl: string | null;
+            videoUrl: string | null;
             projectId: string;
         }[];
     } & {
-        id: string;
         enterpriseId: string;
+        id: string;
         createdAt: Date;
         name: string;
         description: string | null;
         updatedAt: Date;
     }>;
     remove(id: string, enterpriseId: string): Promise<{
-        id: string;
         enterpriseId: string;
+        id: string;
         createdAt: Date;
         name: string;
         description: string | null;

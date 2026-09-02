@@ -113,9 +113,10 @@ export class InspectionsController {
   @Post(':id/process-glb')
   async processGlb(
     @Param('id') id: string,
+    @Body('fileName') fileName: string,
     @GetUser() user: any,
   ) {
-    return this.inspectionsService.processGlb(id, user.enterpriseId, user.role);
+    return this.inspectionsService.processGlb(id, user.enterpriseId, user.role, fileName);
   }
 
   @Post(':id/process-tileset')
@@ -125,5 +126,14 @@ export class InspectionsController {
   ) {
     return this.inspectionsService.processTileset(id, user.enterpriseId, user.role);
   }
+
+  @Post(':id/process-panoramas')
+  async processPanoramas(
+    @Param('id') id: string,
+    @GetUser() user: any,
+  ) {
+    return this.inspectionsService.processPanoramas(id, user.enterpriseId, user.role);
+  }
 }
+
 

@@ -97,9 +97,9 @@ export declare class InspectionsDirectController {
         }[];
         siteMeasurements: {
             id: string;
+            type: string;
             createdAt: Date;
             inspectionId: string;
-            type: string;
             points: import("@prisma/client/runtime/library").JsonValue;
             values: import("@prisma/client/runtime/library").JsonValue;
             label: string | null;
@@ -107,8 +107,8 @@ export declare class InspectionsDirectController {
         stagingProfiles: ({
             stagedItems: {
                 id: string;
-                color: string | null;
                 type: string | null;
+                color: string | null;
                 isPolyHaven: boolean;
                 isSketchfab: boolean;
                 polyHavenId: string | null;
@@ -141,6 +141,7 @@ export declare class InspectionsDirectController {
         })[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
@@ -262,9 +263,9 @@ export declare class InspectionsDirectController {
         }[];
         siteMeasurements: {
             id: string;
+            type: string;
             createdAt: Date;
             inspectionId: string;
-            type: string;
             points: import("@prisma/client/runtime/library").JsonValue;
             values: import("@prisma/client/runtime/library").JsonValue;
             label: string | null;
@@ -272,8 +273,8 @@ export declare class InspectionsDirectController {
         stagingProfiles: ({
             stagedItems: {
                 id: string;
-                color: string | null;
                 type: string | null;
+                color: string | null;
                 isPolyHaven: boolean;
                 isSketchfab: boolean;
                 polyHavenId: string | null;
@@ -306,6 +307,7 @@ export declare class InspectionsDirectController {
         })[];
     } & {
         id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
         title: string;
         description: string | null;
         glbModelUrl: string | null;
