@@ -946,34 +946,11 @@ let InspectionsService = class InspectionsService {
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'panos-'));
         const zipPath = path.join(tempDir, 'panoramas.zip');
         try {
-            console.log(`[processPanoramas] Downloading panoramas.zip for inspection ${id}...`);
             await this.storageService.downloadFile(bucket, `inspections/${id}/panoramas.zip`, zipPath);
             const AdmZip = require('adm-zip');
             const zip = new AdmZip(zipPath);
             const extractDir = path.join(tempDir, 'extracted');
-            fs.mkdirSync(extractDir, { recursive: true });
             zip.extractAllTo(extractDir, true);
-            const scriptPath = path.resolve(process.cwd(), 'scripts/process_panoramas.py');
-            const wasmtimePath = path.resolve(process.cwd(), 'bin/wasmtime.exe');
-            const basisuWasmPath = path.resolve(process.cwd(), 'bin/basisu_st.wasm');
-            if (fs.existsSync(scriptPath)) {
-                console.log(`[processPanoramas] Executing KTX2 & LOD generator: ${scriptPath}`);
-                const { spawnSync } = require('child_process');
-                const res = spawnSync('python', [
-                    scriptPath,
-                    '--input_dir', extractDir,
-                    '--output_dir', extractDir,
-                    '--wasmtime_bin', wasmtimePath,
-                    '--basisu_wasm', basisuWasmPath,
-                    '--sizes', '256', '512', '1024', '2048',
-                ], { stdio: 'inherit' });
-                if (res.error) {
-                    console.warn(`[processPanoramas] Python runner warning:`, res.error);
-                }
-            }
-            else {
-                console.warn(`[processPanoramas] Script not found at ${scriptPath}, skipping KTX2 generation.`);
-            }
             let uploadedCount = 0;
             const uploadRecursive = async (currDir, relPath = '') => {
                 const entries = fs.readdirSync(currDir, { withFileTypes: true });
@@ -992,7 +969,7 @@ let InspectionsService = class InspectionsService {
                             contentType = 'application/json';
                         else if (lower.endsWith('.ktx2'))
                             contentType = 'image/ktx2';
-                        const s3Dest = `inspections/${id}/${s3Rel.replace(/\\/g, '/')}`;
+                        const s3Dest = `inspections/${id}/${s3Rel}`;
                         await this.storageService.uploadFile(bucket, s3Dest, fullPath, contentType);
                         uploadedCount++;
                         if (entry.name === 'scans.json' && !inspection.scansJsonUrl) {
@@ -1005,12 +982,12 @@ let InspectionsService = class InspectionsService {
                 }
             };
             await uploadRecursive(extractDir);
-            console.log(`[processPanoramas] Unpacked & generated ${uploadedCount} panorama files to inspections/${id}/`);
+            console.log(`[processPanoramas] Unpacked ${uploadedCount} panorama files to inspections/${id}/`);
             return { status: 'SUCCESS', filesCount: uploadedCount };
         }
         catch (err) {
             console.error(`[processPanoramas] Error:`, err);
-            throw new common_1.InternalServerErrorException(`Failed to unpack & generate panoramas: ${err.message}`);
+            throw new common_1.InternalServerErrorException(`Failed to unpack panoramas: ${err.message}`);
         }
         finally {
             fs.rmSync(tempDir, { recursive: true, force: true });

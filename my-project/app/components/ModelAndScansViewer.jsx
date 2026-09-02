@@ -3,13 +3,11 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import { useThreeScene } from '../hooks/useThreeScene';
 import { useTourData } from '../hooks/useTourData';
-import { executeFlightAnimation } from '../utils/tourAnimations';
+import { executeFlightAnimation, toggleBoxFading, toggleModelFading } from '../utils/tourAnimations';
 import { useStaging } from '../hooks/useStaging';
-import { disposeScanTextures } from '../utils/depthCubeLoader';
+import { API_URL, MINIO_URL } from '../config/api';
 
-const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect, onPointerDragStart, onPointerDragMove, onPointerDragEnd, activeFloor = 'all' }, ref) => {
-  // Removed debug states
-
+const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, measurementMode, onMeasurementClick, tagMode, onTagClick, onTagSelect, pointersMode, onPointerClick, onPointerSelect, onPointerDragStart, onPointerDragMove, onPointerDragEnd, volumeMode, onVolumeClick }, ref) => {
   // --- Persistent dummy texture to prevent shader recompilation lag ---
   const dummyTex = useMemo(() => {
     const tex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat);
@@ -17,28 +15,143 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     return tex;
   }, []);
 
-  const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, scanLockPosRef, sceneReady } = useThreeScene([dummyTex], true);
+  const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, beforeRenderCallbacksRef, sceneReady } = useThreeScene([dummyTex]);
   const { 
-    modelRef, magicBubbleRef, projectiveMaterialRef, 
-    scanSpheres, loadPanoramaTextures, isDataLoaded, scansData 
-  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, activeFloor);
+    modelRef, tilesetEngineRef, orthoLayerRef, satelliteBasemapRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
+    scanSpheres, loadPanoramaTextures, isDataLoaded, scansData, tourDetails 
+  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, beforeRenderCallbacksRef);
 
   // ─── Staging Hook ───
   const staging = useStaging(
     sceneRef, cameraRef, rendererRef, controlsRef, modelRef, isDataLoaded, tourId, activeProfileId
   );
 
-  // Expose Three.js internals and staging methods to parent
+  // ─── Drone GIS Helper Methods ───
+  const setTopView = () => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    gsap.to(cameraRef.current.position, {
+      x: 0,
+      y: 350,
+      z: 0.5,
+      duration: 1.2,
+      ease: "power2.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+    gsap.to(controlsRef.current.target, {
+      x: 0,
+      y: 4,
+      z: 0,
+      duration: 1.2,
+      ease: "power2.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+  };
+
+  const setIsoView = () => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    gsap.to(cameraRef.current.position, {
+      x: 160,
+      y: 140,
+      z: 200,
+      duration: 1.2,
+      ease: "power2.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+    gsap.to(controlsRef.current.target, {
+      x: 0,
+      y: 4,
+      z: 0,
+      duration: 1.2,
+      ease: "power2.inOut",
+      onUpdate: () => controlsRef.current.update()
+    });
+  };
+
+  const sampleCrossSection = (p1, p2, numSamples = 60) => {
+    const points = [];
+    const start = new THREE.Vector3(p1.x, p1.y, p1.z);
+    const end = new THREE.Vector3(p2.x, p2.y, p2.z);
+    const totalDist = start.distanceTo(end);
+    
+    const raycaster = new THREE.Raycaster();
+    const downVec = new THREE.Vector3(0, -1, 0);
+    
+    const targets = [];
+    if (tilesetEngineRef.current && tilesetEngineRef.current.getGroup()) {
+      targets.push(tilesetEngineRef.current.getGroup());
+    }
+    if (modelRef.current) {
+      targets.push(modelRef.current);
+    }
+
+    let minElev = Infinity;
+    let maxElev = -Infinity;
+
+    for (let i = 0; i <= numSamples; i++) {
+      const t = i / numSamples;
+      const interp = new THREE.Vector3().lerpVectors(start, end, t);
+      
+      const rayOrigin = new THREE.Vector3(interp.x, Math.max(interp.y, 50) + 150, interp.z);
+      raycaster.set(rayOrigin, downVec);
+      
+      let surfaceY = interp.y;
+      if (targets.length > 0) {
+        const hits = raycaster.intersectObjects(targets, true);
+        if (hits.length > 0) {
+          surfaceY = hits[0].point.y;
+        }
+      }
+
+      if (surfaceY < minElev) minElev = surfaceY;
+      if (surfaceY > maxElev) maxElev = surfaceY;
+
+      points.push({
+        x: interp.x,
+        y: surfaceY,
+        z: interp.z,
+        elevation: surfaceY,
+        distance: (t * totalDist).toFixed(2),
+      });
+    }
+
+    if (minElev === Infinity) minElev = 0;
+    if (maxElev === -Infinity) maxElev = 0;
+
+    const deltaElev = maxElev - minElev;
+    const slope = totalDist > 0 ? (deltaElev / totalDist) * 100 : 0;
+
+    return {
+      samples: points,
+      length: totalDist,
+      minElev,
+      maxElev,
+      deltaElev,
+      slope,
+      startPoint: p1,
+      endPoint: p2,
+    };
+  };
+
+  // Expose Three.js internals and GIS methods to parent
   useImperativeHandle(ref, () => ({
     sceneRef,
     cameraRef,
     rendererRef,
     modelRef,
+    tilesetEngineRef,
+    get tilesetEngine() { return tilesetEngineRef.current; },
     controlsRef,
     scansData,
     scanSpheres,
-    staging, // expose the entire staging object
-  }), [sceneRef, cameraRef, rendererRef, modelRef, controlsRef, scansData, scanSpheres, staging]);
+    staging,
+    orthoLayer: orthoLayerRef.current,
+    satelliteBasemap: satelliteBasemapRef.current,
+    get satelliteBasemapLayer() { return satelliteBasemapRef.current; },
+    tourDetails,
+    setTopView,
+    setIsoView,
+    sampleCrossSection,
+  }), [sceneRef, cameraRef, rendererRef, modelRef, controlsRef, scansData, scanSpheres, staging, tourDetails]);
 
   // Track measurement mode state in a ref for the click handler
   const measurementModeRef = useRef(false);
@@ -67,9 +180,12 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
   onPointerDragMoveRef.current = onPointerDragMove;
   onPointerDragEndRef.current = onPointerDragEnd;
 
+  const volumeModeRef = useRef(false);
+  const onVolumeClickRef = useRef(null);
+  volumeModeRef.current = volumeMode;
+  onVolumeClickRef.current = onVolumeClick;
+
   // Active state trackers
-  // Cache loaded panorama textures by scan ID
-  const panoramaCache = useRef({});
   const activeBoxIndexRef = useRef(1);
   const activeSphereRef = useRef(null);
   const wasDraggingRef = useRef(false);
@@ -78,142 +194,22 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
   // Hotspot Overlay view state
   const [isInscan, setIsInscan] = useState(false);
   const [isMeshView, setIsMeshView] = useState(false);
-  const [isRawMeshView, setIsRawMeshView] = useState(false);
 
   // Tag info popup state (for engine/read-only view)
   const [activeTagInfo, setActiveTagInfo] = useState(null);
-  const [calibRotation, setCalibRotation] = useState({ x: 0, y: 0, z: 0 });
-
-  const applyCalibration = (axis, degrees) => {
-    setCalibRotation(prev => {
-      const newCalib = { ...prev, [axis]: prev[axis] + degrees * (Math.PI / 180) };
-      
-      // Update current bubble if inside a scan
-      if (isInscan && activeSphereRef.current && magicBubbleRef.current) {
-        const instancedMesh = scanSpheres[0];
-        const clickedData = instancedMesh.userData.metadata.find(m => m.id === activeSphereRef.current);
-        if (clickedData) {
-          const targetQuat = clickedData.rotation_quaternion;
-          const baseQuat = new THREE.Quaternion(targetQuat[0], targetQuat[1], targetQuat[2], targetQuat[3]);
-          
-          const calibEulerObj = new THREE.Euler(newCalib.x, newCalib.y, newCalib.z, 'XYZ');
-          const calibQ = new THREE.Quaternion().setFromEuler(calibEulerObj);
-          const finalQuat = baseQuat.multiply(calibQ);
-          
-          magicBubbleRef.current.quaternion.copy(finalQuat);
-          
-          // Also update projective material's inverse quat if it's currently active
-          if (projectiveMaterialRef.current) {
-            projectiveMaterialRef.current.uniforms.uCurrentScanQuatInverse.value.set(-finalQuat.x, -finalQuat.y, -finalQuat.z, finalQuat.w);
-          }
-        }
-      }
-      
-      return newCalib;
-    });
-  };
-
-  useEffect(() => {
-    if (isInscan && activeSphereRef.current && isDataLoaded && rendererRef.current) {
-      const instancedMesh = scanSpheres[0];
-      const clickedData = instancedMesh.userData.metadata.find(m => m.id === activeSphereRef.current);
-      if (clickedData && magicBubbleRef.current) {
-        // Set world position (must be optical center realPosition, not floor snappedPosition)
-        magicBubbleRef.current.position.copy(clickedData.realPosition);
-        if (scanLockPosRef) scanLockPosRef.current = clickedData.realPosition;
-
-        // Set rotation quaternion aligned to scanner local orientation
-        if (clickedData.rotation_quaternion) {
-          const q = clickedData.rotation_quaternion;
-          const baseQuat = new THREE.Quaternion(q[0], q[1], q[2], q[3]);
-          const calibEulerObj = new THREE.Euler(calibRotation.x, calibRotation.y, calibRotation.z, 'XYZ');
-          const calibQ = new THREE.Quaternion().setFromEuler(calibEulerObj);
-          const finalQuat = baseQuat.multiply(calibQ);
-          magicBubbleRef.current.quaternion.copy(finalQuat);
-
-          if (projectiveMaterialRef.current) {
-            projectiveMaterialRef.current.uniforms.uCurrentScanQuatInverse.value.set(-finalQuat.x, -finalQuat.y, -finalQuat.z, finalQuat.w);
-          }
-        }
-
-        loadPanoramaTextures(clickedData.id, rendererRef.current).then((loadedTextures) => {
-          panoramaCache.current[clickedData.id] = loadedTextures;
-          const uniforms = magicBubbleRef.current.material.uniforms;
-          if (uniforms.uColorCube) uniforms.uColorCube.value = loadedTextures.colorCube;
-          if (uniforms.uDepthCube) uniforms.uDepthCube.value = loadedTextures.depthCube;
-          if (uniforms.uMinDepth) uniforms.uMinDepth.value = loadedTextures.minDepth;
-          if (uniforms.uMaxDepth) uniforms.uMaxDepth.value = loadedTextures.maxDepth;
-        });
-      }
-    } else {
-      if (scanLockPosRef) scanLockPosRef.current = null;
-    }
-  }, [isInscan, isDataLoaded, scanSpheres, calibRotation]);
 
 
-  const handleToggleMeshView = (useRaw = false) => {
-    if (isMeshView || isRawMeshView) {
-      // Switch back to bubble
-      magicBubbleRef.current.visible = true;
-      if (isMeshView) {
-        gsap.to(projectiveMaterialRef.current.uniforms.uOpacity, { value: 0, duration: 1.0, onComplete: () => {
-          modelRef.current.traverse((child) => {
-            if (child.isMesh && child.userData.originalBasicMaterial) {
-              child.material = child.userData.originalBasicMaterial;
-            }
-          });
-          modelRef.current.visible = false;
-        }});
-      } else {
-        modelRef.current.visible = false;
-      }
-      gsap.to(magicBubbleRef.current.material.uniforms.uOpacity, { value: 1, duration: 1.0 });
-      setIsMeshView(false);
-      setIsRawMeshView(false);
-    } else {
-      // Switch to global mesh
-      if (useRaw) {
-        modelRef.current.traverse((child) => {
-          if (child.isMesh && child.userData.originalBasicMaterial) {
-            child.material = child.userData.originalBasicMaterial;
-          }
-        });
-        setIsRawMeshView(true);
-      } else {
-        modelRef.current.traverse((child) => {
-          if (child.isMesh && child.userData.projectiveMaterial) {
-            child.material = child.userData.projectiveMaterial;
-          }
-        });
-        // Setup projective map for current scan
-        // NOTE: the magic bubble now carries color as a CubeTexture (uColorCube),
-        // while the projective MESH shader still expects an equirect color map.
-        // Guard against the old equirect uniform being absent so the mesh-inspect
-        // toggle does not throw; the projective mesh color path is handled
-        // separately and is not required for the inside-scan parallax test.
-        const currentScanEquirect = panoramaCache.current[activeSphereRef.current]?.equirectTexture;
-        if (currentScanEquirect && projectiveMaterialRef.current.uniforms.uCurrentColorMap) {
-          projectiveMaterialRef.current.uniforms.uCurrentColorMap.value = currentScanEquirect;
-        }
-        projectiveMaterialRef.current.uniforms.uCurrentScanPos.value.copy(magicBubbleRef.current.position);
-        if (magicBubbleRef.current && projectiveMaterialRef.current) {
-          const q = magicBubbleRef.current.quaternion;
-          projectiveMaterialRef.current.uniforms.uCurrentScanQuatInverse.value.set(-q.x, -q.y, -q.z, q.w);
-        }
-        projectiveMaterialRef.current.uniforms.uTransitionProgress.value = 0.0;
-        
-        gsap.to(projectiveMaterialRef.current.uniforms.uOpacity, { value: 1, duration: 1.0 });
-        setIsMeshView(true);
-      }
-      
-      modelRef.current.visible = true;
-      gsap.to(magicBubbleRef.current.material.uniforms.uOpacity, { value: 0, duration: 1.0, onComplete: () => { magicBubbleRef.current.visible = false; }});
-    }
+  const handleToggleMeshView = () => {
+    const currentBox = activeBoxIndexRef.current === 1 ? box1Ref.current : box2Ref.current;
+    
+    toggleBoxFading(currentBox, !isMeshView);
+    toggleModelFading(modelRef.current, isMeshView);
+    
+    setIsMeshView(!isMeshView);
   };
 
   const handleFloorPlanView = () => {
     if (!modelRef.current || !cameraRef.current || !controlsRef.current) return;
-    if (scanLockPosRef) scanLockPosRef.current = null;
 
     // Force Mesh View if inside a panorama
     if (isInscan && !isMeshView) {
@@ -254,7 +250,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
   };
 
   // Synchronize Area Pointers visibility (Only display in Dollhouse mode)
-  // Also toggle keyboard movement and OrbitControls distance constraints
+  // Also toggle keyboard movement: enabled in dollhouse, disabled in panorama
   useEffect(() => {
     const group = sceneRef.current?.getObjectByName('areaPointers');
     if (group) {
@@ -262,23 +258,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     }
     // Enable keyboard in dollhouse view, disable in panorama
     keyboardEnabledRef.current = !isInscan || isMeshView;
-
-    // Lock/unlock OrbitControls distance based on view mode
-    const controls = controlsRef.current;
-    if (controls) {
-      if (isInscan && !isMeshView) {
-        // Panorama mode: lock camera at scan position, disable zoom
-        controls.enableZoom = false;
-        controls.minDistance = 0;
-        controls.maxDistance = 0.2;
-      } else {
-        // Dollhouse / Mesh view: restore free camera movement
-        controls.enableZoom = true;
-        controls.minDistance = 0;
-        controls.maxDistance = Infinity;
-      }
-    }
-  }, [isInscan, isMeshView, sceneRef, keyboardEnabledRef, controlsRef]);
+  }, [isInscan, isMeshView, sceneRef, keyboardEnabledRef]);
 
   // Hotspot Distance Culling (Reduce visual clutter in panorama mode)
   useEffect(() => {
@@ -304,11 +284,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
         if (data.id === activeSphereRef.current) return; // Always hidden when active
         
         let shouldBeVisible = true;
-        
-        // Active Floor filtering
-        if (activeFloor !== 'all' && data.floor_level !== activeFloor) {
-          shouldBeVisible = false;
-        } else if (!showAll) {
+        if (!showAll) {
            const dist = cameraPos.distanceTo(data.realPosition);
            shouldBeVisible = dist < threshold;
         }
@@ -330,44 +306,29 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     
     updateVisibility();
     return () => cancelAnimationFrame(rafId);
-  }, [isDataLoaded, scanSpheres, cameraRef, isInscan, isMeshView, activeFloor]);
+  }, [isDataLoaded, scanSpheres, cameraRef, isInscan, isMeshView]);
 
-  // --- Active Floor Model Clipping ---
+  // ─── Continuous 3D Tiles Update Loop ───
   useEffect(() => {
-    if (!modelRef.current || !rendererRef.current || !isDataLoaded) return;
-    
-    // Enable WebGL local clipping
-    rendererRef.current.localClippingEnabled = true;
-    
-    // We only need clipping when viewing the Ground Floor (0) to hide the Upper Floor (1)
-    if (activeFloor === 0) {
-      // Plane normal points OUTWARD from the kept geometry.
-      // Normal (0,0,-1) keeps things where (-z + constant > 0) -> z < constant
-      // Cut off everything above Z = 3.0 meters
-      const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 3.0);
-      
-      modelRef.current.traverse((child) => {
-        if (child.isMesh && child.material) {
-          const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach(m => {
-            m.clippingPlanes = [clipPlane];
-            m.needsUpdate = true;
-          });
-        }
-      });
-    } else {
-      // Remove clipping plane for 'all' or '1'
-      modelRef.current.traverse((child) => {
-        if (child.isMesh && child.material) {
-          const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach(m => {
-            m.clippingPlanes = [];
-            m.needsUpdate = true;
-          });
-        }
-      });
+    let tilesRafId;
+    const updateTiles = () => {
+      tilesRafId = requestAnimationFrame(updateTiles);
+      if (tilesetEngineRef.current) {
+        tilesetEngineRef.current.update();
+      }
+    };
+    updateTiles();
+    return () => cancelAnimationFrame(tilesRafId);
+  }, []);
+
+  // Auto-frame camera for Drone 3D Tiles & Ortho when loaded
+  useEffect(() => {
+    if ((tourDetails?.tilesetUrl || tourDetails?.orthoUrl) && !isInscan && cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.set(0, 140, 220);
+      controlsRef.current.target.set(0, 4, 0);
+      controlsRef.current.update();
     }
-  }, [activeFloor, isDataLoaded, modelRef, rendererRef]);
+  }, [tourDetails, isInscan]);
 
   // --- Click Event & Raycasting ---
   useEffect(() => {
@@ -380,53 +341,46 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    const disposeCachedPanorama = (id) => {
-      if (!id) return;
-      if (panoramaCache.current[id]) {
-        const p = panoramaCache.current[id];
-        if (p.colorCube) p.colorCube.dispose();
-        if (p.depthCube) p.depthCube.dispose();
-        if (p.equirectTexture) p.equirectTexture.dispose();
-        delete panoramaCache.current[id];
-      }
-      disposeScanTextures(id);
-    };
-
     const transitionToScan = (clickedData, instancedMesh) => {
       if (activeSphereRef.current === clickedData.id) return;
 
       const targetPos = clickedData.realPosition;
-      
-      const baseQuat = new THREE.Quaternion(clickedData.rotation_quaternion[0], clickedData.rotation_quaternion[1], clickedData.rotation_quaternion[2], clickedData.rotation_quaternion[3]);
-      
-      const calibEulerObj = new THREE.Euler(calibRotation.x, calibRotation.y, calibRotation.z, 'XYZ');
-      const calibQ = new THREE.Quaternion().setFromEuler(calibEulerObj);
-      const finalQuat = baseQuat.multiply(calibQ);
-      const targetQuat = [finalQuat.x, finalQuat.y, finalQuat.z, finalQuat.w];
+      const targetQuat = clickedData.rotation_quaternion;
       const scanId = clickedData.id;
 
       document.body.style.cursor = 'wait';
-      const currentScanId = activeSphereRef.current;
-
-      // Immediately dispose any old scans except currentScanId (needed for transition) and new scanId
-      Object.keys(panoramaCache.current).forEach(id => {
-        if (id !== currentScanId && id !== scanId) {
-          disposeCachedPanorama(id);
-        }
-      });
 
       loadPanoramaTextures(scanId, renderer, staging.bakedTexturesMap).then((loadedTextures) => {
-        panoramaCache.current[scanId] = loadedTextures;
-        const currentEquirect = currentScanId ? panoramaCache.current[currentScanId]?.equirectTexture : null;
-        const nextEquirect = loadedTextures.equirectTexture;
-
         document.body.style.cursor = 'default';
         controls.enabled = false;
 
         const lookAtDirection = new THREE.Vector3();
         camera.getWorldDirection(lookAtDirection);
 
+        // Identify box roles
+        const currentBox = activeBoxIndexRef.current === 1 ? box1Ref.current : box2Ref.current;
+        const nextBox = activeBoxIndexRef.current === 1 ? box2Ref.current : box1Ref.current;
+        const nextGroup = activeBoxIndexRef.current === 1 ? panoramaGroup2Ref.current : panoramaGroup1Ref.current;
+
         const isFirstClick = activeSphereRef.current === null;
+
+        // Prepare the NEXT box with new textures immediately
+        nextBox.material.forEach((mat, i) => {
+          if (mat.map && mat.map !== dummyTex) mat.map.dispose();
+          mat.map = loadedTextures[i];
+          mat.needsUpdate = true;
+        });
+
+        // Teleport NEXT group to destination
+        nextGroup.position.copy(targetPos);
+        if (targetQuat) {
+          const q = new THREE.Quaternion(targetQuat[1], targetQuat[2], targetQuat[3], targetQuat[0]);
+          nextGroup.setRotationFromQuaternion(q);
+          nextGroup.rotateZ(Math.PI / 2);
+        }
+
+        // Force renderer to acknowledge new textures before animating
+        renderer.compile(sceneRef.current, camera);
 
         // Wrap in RAF to prevent GSAP/WebGL start-of-frame lag
         requestAnimationFrame(() => {
@@ -435,59 +389,48 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
             controls,
             targetPos,
             lookAtDirection,
-            magicBubble: magicBubbleRef.current,
-            projectiveMaterial: projectiveMaterialRef.current,
+            currentBox,
+            nextBox,
             model: modelRef.current,
-            loadedTextures,
-            currentEquirect,
-            nextEquirect,
-            targetQuat,
+            stagedGroup: staging?.stagedGroupRef?.current,
             isFirstClick,
             onComplete: () => {
               // Final State cleanup
-              setIsInscan(true);
-              setIsMeshView(false);
-
-              if (scanLockPosRef) scanLockPosRef.current = targetPos;
-              controls.enabled = true;
-
-              // Lock OrbitControls distance to keep camera fixed at the scan position.
-              // This prevents the user from zooming out of the panorama bubble.
-              controls.enableZoom = false;
-              controls.minDistance = 0;
-              controls.maxDistance = 0.2;
-
-              // Set the orbit target slightly ahead of the camera along its current
-              // look direction. This gives OrbitControls a non-zero orbit radius,
-              // preventing gimbal lock and erratic rotation behavior.
-              if (targetPos) {
-                const forward = new THREE.Vector3();
-                camera.getWorldDirection(forward);
-                controls.target.copy(targetPos).add(forward.multiplyScalar(0.1));
-                controls.update();
-              }
-
-              // Dispose previous scan's heavy 4K textures now that arrival animation is complete
-              if (currentScanId && currentScanId !== scanId) {
-                disposeCachedPanorama(currentScanId);
-              }
-
-              // Background preload 2 nearest neighbor scans for instant click transitions
-              if (instancedMesh && instancedMesh.userData?.metadata) {
-                const neighbors = instancedMesh.userData.metadata
-                  .filter(m => m.id !== scanId)
-                  .map(m => ({ id: m.id, dist: m.realPosition.distanceTo(targetPos) }))
-                  .sort((a, b) => a.dist - b.dist)
-                  .slice(0, 2);
-
-                neighbors.forEach(n => {
-                  if (!panoramaCache.current[n.id]) {
-                    loadPanoramaTextures(n.id, renderer).then(tex => {
-                      panoramaCache.current[n.id] = tex;
-                    }).catch(() => {});
+              if (modelRef.current) {
+                modelRef.current.visible = true;
+                modelRef.current.traverse((child) => {
+                  if (child.isMesh && child.material) {
+                    const mats = Array.isArray(child.material) ? child.material : [child.material];
+                    mats.forEach(mat => {
+                      mat.colorWrite = false;
+                      mat.depthWrite = true;
+                      mat.transparent = true;
+                      mat.side = THREE.DoubleSide;
+                      mat.needsUpdate = true;
+                    });
                   }
                 });
               }
+              if (!isFirstClick && currentBox) {
+                currentBox.visible = false;
+                // Immediately free GPU memory from the old panorama
+                currentBox.material.forEach((mat) => {
+                  if (mat.map && mat.map !== dummyTex) {
+                    mat.map.dispose();
+                    mat.map = dummyTex;
+                    mat.needsUpdate = true;
+                  }
+                });
+              }
+
+              // Swap Active Box index
+              activeBoxIndexRef.current = activeBoxIndexRef.current === 1 ? 2 : 1;
+
+              setIsInscan(true);
+              setIsMeshView(false);
+
+              controls.enabled = true;
+              controls.update();
 
               if (activeSphereRef.current) {
                 const oldData = instancedMesh.userData.metadata.find(m => m.id === activeSphereRef.current);
@@ -553,13 +496,19 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
           if (tagHits.length > 0) {
             const hitSprite = tagHits[0].object;
             const tagId = hitSprite.userData.tagId;
-            // Using static tag info instead of backend fetch
-            setActiveTagInfo({
-              id: tagId,
-              title: "Static Tag " + tagId,
-              description: "This is a statically loaded tag because the backend is disabled.",
-              type: "info"
-            });
+            // Fetch tag info from backend
+            const token = localStorage.getItem('access_token');
+            fetch(`${API_URL}/inspections/${tourId}`, {
+              headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            })
+              .then(r => r.json())
+              .then(tour => {
+                const tagData = tour.tags?.find(t => t.id === tagId);
+                if (tagData) {
+                  setActiveTagInfo(tagData);
+                }
+              })
+              .catch(err => console.error('Failed to fetch tag info:', err));
             return;
           }
         }
@@ -588,6 +537,12 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
       // If pointer mode is active, delegate to pointer handler
       if (pointersModeRef.current && onPointerClickRef.current) {
         onPointerClickRef.current(event);
+        return;
+      }
+
+      // If volume mode is active, delegate to volume handler
+      if (volumeModeRef.current && onVolumeClickRef.current) {
+        onVolumeClickRef.current(event);
         return;
       }
 
@@ -632,17 +587,10 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
 
       const moveDir = new THREE.Vector3();
 
-      if (e.code === 'ArrowUp' || e.code === 'KeyW') {
-        moveDir.copy(forward);
-      } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
-        moveDir.copy(forward).negate();
-      } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
-        // Handled smoothly in useThreeScene.js animate loop
-        return;
-      } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
-        // Handled smoothly in useThreeScene.js animate loop
-        return;
-      }
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') moveDir.copy(forward);
+      else if (e.code === 'ArrowDown' || e.code === 'KeyS') moveDir.copy(forward).negate();
+      else if (e.code === 'ArrowLeft' || e.code === 'KeyA') moveDir.copy(right).negate();
+      else if (e.code === 'ArrowRight' || e.code === 'KeyD') moveDir.copy(right);
 
       moveDir.normalize();
 
@@ -701,21 +649,6 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     const onMove = (e) => {
       if (wasDraggingRef.current && onPointerDragMoveRef.current) {
         onPointerDragMoveRef.current(e);
-      } else if (scanSpheres.length > 0) {
-        const rect = renderer.domElement.getBoundingClientRect();
-        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObjects(scanSpheres);
-        if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
-          const instancedMesh = intersects[0].object;
-          const hoverData = instancedMesh.userData?.metadata?.[intersects[0].instanceId];
-          if (hoverData?.id && !panoramaCache.current[hoverData.id]) {
-            loadPanoramaTextures(hoverData.id, renderer).then((tex) => {
-              panoramaCache.current[hoverData.id] = tex;
-            }).catch(() => {});
-          }
-        }
       }
     };
     const onUp = (e) => {
@@ -736,7 +669,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
       renderer.domElement.removeEventListener('pointermove', onMove);
       renderer.domElement.removeEventListener('pointerup', onUp);
     };
-  }, [isDataLoaded, scanSpheres, cameraRef, rendererRef, controlsRef, sceneRef, modelRef, magicBubbleRef, projectiveMaterialRef, loadPanoramaTextures, dummyTex, staging]);
+  }, [isDataLoaded, scanSpheres, cameraRef, rendererRef, controlsRef, sceneRef, modelRef, box1Ref, box2Ref, panoramaGroup1Ref, panoramaGroup2Ref, loadPanoramaTextures, dummyTex, staging]);
 
 
   return (
@@ -744,122 +677,69 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
       <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
       {isInscan && (
         <>
-          <div style={{ position: 'absolute', bottom: 30, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, display: 'flex', gap: '10px' }}>
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleToggleMeshView(false); }}
-              style={{
-                padding: '12px 24px',
-                background: 'rgba(15, 15, 15, 0.85)',
-                color: '#fff',
-                border: '1px solid rgba(255,255,255,0.2)',
-                borderRadius: '30px',
-                cursor: 'pointer',
-                backdropFilter: 'blur(8px)',
-                fontWeight: 'bold',
-                fontSize: '14px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                transition: 'background 0.2s ease'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(40, 40, 40, 0.95)'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(15, 15, 15, 0.85)'}
-            >
-              {(isMeshView || isRawMeshView) ? 'Return to 360 View' : 'Inspect 3D Mesh'}
-            </button>
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleToggleMeshView(true); }}
-              style={{
-                padding: '12px 24px',
-                background: 'rgba(15, 15, 15, 0.85)',
-                color: '#fff',
-                border: '1px solid rgba(255,255,255,0.2)',
-                borderRadius: '30px',
-                cursor: 'pointer',
-                backdropFilter: 'blur(8px)',
-                fontWeight: 'bold',
-                fontSize: '14px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                transition: 'background 0.2s ease',
-                display: (isMeshView || isRawMeshView) ? 'none' : 'block'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(40, 40, 40, 0.95)'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(15, 15, 15, 0.85)'}
-            >
-              Inspect Raw Mesh
-            </button>
-          </div>
-          
-          <div style={{
-            position: 'absolute',
-            top: 20,
-            left: 20,
-            zIndex: 1000,
-            background: 'rgba(15, 15, 15, 0.85)',
-            padding: '16px',
-            borderRadius: '12px',
-            color: 'white',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255,255,255,0.2)',
-          }}>
-            <h4 style={{ margin: 0, fontSize: '14px' }}>Manual Calibration (90°)</h4>
-            {['x', 'y', 'z'].map(axis => (
-              <div key={axis} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                <span style={{ textTransform: 'uppercase', fontWeight: 'bold' }}>{axis} Axis</span>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); applyCalibration(axis, -90); }}
-                    style={{ padding: '4px 12px', cursor: 'pointer', background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: '4px' }}
-                  >-90</button>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); applyCalibration(axis, 90); }}
-                    style={{ padding: '4px 12px', cursor: 'pointer', background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: '4px' }}
-                  >+90</button>
-                </div>
-              </div>
-            ))}
-            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)', marginTop: '4px' }}>
-              X: {(calibRotation.x * 180 / Math.PI).toFixed(0)}°, Y: {(calibRotation.y * 180 / Math.PI).toFixed(0)}°, Z: {(calibRotation.z * 180 / Math.PI).toFixed(0)}°
-            </div>
-          </div>
-
+          <button 
+            onClick={(e) => { e.stopPropagation(); handleToggleMeshView(); }}
+            style={{
+              position: 'absolute',
+              bottom: 30,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 1000,
+              padding: '12px 24px',
+              background: 'rgba(15, 15, 15, 0.85)',
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '30px',
+              cursor: 'pointer',
+              backdropFilter: 'blur(8px)',
+              fontWeight: 'bold',
+              fontSize: '14px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              transition: 'background 0.2s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(40, 40, 40, 0.95)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(15, 15, 15, 0.85)'}
+          >
+            {isMeshView ? 'Return to 360 View' : 'Inspect 3D Mesh'}
+          </button>
         </>
       )}
 
-      {/* Floor Plan Button */}
-      <button 
-        onClick={(e) => { e.stopPropagation(); handleFloorPlanView(); }}
-        style={{
-          position: 'absolute',
-          bottom: 30,
-          right: 30,
-          zIndex: 1000,
-          padding: '12px 24px',
-          background: 'rgba(15, 15, 15, 0.85)',
-          color: '#fff',
-          border: '1px solid rgba(255,255,255,0.2)',
-          borderRadius: '30px',
-          cursor: 'pointer',
-          backdropFilter: 'blur(8px)',
-          fontWeight: 'bold',
-          fontSize: '14px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-          transition: 'background 0.2s ease',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(40, 40, 40, 0.95)'}
-        onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(15, 15, 15, 0.85)'}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-          <line x1="3" y1="9" x2="21" y2="9"></line>
-          <line x1="9" y1="21" x2="9" y2="9"></line>
-        </svg>
-        Floor Plan View
-      </button>
+      {/* Floor Plan Button (Only in Matterport/360 GLB mode) */}
+      {!tourDetails?.tilesetUrl && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); handleFloorPlanView(); }}
+          style={{
+            position: 'absolute',
+            top: 30,
+            right: 30,
+            zIndex: 1000,
+            padding: '12px 24px',
+            background: 'rgba(15, 15, 15, 0.85)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '30px',
+            cursor: 'pointer',
+            backdropFilter: 'blur(8px)',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            transition: 'background 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(40, 40, 40, 0.95)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(15, 15, 15, 0.85)'}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="3" y1="9" x2="21" y2="9"></line>
+            <line x1="9" y1="21" x2="9" y2="9"></line>
+          </svg>
+          Floor Plan View
+        </button>
+      )}
 
       {/* Model Loading Overlay */}
       {staging?.loadingModelId && (
@@ -1188,7 +1068,7 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
                 {activeTagInfo.documents.map(doc => (
                   <a
                     key={doc.id}
-                    href={`/documents/${doc.fileUrl}`}
+                    href={`${MINIO_URL}/virtual-tours/${doc.fileUrl}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{

@@ -9,7 +9,7 @@ import { useThreeScene } from '../hooks/useThreeScene';
 import { useStaging } from '../hooks/useStaging';
 import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
 import { createTagSpriteMaterial } from '../hooks/useTags';
-import { ProjectiveMeshShader } from '../shaders/HybridProjectiveShaders';
+import { EquirectProjectiveShader } from '../shaders/EquirectProjectiveShader';
 import { StaticCubemapShader } from '../shaders/StaticCubemapShader';
 import { textureManager } from '../utils/TextureManager';
 import { API_URL, MINIO_URL } from '../config/api';
@@ -139,9 +139,9 @@ const IndustrialTourViewer = forwardRef(({
 
     // Setup Projective Mesh Material (Equirectangular)
     const projMat = new THREE.ShaderMaterial({
-      uniforms: THREE.UniformsUtils.clone(ProjectiveMeshShader.uniforms),
-      vertexShader: ProjectiveMeshShader.vertexShader,
-      fragmentShader: ProjectiveMeshShader.fragmentShader,
+      uniforms: THREE.UniformsUtils.clone(EquirectProjectiveShader.uniforms),
+      vertexShader: EquirectProjectiveShader.vertexShader,
+      fragmentShader: EquirectProjectiveShader.fragmentShader,
       side: THREE.DoubleSide,
       transparent: false,
       depthTest: true,
@@ -224,9 +224,10 @@ const IndustrialTourViewer = forwardRef(({
           const posY = scan.y ?? scan.posY ?? scan.position?.[1] ?? 0;
           const posZ = scan.alt ?? scan.z ?? scan.posZ ?? scan.position?.[2] ?? 0;
 
-          const qVals = scan.rotation_quaternion || scan.quaternion_xyzw || [0, 0, 0, 1];
+          const qVals = scan.rotation_quaternion || scan.quaternion_xyzw || [1, 0, 0, 0];
+          // Handle [w, x, y, z] or [x, y, z, w]
           const quat = qVals.length === 4 
-            ? new THREE.Quaternion(qVals[0], qVals[1], qVals[2], qVals[3]) 
+            ? new THREE.Quaternion(qVals[1], qVals[2], qVals[3], qVals[0]) 
             : new THREE.Quaternion(0, 0, 0, 1);
 
           const rotMatrix = new THREE.Matrix4().makeRotationFromQuaternion(quat);
@@ -493,13 +494,13 @@ const IndustrialTourViewer = forwardRef(({
       // Load Equirectangular low-res for real-time mesh projection
       const nextEquirect = await textureManager.loadEquirect(nextScanIdNum);
 
-      // Load KTX2 compressed cubemap or native cubemaps for the background bubble
+      // Load Cubemap or 256px KTX2 for the background bubble
       let nextCubeMap;
       try {
-        nextCubeMap = await textureManager.loadKTX2(nextScanIdNum, '2048');
+        nextCubeMap = await textureManager.loadCubeMap(nextScanIdNum);
       } catch (e) {
         try {
-          nextCubeMap = await textureManager.loadCubeMap(nextScanIdNum);
+          nextCubeMap = await textureManager.loadKTX2(nextScanIdNum, '256');
         } catch (e2) {
           nextCubeMap = dummyTex;
         }
@@ -522,19 +523,26 @@ const IndustrialTourViewer = forwardRef(({
       }
 
       const projMat = projectiveMatRef.current;
-      projMat.uniforms.uNextColorMap.value = nextEquirect;
+      const nextRot3x3 = new THREE.Matrix3().setFromMatrix4(
+        new THREE.Matrix4().makeRotationFromQuaternion(targetScan.quaternion)
+      );
+
+      projMat.uniforms.uNextEquirect.value = nextEquirect;
       projMat.uniforms.uNextScanPos.value.copy(targetScan.positionVec);
-      const nextQ = targetScan.quaternion;
-      projMat.uniforms.uNextScanQuatInverse.value.set(-nextQ.x, -nextQ.y, -nextQ.z, nextQ.w);
+      projMat.uniforms.uNextInvRot.value.copy(targetScan.invRot3x3);
+      if (projMat.uniforms.uNextRot) projMat.uniforms.uNextRot.value.copy(nextRot3x3);
 
       const relRot3x3 = new THREE.Matrix3().identity();
       let currentCubeMap = nextCubeMap;
 
       if (!isFirstClick && currentEquirect && currentScan) {
-        projMat.uniforms.uCurrentColorMap.value = currentEquirect;
+        const currRot3x3 = new THREE.Matrix3().setFromMatrix4(
+          new THREE.Matrix4().makeRotationFromQuaternion(currentScan.quaternion)
+        );
+        projMat.uniforms.uCurrentEquirect.value = currentEquirect;
         projMat.uniforms.uCurrentScanPos.value.copy(currentScanPos);
-        const currQ = currentScan.quaternion;
-        projMat.uniforms.uCurrentScanQuatInverse.value.set(-currQ.x, -currQ.y, -currQ.z, currQ.w);
+        projMat.uniforms.uCurrentInvRot.value.copy(currentInvRot);
+        if (projMat.uniforms.uCurrentRot) projMat.uniforms.uCurrentRot.value.copy(currRot3x3);
         projMat.uniforms.uTransitionProgress.value = 0.0;
 
         // Calculate Relative Rotation (R_A^-1 * R_B)
@@ -549,9 +557,10 @@ const IndustrialTourViewer = forwardRef(({
           currentCubeMap = bubbleRef.current.material.uniforms.uCubeMap.value;
         }
       } else {
-        projMat.uniforms.uCurrentColorMap.value = nextEquirect;
+        projMat.uniforms.uCurrentEquirect.value = nextEquirect;
         projMat.uniforms.uCurrentScanPos.value.copy(targetScan.positionVec);
-        projMat.uniforms.uCurrentScanQuatInverse.value.set(-nextQ.x, -nextQ.y, -nextQ.z, nextQ.w);
+        projMat.uniforms.uCurrentInvRot.value.copy(targetScan.invRot3x3);
+        if (projMat.uniforms.uCurrentRot) projMat.uniforms.uCurrentRot.value.copy(nextRot3x3);
         projMat.uniforms.uTransitionProgress.value = 1.0;
       }
 
