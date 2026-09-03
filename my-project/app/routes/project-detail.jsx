@@ -13,7 +13,8 @@ import {
   RotateCw, 
   Trash2,
   Calendar,
-  Compass
+  Compass,
+  Clock
 } from 'lucide-react';
 import './dashboard.css';
 import { API_URL, MINIO_URL } from '../config/api';
@@ -23,6 +24,26 @@ export function meta() {
     { title: "Project Inspections | VirtualTwin SaaS" },
   ];
 }
+
+const parseCsvOrJson = (text) => {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return JSON.parse(trimmed);
+  }
+  const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) throw new Error("Invalid file: No data rows found");
+  const delimiter = lines[0].includes(';') ? ';' : (lines[0].includes('\t') ? '\t' : ',');
+  const headers = lines[0].split(delimiter).map(h => h.trim().replace(/^["']|["']$/g, ''));
+  return lines.slice(1).map(line => {
+    const values = line.split(delimiter).map(v => v.trim().replace(/^["']|["']$/g, ''));
+    const obj = {};
+    headers.forEach((h, i) => {
+      const val = values[i];
+      obj[h] = !isNaN(Number(val)) && val !== '' ? Number(val) : val;
+    });
+    return obj;
+  });
+};
 
 function ProjectDetailContent() {
   const navigate = useNavigate();
@@ -135,7 +156,7 @@ function ProjectDetailContent() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ mpData: JSON.parse(mpText), rcData: JSON.parse(rcText) })
+        body: JSON.stringify({ mpData: parseCsvOrJson(mpText), rcData: parseCsvOrJson(rcText) })
       });
 
       if (!processRes.ok) {
@@ -302,8 +323,9 @@ function ProjectDetailContent() {
                       )}
                     </div>
                     
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginBottom: '14px' }}>
-                      Created: {new Date(insp.createdAt).toLocaleDateString()}
+                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Clock className="h-3.5 w-3.5 text-slate-400" />
+                      <span>Created: {new Date(insp.createdAt).toLocaleDateString()} at {new Date(insp.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
 
                     <p className="tour-desc" style={{ marginBottom: '20px' }}>

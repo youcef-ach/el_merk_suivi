@@ -25,14 +25,44 @@ const getSignature = (pointIndex, allPoints) => {
     return neighbors.map(d => d / normalizationFactor);
 };
 const processScans = (mpRawData, rcRawData) => {
-    const mpPoints = Object.entries(mpRawData).map(([name, data]) => ({
-        name: name,
-        pos: { x: data.position[0], y: data.position[1], z: data.position[2] },
-        quaternion: data.rotation_quaternion,
-    }));
+    const mpRawList = Array.isArray(mpRawData)
+        ? mpRawData
+        : Object.entries(mpRawData || {}).map(([key, val]) => ({
+            name: key,
+            ...(typeof val === 'object' ? val : {})
+        }));
+    const mpPoints = mpRawList.map((data, idx) => {
+        const name = data['#name'] || data.id || data.name || `scan_${idx}`;
+        let posX = 0, posY = 0, posZ = 0;
+        if (Array.isArray(data.position) && data.position.length >= 3) {
+            posX = Number(data.position[0]);
+            posY = Number(data.position[1]);
+            posZ = Number(data.position[2]);
+        }
+        else {
+            posX = Number(data.x ?? 0);
+            posY = Number(data.y ?? 0);
+            posZ = Number(data.alt ?? data.z ?? 0);
+        }
+        const quat = data.rotation_quaternion || data.quaternion || [1, 0, 0, 0];
+        return {
+            name,
+            pos: { x: posX, y: posY, z: posZ },
+            quaternion: quat,
+        };
+    });
+    const rcRawList = Array.isArray(rcRawData)
+        ? rcRawData
+        : Object.entries(rcRawData || {}).map(([key, val]) => ({
+            name: key,
+            ...(typeof val === 'object' ? val : {})
+        }));
     const uniqueRcData = [];
-    rcRawData.forEach((rcItem) => {
-        const rcPos = { x: rcItem.x, y: rcItem.y, z: rcItem.alt };
+    rcRawList.forEach((rcItem) => {
+        const posX = Number(rcItem.x ?? rcItem.pos?.x ?? rcItem.position?.[0] ?? 0);
+        const posY = Number(rcItem.y ?? rcItem.pos?.y ?? rcItem.position?.[1] ?? 0);
+        const posZ = Number(rcItem.alt ?? rcItem.z ?? rcItem.pos?.z ?? rcItem.position?.[2] ?? 0);
+        const rcPos = { x: posX, y: posY, z: posZ };
         const isDuplicate = uniqueRcData.some((existingItem) => {
             return getDistance(rcPos, existingItem.pos) < exports.RC_DUPLICATE_TOLERANCE;
         });
@@ -70,11 +100,12 @@ const processScans = (mpRawData, rcRawData) => {
         if (!matchedRc.has(pair.rcIndex) && !matchedMp.has(pair.mpIndex)) {
             const rcEntry = uniqueRcData[pair.rcIndex].original;
             const mpPoint = mpPoints[pair.mpIndex];
+            const rcPos = uniqueRcData[pair.rcIndex].pos;
             finalOutput.push({
                 '#name': mpPoint.name,
-                x: rcEntry.x,
-                y: rcEntry.y,
-                alt: rcEntry.alt,
+                x: rcEntry.x !== undefined ? Number(rcEntry.x) : rcPos.x,
+                y: rcEntry.y !== undefined ? Number(rcEntry.y) : rcPos.y,
+                alt: rcEntry.alt !== undefined ? Number(rcEntry.alt) : (rcEntry.z !== undefined ? Number(rcEntry.z) : rcPos.z),
                 rotation_quaternion: mpPoint.quaternion,
             });
             matchedRc.add(pair.rcIndex);

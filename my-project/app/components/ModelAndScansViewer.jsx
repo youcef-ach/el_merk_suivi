@@ -15,11 +15,11 @@ const ModelAndScansViewer = forwardRef(({ tourId, activeProfileId, stagingMode, 
     return tex;
   }, []);
 
-  const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, beforeRenderCallbacksRef, sceneReady } = useThreeScene([dummyTex]);
+  const { mountRef, sceneRef, cameraRef, rendererRef, controlsRef, keyboardEnabledRef, beforeRenderCallbacksRef, sceneReady } = useThreeScene([dummyTex], true);
   const { 
     modelRef, tilesetEngineRef, orthoLayerRef, satelliteBasemapRef, box1Ref, panoramaGroup1Ref, box2Ref, panoramaGroup2Ref, 
     scanSpheres, loadPanoramaTextures, isDataLoaded, scansData, tourDetails 
-  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, beforeRenderCallbacksRef);
+  } = useTourData(sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, beforeRenderCallbacksRef, controlsRef);
 
   // ─── Staging Hook ───
   const staging = useStaging(

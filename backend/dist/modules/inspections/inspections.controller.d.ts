@@ -550,7 +550,7 @@ export declare class InspectionsController {
         rawScansS3Path: string;
         rawCsvS3Path: string;
     }>;
-    processGlb(id: string, fileName: string, user: any): Promise<{
+    processGlb(id: string, fileName: string, compressionMode: 'uastc' | 'etc1s', user: any): Promise<{
         status: string;
         glbModelUrl: string;
         fileSizeMb: number;
@@ -562,5 +562,6 @@ export declare class InspectionsController {
     processPanoramas(id: string, user: any): Promise<{
         status: string;
         filesCount: number;
+        scansProcessed: number;
     }>;
 }

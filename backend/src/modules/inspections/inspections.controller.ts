@@ -114,9 +114,10 @@ export class InspectionsController {
   async processGlb(
     @Param('id') id: string,
     @Body('fileName') fileName: string,
+    @Body('compressionMode') compressionMode: 'uastc' | 'etc1s',
     @GetUser() user: any,
   ) {
-    return this.inspectionsService.processGlb(id, user.enterpriseId, user.role, fileName);
+    return this.inspectionsService.processGlb(id, user.enterpriseId, user.role, fileName, compressionMode);
   }
 
   @Post(':id/process-tileset')

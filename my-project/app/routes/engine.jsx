@@ -346,6 +346,11 @@ export default function EnginePage() {
               <span style={{ fontSize: '11px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '2px 8px', borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
                 360° Walkthrough
               </span>
+              {inspectionData?.createdAt && (
+                <span style={{ fontSize: '11px', color: '#94a3b8', borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: '8px' }}>
+                  {new Date(inspectionData.createdAt).toLocaleDateString()} {new Date(inspectionData.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
             </div>
           </div>
 

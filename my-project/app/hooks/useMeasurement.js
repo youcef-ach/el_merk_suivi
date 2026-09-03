@@ -110,34 +110,42 @@ export const useMeasurement = (viewerRef) => {
     
     if (!renderer || !camera) return;
 
-    const rect = renderer.domElement.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1
-    );
+    let hitPoint = null;
+    if (event?.isVector3) {
+      hitPoint = event.clone();
+    } else if (event?.clientX !== undefined) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+      );
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(mouse, camera);
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
 
-    // Collect meshes from GLB model or 3D Tileset group
-    const meshes = [];
-    if (model) {
-      model.traverse((child) => {
-        if (child.isMesh) meshes.push(child);
-      });
+      // Collect meshes from GLB model or 3D Tileset group
+      const meshes = [];
+      if (model) {
+        model.traverse((child) => {
+          if (child.isMesh) meshes.push(child);
+        });
+      }
+      if (tilesGroup) {
+        tilesGroup.traverse((child) => {
+          if (child.isMesh) meshes.push(child);
+        });
+      }
+
+      if (meshes.length === 0) return;
+
+      const intersects = raycaster.intersectObjects(meshes, true);
+      if (intersects.length === 0) return;
+
+      hitPoint = intersects[0].point.clone();
     }
-    if (tilesGroup) {
-      tilesGroup.traverse((child) => {
-        if (child.isMesh) meshes.push(child);
-      });
-    }
 
-    if (meshes.length === 0) return;
+    if (!hitPoint) return;
 
-    const intersects = raycaster.intersectObjects(meshes, true);
-    if (intersects.length === 0) return;
-
-    const hitPoint = intersects[0].point.clone();
     const group = ensureMarkersGroup();
     if (!group) return;
 

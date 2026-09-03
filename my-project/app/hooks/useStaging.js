@@ -2,6 +2,16 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+
+const stagingDraco = new DRACOLoader();
+stagingDraco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+const configureStagingLoader = (loader) => {
+  loader.setDRACOLoader(stagingDraco);
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  return loader;
+};
 import { createFurniture } from '../utils/furnitureFactory';
 import { getSketchfabDownloadUrl, downloadAndExtractSketchfabGltf } from '../utils/sketchfabService';
 import { API_URL as API } from '../config/api';
@@ -235,7 +245,7 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
                 return url;
               };
 
-              const loader = new GLTFLoader(manager);
+              const loader = configureStagingLoader(new GLTFLoader(manager));
               loader.setCrossOrigin('anonymous');
               loader.load(
                 gltfUrl,
@@ -280,7 +290,7 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
               return url;
             };
 
-            const loader = new GLTFLoader(manager);
+            const loader = configureStagingLoader(new GLTFLoader(manager));
             loader.setCrossOrigin('anonymous');
             loader.load(
               gltfUrl,
@@ -331,7 +341,7 @@ export const useStaging = (sceneRef, cameraRef, rendererRef, controlsRef, modelR
           })
           .catch(reject);
       } else if (itemData.isLocalModel) {
-        const loader = new GLTFLoader();
+        const loader = configureStagingLoader(new GLTFLoader());
         loader.load(
           itemData.modelUrl,
           (gltf) => {

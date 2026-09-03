@@ -66,8 +66,8 @@ let InspectionsController = class InspectionsController {
     async processAndUploadScans(id, body, user) {
         return this.inspectionsService.processAndUploadScans(id, body.mpData, body.rcData, user.enterpriseId, user.role);
     }
-    async processGlb(id, fileName, user) {
-        return this.inspectionsService.processGlb(id, user.enterpriseId, user.role, fileName);
+    async processGlb(id, fileName, compressionMode, user) {
+        return this.inspectionsService.processGlb(id, user.enterpriseId, user.role, fileName, compressionMode);
     }
     async processTileset(id, user) {
         return this.inspectionsService.processTileset(id, user.enterpriseId, user.role);
@@ -189,9 +189,10 @@ __decorate([
     (0, common_1.Post)(':id/process-glb'),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Body)('fileName')),
-    __param(2, (0, get_user_decorator_1.GetUser)()),
+    __param(2, (0, common_1.Body)('compressionMode')),
+    __param(3, (0, get_user_decorator_1.GetUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, Object]),
+    __metadata("design:paramtypes", [String, String, String, Object]),
     __metadata("design:returntype", Promise)
 ], InspectionsController.prototype, "processGlb", null);
 __decorate([

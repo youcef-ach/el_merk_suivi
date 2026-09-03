@@ -17,6 +17,8 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const zlib = require("zlib");
+const child_process_1 = require("child_process");
+const util_1 = require("util");
 const client_1 = require("@prisma/client");
 let InspectionsService = class InspectionsService {
     constructor(prisma, storageService) {
@@ -813,7 +815,97 @@ let InspectionsService = class InspectionsService {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }
     }
-    async processGlb(id, userEnterpriseId, role, uploadedFileName = 'model.glb') {
+    checkGlbHasKtx2(filePath) {
+        try {
+            const fd = fs.openSync(filePath, 'r');
+            const header = Buffer.alloc(12);
+            fs.readSync(fd, header, 0, 12, 0);
+            const magic = header.readUInt32LE(0);
+            if (magic !== 0x46546c67) {
+                fs.closeSync(fd);
+                return false;
+            }
+            const chunkHeader = Buffer.alloc(8);
+            fs.readSync(fd, chunkHeader, 0, 8, 12);
+            const jsonLength = chunkHeader.readUInt32LE(0);
+            const readLen = Math.min(jsonLength, 65536);
+            const jsonBuffer = Buffer.alloc(readLen);
+            fs.readSync(fd, jsonBuffer, 0, readLen, 20);
+            fs.closeSync(fd);
+            return jsonBuffer.toString('utf8').includes('KHR_texture_basisu');
+        }
+        catch (_) {
+            return false;
+        }
+    }
+    getGlbVertexCount(filePath) {
+        try {
+            const fd = fs.openSync(filePath, 'r');
+            const header = Buffer.alloc(12);
+            fs.readSync(fd, header, 0, 12, 0);
+            if (header.readUInt32LE(0) !== 0x46546c67) {
+                fs.closeSync(fd);
+                return 500000;
+            }
+            const chunkHeader = Buffer.alloc(8);
+            fs.readSync(fd, chunkHeader, 0, 8, 12);
+            const jsonLength = chunkHeader.readUInt32LE(0);
+            const readLen = Math.min(jsonLength, 65536);
+            const jsonBuffer = Buffer.alloc(readLen);
+            fs.readSync(fd, jsonBuffer, 0, readLen, 20);
+            fs.closeSync(fd);
+            const jsonStr = jsonBuffer.toString('utf8');
+            const gltf = JSON.parse(jsonStr);
+            let total = 0;
+            if (gltf.meshes) {
+                for (const m of gltf.meshes) {
+                    for (const p of m.primitives || []) {
+                        if (p.attributes && p.attributes.POSITION !== undefined && gltf.accessors) {
+                            total += gltf.accessors[p.attributes.POSITION]?.count || 0;
+                        }
+                    }
+                }
+            }
+            return total > 0 ? total : 500000;
+        }
+        catch (_) {
+            return 500000;
+        }
+    }
+    getGlbTextureCount(filePath) {
+        try {
+            const fd = fs.openSync(filePath, 'r');
+            const header = Buffer.alloc(12);
+            fs.readSync(fd, header, 0, 12, 0);
+            if (header.readUInt32LE(0) !== 0x46546c67) {
+                fs.closeSync(fd);
+                return 1;
+            }
+            const chunkHeader = Buffer.alloc(8);
+            fs.readSync(fd, chunkHeader, 0, 8, 12);
+            const jsonLength = chunkHeader.readUInt32LE(0);
+            const readLen = Math.min(jsonLength, 65536);
+            const jsonBuffer = Buffer.alloc(readLen);
+            fs.readSync(fd, jsonBuffer, 0, readLen, 20);
+            fs.closeSync(fd);
+            const jsonStr = jsonBuffer.toString('utf8');
+            const texturesMatch = jsonStr.match(/"textures"\s*:\s*\[([^\]]*)\]/);
+            if (texturesMatch) {
+                const count = (texturesMatch[1].match(/\{/g) || []).length;
+                return count > 0 ? count : 1;
+            }
+            const imagesMatch = jsonStr.match(/"images"\s*:\s*\[([^\]]*)\]/);
+            if (imagesMatch) {
+                const count = (imagesMatch[1].match(/\{/g) || []).length;
+                return count > 0 ? count : 1;
+            }
+            return 1;
+        }
+        catch (_) {
+            return 1;
+        }
+    }
+    async processGlb(id, userEnterpriseId, role, targetFileName, compressionMode = 'uastc') {
         const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
         if (!inspection)
             throw new common_1.NotFoundException('Inspection not found');
@@ -821,36 +913,26 @@ let InspectionsService = class InspectionsService {
             throw new common_1.ForbiddenException('Only the creator or admin can process 3D models for this inspection');
         }
         const bucket = 'virtual-inspections';
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-opt-'));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glb-opt-'));
         try {
-            const candidateNames = [uploadedFileName, 'model.zip', 'model.obj', 'model.glb', 'model.gltf'];
-            let downloadedPath = '';
-            let downloadedName = '';
-            for (const name of candidateNames) {
-                if (!name)
-                    continue;
-                const targetPath = path.join(tempDir, name);
-                try {
-                    await this.storageService.downloadFile(bucket, `inspections/${id}/${name}`, targetPath);
-                    if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 0) {
-                        downloadedPath = targetPath;
-                        downloadedName = name;
-                        break;
-                    }
+            let downloadedName = targetFileName;
+            if (!downloadedName) {
+                if (inspection.glbModelUrl) {
+                    downloadedName = path.basename(inspection.glbModelUrl);
                 }
-                catch (e) {
+                else {
+                    downloadedName = 'model.glb';
                 }
             }
-            if (!downloadedPath) {
-                throw new common_1.NotFoundException(`No uploaded 3D model found in inspections/${id}/`);
-            }
-            console.log(`[processGlb] Downloaded ${downloadedName} (${fs.statSync(downloadedPath).size} bytes)`);
-            const extractDir = path.join(tempDir, 'extracted');
-            fs.mkdirSync(extractDir, { recursive: true });
-            let sourceGlbPath = '';
+            const downloadedPath = path.join(tempDir, downloadedName);
+            const s3Source = `inspections/${id}/${downloadedName}`;
+            await this.storageService.downloadFile(bucket, s3Source, downloadedPath);
+            let sourceGlbPath;
             if (downloadedName.toLowerCase().endsWith('.zip')) {
+                console.log(`[processGlb] Extracting ZIP model archive: ${downloadedPath}`);
                 const AdmZip = require('adm-zip');
                 const zip = new AdmZip(downloadedPath);
+                const extractDir = path.join(tempDir, 'unzipped');
                 zip.extractAllTo(extractDir, true);
                 let foundObj = null;
                 let foundGlb = null;
@@ -895,28 +977,102 @@ let InspectionsService = class InspectionsService {
             else {
                 sourceGlbPath = downloadedPath;
             }
-            console.log(`[processGlb] Optimizing & Draco compressing: ${sourceGlbPath}`);
-            const { NodeIO } = require('@gltf-transform/core');
-            const { KHRONOS_EXTENSIONS } = require('@gltf-transform/extensions');
-            const { weld, dedup, prune, textureCompress, draco } = require('@gltf-transform/functions');
-            const draco3d = require('draco3dgltf');
-            const sharp = require('sharp');
-            const encoder = await draco3d.createEncoderModule();
-            const decoder = await draco3d.createDecoderModule();
-            const io = new NodeIO()
-                .registerExtensions(KHRONOS_EXTENSIONS)
-                .registerDependencies({
-                'draco3d.encoder': encoder,
-                'draco3d.decoder': decoder,
-            });
-            const document = await io.read(sourceGlbPath);
-            await document.transform(dedup(), prune(), weld({ tolerance: 0.0001 }), textureCompress({ encoder: sharp, resize: [1024, 1024] }), draco({ method: 'edgebreaker' }));
             const finalGlbPath = path.join(tempDir, 'model.glb');
-            await io.write(finalGlbPath, document);
+            const isAlreadyKtx2 = this.checkGlbHasKtx2(sourceGlbPath);
+            const vertexCount = this.getGlbVertexCount(sourceGlbPath);
+            const textureCount = this.getGlbTextureCount(sourceGlbPath);
+            const maxMasterVertices = 1500000;
+            const maxMobileVertices = 400000;
+            let masterSimplificationRatio = 1.0;
+            if (vertexCount > maxMasterVertices) {
+                masterSimplificationRatio = Math.max(0.1, Number((maxMasterVertices / vertexCount).toFixed(2)));
+            }
+            let mobileSimplificationRatio = Math.min(0.35, Number((maxMobileVertices / vertexCount).toFixed(2)));
+            if (mobileSimplificationRatio < 0.05)
+                mobileSimplificationRatio = 0.05;
+            const masterTexLimit = textureCount <= 2 ? '2048' : '1024';
+            const mobileTexLimit = textureCount <= 2 ? '1024' : '512';
+            console.log(`[processGlb] source: ${sourceGlbPath}, isAlreadyKtx2: ${isAlreadyKtx2}, vertices: ${vertexCount}, textures: ${textureCount}, decimation: [master: ${masterSimplificationRatio}, mobile: ${mobileSimplificationRatio}], texLimits: [master: ${masterTexLimit}px, mobile: ${mobileTexLimit}px]`);
+            const gltfpackBin = path.resolve(process.cwd(), 'gltfpack.exe');
+            let usedGltfpack = false;
+            if (fs.existsSync(gltfpackBin)) {
+                try {
+                    const { execFile } = require('child_process');
+                    const util = require('util');
+                    const execFilePromise = util.promisify(execFile);
+                    const args = ['-i', sourceGlbPath, '-o', finalGlbPath, '-cc', '-mm'];
+                    if (masterSimplificationRatio < 1.0) {
+                        args.push('-si', String(masterSimplificationRatio), '-slb');
+                    }
+                    if (!isAlreadyKtx2) {
+                        if (compressionMode === 'etc1s') {
+                            args.push('-tc', '-tl', masterTexLimit);
+                            console.log(`[processGlb] Compressing textures with KTX2 ETC1S (max ${masterTexLimit}px) + Mesh Merging...`);
+                        }
+                        else {
+                            args.push('-tc', '-tl', masterTexLimit);
+                            console.log(`[processGlb] Compressing textures with KTX2 BasisU (max ${masterTexLimit}px) + Mesh Merging...`);
+                        }
+                    }
+                    else {
+                        console.log(`[processGlb] Model already has KTX2 textures. Preserving textures, merging meshes and optimizing geometry.`);
+                    }
+                    const { stdout, stderr } = await execFilePromise(gltfpackBin, args, { maxBuffer: 100 * 1024 * 1024 });
+                    if (stdout)
+                        console.log(`[gltfpack] ${stdout}`);
+                    if (stderr)
+                        console.warn(`[gltfpack warn] ${stderr}`);
+                    if (fs.existsSync(finalGlbPath) && fs.statSync(finalGlbPath).size > 0) {
+                        usedGltfpack = true;
+                    }
+                    const lod1GlbPath = path.join(tempDir, 'model_lod1.glb');
+                    const lod1Args = ['-i', sourceGlbPath, '-o', lod1GlbPath, '-si', String(mobileSimplificationRatio), '-slb', '-cc', '-mm'];
+                    if (!isAlreadyKtx2) {
+                        lod1Args.push('-tc', '-tl', mobileTexLimit);
+                    }
+                    try {
+                        console.log(`[processGlb] Generating automated Mobile LOD1 decimated mesh (-si ${mobileSimplificationRatio} -slb, max ${mobileTexLimit}px)...`);
+                        const { stdout: lod1Out } = await execFilePromise(gltfpackBin, lod1Args, { maxBuffer: 100 * 1024 * 1024 });
+                        if (lod1Out)
+                            console.log(`[gltfpack LOD1] ${lod1Out}`);
+                    }
+                    catch (lodErr) {
+                        console.warn(`[processGlb] Warning: Failed to generate model_lod1.glb:`, lodErr.message);
+                    }
+                }
+                catch (gpErr) {
+                    console.warn(`[processGlb] gltfpack failed, falling back to @gltf-transform:`, gpErr.message);
+                }
+            }
+            if (!usedGltfpack) {
+                console.log(`[processGlb] Optimizing & Draco compressing via @gltf-transform: ${sourceGlbPath}`);
+                const { NodeIO } = require('@gltf-transform/core');
+                const { KHRONOS_EXTENSIONS } = require('@gltf-transform/extensions');
+                const { weld, dedup, prune, textureCompress, draco } = require('@gltf-transform/functions');
+                const draco3d = require('draco3dgltf');
+                const sharp = require('sharp');
+                const encoder = await draco3d.createEncoderModule();
+                const decoder = await draco3d.createDecoderModule();
+                const io = new NodeIO()
+                    .registerExtensions(KHRONOS_EXTENSIONS)
+                    .registerDependencies({
+                    'draco3d.encoder': encoder,
+                    'draco3d.decoder': decoder,
+                });
+                const document = await io.read(sourceGlbPath);
+                await document.transform(dedup(), prune(), weld({ tolerance: 0.0001 }), textureCompress({ encoder: sharp, resize: [1024, 1024] }), draco({ method: 'edgebreaker' }));
+                await io.write(finalGlbPath, document);
+            }
             const optimizedSize = fs.statSync(finalGlbPath).size;
-            console.log(`[processGlb] Optimization complete! Final Draco GLB size: ${(optimizedSize / 1024 / 1024).toFixed(2)} MB`);
+            console.log(`[processGlb] Optimization complete! Final model size: ${(optimizedSize / 1024 / 1024).toFixed(2)} MB`);
             const s3Dest = `inspections/${id}/model.glb`;
             await this.storageService.uploadFile(bucket, s3Dest, finalGlbPath, 'model/gltf-binary');
+            const lod1GlbPath = path.join(tempDir, 'model_lod1.glb');
+            if (fs.existsSync(lod1GlbPath) && fs.statSync(lod1GlbPath).size > 0) {
+                const lod1S3Dest = `inspections/${id}/model_lod1.glb`;
+                await this.storageService.uploadFile(bucket, lod1S3Dest, lod1GlbPath, 'model/gltf-binary');
+                console.log(`[processGlb] Uploaded mobile model_lod1.glb (${(fs.statSync(lod1GlbPath).size / 1024 / 1024).toFixed(2)} MB) to ${lod1S3Dest}`);
+            }
             await this.prisma.inspection.update({
                 where: { id },
                 data: { glbModelUrl: s3Dest },
@@ -948,9 +1104,206 @@ let InspectionsService = class InspectionsService {
         try {
             await this.storageService.downloadFile(bucket, `inspections/${id}/panoramas.zip`, zipPath);
             const AdmZip = require('adm-zip');
+            const sharp = require('sharp');
+            const execPromise = (0, util_1.promisify)(child_process_1.exec);
             const zip = new AdmZip(zipPath);
             const extractDir = path.join(tempDir, 'extracted');
             zip.extractAllTo(extractDir, true);
+            const outputDir = path.join(tempDir, 'output');
+            const cubemapsDir = path.join(outputDir, 'cubemaps');
+            const equirectDir = path.join(outputDir, 'equirect');
+            const equirectLowDir = path.join(outputDir, 'equirect_low');
+            const ktx2Dir = path.join(outputDir, 'ktx2');
+            fs.mkdirSync(cubemapsDir, { recursive: true });
+            fs.mkdirSync(equirectDir, { recursive: true });
+            fs.mkdirSync(equirectLowDir, { recursive: true });
+            fs.mkdirSync(ktx2Dir, { recursive: true });
+            const allExtractedFiles = [];
+            const findFilesRecursive = (curr) => {
+                const entries = fs.readdirSync(curr, { withFileTypes: true });
+                for (const entry of entries) {
+                    const full = path.join(curr, entry.name);
+                    if (entry.isDirectory()) {
+                        findFilesRecursive(full);
+                    }
+                    else {
+                        allExtractedFiles.push({ name: entry.name, fullPath: full });
+                    }
+                }
+            };
+            findFilesRecursive(extractDir);
+            let scansJsonPath = null;
+            let rawScansData = null;
+            for (const f of allExtractedFiles) {
+                if (f.name.toLowerCase() === 'scans.json') {
+                    scansJsonPath = f.fullPath;
+                    try {
+                        rawScansData = JSON.parse(fs.readFileSync(f.fullPath, 'utf8'));
+                    }
+                    catch (e) {
+                        console.warn('[processPanoramas] Error parsing scans.json:', e);
+                    }
+                    break;
+                }
+            }
+            if (!rawScansData) {
+                try {
+                    const rootScansPath = path.join(tempDir, 'root_scans.json');
+                    await this.storageService.downloadFile(bucket, `inspections/${id}/scans.json`, rootScansPath);
+                    if (fs.existsSync(rootScansPath)) {
+                        rawScansData = JSON.parse(fs.readFileSync(rootScansPath, 'utf8'));
+                        console.log(`[processPanoramas] Loaded root scans.json from inspection storage (${rawScansData.length || Object.keys(rawScansData).length} stations)`);
+                    }
+                }
+                catch (e) {
+                }
+            }
+            const scanCubemaps = new Map();
+            const scanEquirects = new Map();
+            const scanEquirectLows = new Map();
+            const faceRegex = /^(?:scan_)?(\d+|[a-zA-Z0-9_-]+)_(px|nx|py|ny|pz|nz)\.(jpe?g|png)$/i;
+            const equirectLowRegex = /^(?:scan_)?(\d+|[a-zA-Z0-9_-]+)_equirect_low\.(jpe?g|png)$/i;
+            const equirectRegex = /^(?:scan_)?(\d+|[a-zA-Z0-9_-]+)_(?:equirect|pano)\.(jpe?g|png)$/i;
+            for (const f of allExtractedFiles) {
+                const eqLowMatch = f.name.match(equirectLowRegex);
+                if (eqLowMatch) {
+                    const scanId = eqLowMatch[1];
+                    scanEquirectLows.set(scanId, f.fullPath);
+                    continue;
+                }
+                const eqMatch = f.name.match(equirectRegex);
+                if (eqMatch) {
+                    const scanId = eqMatch[1];
+                    scanEquirects.set(scanId, f.fullPath);
+                    continue;
+                }
+                const faceMatch = f.name.match(faceRegex);
+                if (faceMatch) {
+                    const scanId = faceMatch[1];
+                    const face = faceMatch[2].toLowerCase();
+                    if (!scanCubemaps.has(scanId)) {
+                        scanCubemaps.set(scanId, {});
+                    }
+                    scanCubemaps.get(scanId)[face] = f.fullPath;
+                }
+            }
+            const scanIds = new Set([
+                ...scanCubemaps.keys(),
+                ...scanEquirects.keys(),
+                ...scanEquirectLows.keys(),
+            ]);
+            if (rawScansData) {
+                const arr = Array.isArray(rawScansData) ? rawScansData : Object.keys(rawScansData).map(k => ({ '#name': k }));
+                arr.forEach((s, idx) => {
+                    const name = s['#name'] || s.id || `scan_${idx}`;
+                    const clean = String(name).replace(/^scan_/, '');
+                    scanIds.add(clean);
+                });
+            }
+            console.log(`[processPanoramas] Found ${scanIds.size} scan stations to process.`);
+            const wasmtimeBin = path.resolve(process.cwd(), 'bin/wasmtime.exe');
+            const wasmModule = path.resolve(process.cwd(), 'bin/basisu_st.wasm');
+            const hasWasmEncoder = fs.existsSync(wasmtimeBin) && fs.existsSync(wasmModule);
+            const metadataOut = {};
+            for (const scanId of scanIds) {
+                const cleanId = String(scanId).replace(/^scan_/, '');
+                const fullScanKey = `scan_${cleanId}`;
+                console.log(`[processPanoramas] Processing ${fullScanKey}...`);
+                const origEquirect = scanEquirects.get(cleanId) || scanEquirects.get(fullScanKey);
+                const origEquirectLow = scanEquirectLows.get(cleanId) || scanEquirectLows.get(fullScanKey);
+                const destEquirectLow = path.join(equirectLowDir, `${fullScanKey}_equirect_low.jpg`);
+                const destEquirect = path.join(equirectDir, `${fullScanKey}_equirect.jpg`);
+                if (origEquirect) {
+                    fs.copyFileSync(origEquirect, destEquirect);
+                    try {
+                        await sharp(origEquirect)
+                            .resize(2048, 1024, { fit: 'fill' })
+                            .jpeg({ quality: 85, mozjpeg: true })
+                            .toFile(destEquirectLow);
+                        console.log(`  [MozJPEG] Generated crisp 2048x1024 ${destEquirectLow}`);
+                    }
+                    catch (e) {
+                        console.warn(`  [processPanoramas] Error generating equirect_low for ${fullScanKey}:`, e.message);
+                    }
+                }
+                else if (origEquirectLow) {
+                    fs.copyFileSync(origEquirectLow, destEquirectLow);
+                }
+                const faces = scanCubemaps.get(cleanId) || scanCubemaps.get(fullScanKey);
+                const requiredFaces = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
+                const hasAllFaces = faces && requiredFaces.every(f => !!faces[f]);
+                if (hasAllFaces) {
+                    for (const f of requiredFaces) {
+                        const destFace = path.join(cubemapsDir, `${fullScanKey}_${f}.jpg`);
+                        fs.copyFileSync(faces[f], destFace);
+                    }
+                    if (hasWasmEncoder) {
+                        const sizes = [256, 512, 1024];
+                        for (const size of sizes) {
+                            const ktx2RelOut = `output/ktx2/${fullScanKey}_${size}.ktx2`;
+                            const faceRelPaths = requiredFaces.map(f => `output/cubemaps/${fullScanKey}_${f}.jpg`);
+                            const cmd = `"${wasmtimeBin}" run --dir . "${wasmModule}" -cubemap -uastc -uastc_level 2 -mipmap -resample ${size} ${size} -output_file ${ktx2RelOut} ${faceRelPaths.join(' ')}`;
+                            try {
+                                await execPromise(cmd, { cwd: tempDir });
+                                console.log(`  [KTX2] Generated ${fullScanKey}_${size}.ktx2`);
+                            }
+                            catch (ktxErr) {
+                                console.warn(`  [KTX2] Failed generating ${fullScanKey}_${size}.ktx2:`, ktxErr.message);
+                            }
+                        }
+                    }
+                }
+                let position = [0, 0, 0];
+                let quaternion_xyzw = [0, 0, 0, 1];
+                let quaternion_wxyz = [1, 0, 0, 0];
+                if (rawScansData) {
+                    let matchedScan = null;
+                    if (Array.isArray(rawScansData)) {
+                        matchedScan = rawScansData.find((s) => s['#name'] === fullScanKey || s['#name'] === cleanId || s.id === fullScanKey || s.id === cleanId);
+                    }
+                    else if (rawScansData[fullScanKey] || rawScansData[cleanId]) {
+                        matchedScan = rawScansData[fullScanKey] || rawScansData[cleanId];
+                    }
+                    if (matchedScan) {
+                        const posX = matchedScan.x ?? matchedScan.posX ?? matchedScan.position?.[0] ?? 0;
+                        const posY = matchedScan.y ?? matchedScan.posY ?? matchedScan.position?.[1] ?? 0;
+                        const posZ = matchedScan.alt ?? matchedScan.z ?? matchedScan.posZ ?? matchedScan.position?.[2] ?? 0;
+                        position = [posX, posY, posZ];
+                        if (matchedScan.quaternion_xyzw) {
+                            quaternion_xyzw = matchedScan.quaternion_xyzw;
+                            quaternion_wxyz = [matchedScan.quaternion_xyzw[3], matchedScan.quaternion_xyzw[0], matchedScan.quaternion_xyzw[1], matchedScan.quaternion_xyzw[2]];
+                        }
+                        else if (matchedScan.rotation_quaternion) {
+                            const rq = matchedScan.rotation_quaternion;
+                            quaternion_wxyz = rq;
+                            quaternion_xyzw = [rq[1], rq[2], rq[3], rq[0]];
+                        }
+                    }
+                }
+                metadataOut[fullScanKey] = {
+                    index: parseInt(cleanId, 10) || 0,
+                    position,
+                    quaternion_xyzw,
+                    quaternion_wxyz,
+                    cubemap_urls: [
+                        `cubemaps/${fullScanKey}_px.jpg`,
+                        `cubemaps/${fullScanKey}_nx.jpg`,
+                        `cubemaps/${fullScanKey}_py.jpg`,
+                        `cubemaps/${fullScanKey}_ny.jpg`,
+                        `cubemaps/${fullScanKey}_pz.jpg`,
+                        `cubemaps/${fullScanKey}_nz.jpg`,
+                    ],
+                    equirect_url: `equirect/${fullScanKey}_equirect.jpg`,
+                    equirect_low_url: `equirect_low/${fullScanKey}_equirect_low.jpg`,
+                    ktx2_256: `ktx2/${fullScanKey}_256.ktx2`,
+                    ktx2_512: `ktx2/${fullScanKey}_512.ktx2`,
+                    ktx2_1024: `ktx2/${fullScanKey}_1024.ktx2`,
+                };
+            }
+            fs.writeFileSync(path.join(outputDir, 'scan_metadata.json'), JSON.stringify(metadataOut, null, 2), 'utf8');
+            if (scansJsonPath) {
+                fs.copyFileSync(scansJsonPath, path.join(outputDir, 'scans.json'));
+            }
             let uploadedCount = 0;
             const uploadRecursive = async (currDir, relPath = '') => {
                 const entries = fs.readdirSync(currDir, { withFileTypes: true });
@@ -972,22 +1325,23 @@ let InspectionsService = class InspectionsService {
                         const s3Dest = `inspections/${id}/${s3Rel}`;
                         await this.storageService.uploadFile(bucket, s3Dest, fullPath, contentType);
                         uploadedCount++;
-                        if (entry.name === 'scans.json' && !inspection.scansJsonUrl) {
-                            await this.prisma.inspection.update({
-                                where: { id },
-                                data: { scansJsonUrl: s3Dest },
-                            });
-                        }
                     }
                 }
             };
-            await uploadRecursive(extractDir);
-            console.log(`[processPanoramas] Unpacked ${uploadedCount} panorama files to inspections/${id}/`);
-            return { status: 'SUCCESS', filesCount: uploadedCount };
+            await uploadRecursive(outputDir);
+            console.log(`[processPanoramas] Uploaded ${uploadedCount} optimized panorama assets (KTX2, LODs, equirects) to inspections/${id}/`);
+            const scansJsonS3 = `inspections/${id}/scans.json`;
+            if (!inspection.scansJsonUrl) {
+                await this.prisma.inspection.update({
+                    where: { id },
+                    data: { scansJsonUrl: scansJsonS3 },
+                });
+            }
+            return { status: 'SUCCESS', filesCount: uploadedCount, scansProcessed: scanIds.size };
         }
         catch (err) {
             console.error(`[processPanoramas] Error:`, err);
-            throw new common_1.InternalServerErrorException(`Failed to unpack panoramas: ${err.message}`);
+            throw new common_1.InternalServerErrorException(`Failed to process panoramas: ${err.message}`);
         }
         finally {
             fs.rmSync(tempDir, { recursive: true, force: true });

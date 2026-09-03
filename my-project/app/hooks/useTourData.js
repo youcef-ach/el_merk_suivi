@@ -22,7 +22,7 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
  * Georeferenced Orthomosaics, 360° Panorama dual-box fading,
  * Red scan rings instanced mesh, and Drone Survey deliverables.
  */
-export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, beforeRenderCallbacksRef) => {
+export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef, cameraRef, activeProfileId, beforeRenderCallbacksRef, controlsRef) => {
   const modelRef = useRef(null);
   const tilesetEngineRef = useRef(null);
   const orthoLayerRef = useRef(null);
@@ -48,6 +48,8 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
     let isSubscribed = true;
 
+    console.log(`[useTourData] 🎬 initEngine triggered: tourId=${tourId}, sceneReady=${sceneReady}`);
+
     const initEngine = async () => {
       let glbUrl = null;
       let jsonUrl = null;
@@ -55,9 +57,11 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
       let orthoUrl = null;
       let tourTags = [];
       let tourAreaPointers = [];
+      let tour = null;
 
       try {
         const token = localStorage.getItem('access_token');
+        console.log(`[useTourData] Fetching tour: ${API_URL}/inspections/${tourId}`);
         const res = await fetch(`${API_URL}/inspections/${tourId}`, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
@@ -67,9 +71,10 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
           throw new Error(`Tour fetch failed: ${res.status} ${errText}`);
         }
 
-        const tour = await res.json();
+        tour = await res.json();
         if (!isSubscribed) return;
         setTourDetails(tour);
+        console.log(`[useTourData] Tour fetched successfully:`, { type: tour.type, glbModelUrl: tour.glbModelUrl, scansJsonUrl: tour.scansJsonUrl });
 
         // 3D Tileset / RealityScan photogrammetry model
         if (tour.tilesetUrl) {
@@ -158,14 +163,21 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
         if (rendererRef && rendererRef.current) {
           const ktx2Loader = new KTX2Loader()
-            .setTranscoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/')
-            .detectSupport(rendererRef.current)
-            .setWorkerLimit(Math.max(1, (navigator.hardwareConcurrency || 4) - 1));
+            .setTranscoderPath('/basis/')
+            .detectSupport(rendererRef.current);
           gltfLoader.setKTX2Loader(ktx2Loader);
         }
         
         gltfLoader.setMeshoptDecoder(MeshoptDecoder);
-        gltfLoader.load(glbUrl, resolve, undefined, reject);
+        console.log(`[useTourData] 📦 Calling gltfLoader.load for glbUrl: ${glbUrl}`);
+        gltfLoader.load(glbUrl, (gltf) => {
+          const extUsed = gltf.parser?.json?.extensionsUsed || [];
+          console.log(`[GLTFLoader] 🚀 3D Digital Twin loaded successfully with hardware extensions:`, extUsed);
+          resolve(gltf);
+        }, undefined, (err) => {
+          console.error(`[useTourData] Failed to load GLB model from ${glbUrl}:`, err);
+          reject(err);
+        });
       }) : Promise.resolve(null);
 
       // ─── 4. Load Scans Telemetry for 360 Red Rings ───
@@ -182,7 +194,8 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
           if (!isSubscribed) return;
 
           if (gltf) {
-            gltf.scene.traverse((child) => {
+            const model = gltf.scene;
+            model.traverse((child) => {
               if (child.isMesh) {
                 const oldMats = Array.isArray(child.material) ? child.material : [child.material];
                 const newMats = oldMats.map(m => {
@@ -190,33 +203,45 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
                     map: m.map || null,
                     color: m.color || 0xffffff,
                     transparent: false,
-                    side: m.side,
+                    side: THREE.DoubleSide,
                   });
                   m.dispose();
                   return basic;
                 });
                 child.material = newMats.length === 1 ? newMats[0] : newMats;
-                child.matrixAutoUpdate = false;
-                child.updateMatrix();
+                child.userData.originalMaterial = child.material;
 
                 if (child.geometry) {
                   child.geometry.computeBoundingBox();
                   child.geometry.computeBoundingSphere();
-                  child.geometry.computeBoundsTree();
-                  child.raycast = acceleratedRaycast;
+                  const vertCount = child.geometry.attributes.position ? child.geometry.attributes.position.count : 0;
+                  if (vertCount <= 800000 && typeof child.geometry.computeBoundsTree === 'function') {
+                    try {
+                      child.geometry.computeBoundsTree();
+                      child.raycast = acceleratedRaycast;
+                    } catch (_) {}
+                  }
                 }
               }
             });
-            // Automatically snap lowest point of GLB model to Y = 0 on ground plane
-            const glbBox = new THREE.Box3().setFromObject(gltf.scene);
-            if (isFinite(glbBox.min.y) && Math.abs(glbBox.min.y) > 0.001) {
-              gltf.scene.position.y -= glbBox.min.y;
-              gltf.scene.updateMatrixWorld(true);
-              console.log(`[useTourData] Snapped GLB model ground level to Y = 0.00m (offset: ${(-glbBox.min.y).toFixed(3)}m)`);
+
+            // Automatically snap lowest point of GLB model to Y = 0 on ground plane ONLY for DRONE_SURVEY
+            if (tour?.type === 'DRONE_SURVEY') {
+              const glbBox = new THREE.Box3().setFromObject(model);
+              if (isFinite(glbBox.min.y) && Math.abs(glbBox.min.y) > 0.001) {
+                model.position.y -= glbBox.min.y;
+                model.updateMatrixWorld(true);
+                console.log(`[useTourData] Snapped GLB model ground level to Y = 0.00m (offset: ${(-glbBox.min.y).toFixed(3)}m)`);
+              }
             }
 
-            scene.add(gltf.scene);
-            modelRef.current = gltf.scene;
+            if (tour?.type === 'VIRTUAL_TOUR') {
+              scene.fog = null;
+            }
+
+            scene.add(model);
+            modelRef.current = model;
+
           }
 
           setIsModelLoaded(true);

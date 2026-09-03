@@ -22,7 +22,7 @@ class TextureManager {
 
     if (!this.ktx2Loader && renderer) {
       this.ktx2Loader = new KTX2Loader()
-        .setTranscoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/')
+        .setTranscoderPath('/basis/')
         .detectSupport(renderer);
     }
   }
@@ -30,7 +30,8 @@ class TextureManager {
   setBasePath(tourId) {
     if (!tourId) return;
     this.baseKtx2Path = `${MINIO_URL}/virtual-inspections/inspections/${tourId}/ktx2`;
-    this.baseEquirectPath = `${MINIO_URL}/virtual-inspections/inspections/${tourId}/equirect_low`;
+    this.baseEquirectPath = `${MINIO_URL}/virtual-inspections/inspections/${tourId}/equirect`;
+    this.baseEquirectLowPath = `${MINIO_URL}/virtual-inspections/inspections/${tourId}/equirect_low`;
     this.baseCubemapPath = `${MINIO_URL}/virtual-inspections/inspections/${tourId}/cubemaps`;
   }
 
@@ -87,46 +88,105 @@ class TextureManager {
   }
 
   /**
-   * Load Equirectangular low-res texture for transition projection
+   * Load Equirectangular texture (Adaptive 2K on mobile/Tier 1&2 for 60 FPS flights, 4K on Tier 3 desktop)
    */
-  async loadEquirect(scanId) {
+  async loadEquirect(scanId, preferTier = 'auto') {
     const cleanId = String(scanId).replace(/^scan_/, '');
-    if (this.equirectTextureCache.has(cleanId)) {
+    
+    // Determine target resolution tier
+    let targetTier = preferTier;
+    if (targetTier === 'auto') {
+      try {
+        const { getDeviceTier } = await import('./deviceTier.js');
+        targetTier = getDeviceTier().flightEquirectTier || '4k';
+      } catch (_) {
+        targetTier = '4k';
+      }
+    }
+
+    const cacheKey = `${cleanId}_${targetTier}`;
+    if (this.equirectTextureCache.has(cacheKey)) {
+      return this.equirectTextureCache.get(cacheKey);
+    }
+    // Also check generic cache
+    if (this.equirectTextureCache.has(cleanId) && targetTier !== '2k') {
       return this.equirectTextureCache.get(cleanId);
     }
 
     const texLoader = new THREE.TextureLoader();
-    const primaryUrl = `${this.baseEquirectPath}/scan_${cleanId}_equirect_low.jpg`;
-    const fallbackUrl = `/equirect_low/scan_${cleanId}_equirect_low.jpg`;
+    const cacheBust = `?t=${Date.now()}`;
+
+    const url4k = `${this.baseEquirectPath}/scan_${cleanId}_equirect.jpg${cacheBust}`;
+    const url2k = `${this.baseEquirectLowPath || this.baseEquirectPath}/scan_${cleanId}_equirect_low.jpg${cacheBust}`;
+
+    // Select primary and fallback based on device tier
+    const primaryUrl = targetTier === '2k' ? url2k : url4k;
+    const fallbackUrl = targetTier === '2k' ? url4k : url2k;
+
+    const configureTex = (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.generateMipmaps = true;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      if (this.renderer?.capabilities?.getMaxAnisotropy) {
+        tex.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+      }
+      this.equirectTextureCache.set(cacheKey, tex);
+      this.equirectTextureCache.set(cleanId, tex);
+      return tex;
+    };
 
     return new Promise((resolve) => {
       texLoader.load(
         primaryUrl,
-        (tex) => {
-          tex.colorSpace = THREE.SRGBColorSpace;
-          this.equirectTextureCache.set(cleanId, tex);
-          resolve(tex);
-        },
+        (tex) => resolve(configureTex(tex)),
         undefined,
         () => {
           texLoader.load(
             fallbackUrl,
-            (fallbackTex) => {
-              fallbackTex.colorSpace = THREE.SRGBColorSpace;
-              this.equirectTextureCache.set(cleanId, fallbackTex);
-              resolve(fallbackTex);
-            },
+            (fallbackTex) => resolve(configureTex(fallbackTex)),
             undefined,
             () => {
-              // Return dummy 1x1 texture if not found
-              const dummy = new THREE.DataTexture(new Uint8Array([100, 100, 100, 255]), 1, 1, THREE.RGBAFormat);
-              dummy.needsUpdate = true;
-              resolve(dummy);
+              const localUrl = `/equirect/scan_${cleanId}_equirect.jpg${cacheBust}`;
+              texLoader.load(
+                localUrl,
+                (localTex) => resolve(configureTex(localTex)),
+                undefined,
+                () => {
+                  const dummy = new THREE.DataTexture(new Uint8Array([100, 100, 100, 255]), 1, 1, THREE.RGBAFormat);
+                  dummy.needsUpdate = true;
+                  resolve(dummy);
+                }
+              );
             }
           );
         }
       );
     });
+  }
+
+  /**
+   * Return highest quality cached KTX2 texture already loaded in memory
+   */
+  getBestCachedKTX2(scanId) {
+    const cleanId = String(scanId).replace(/^scan_/, '');
+    const cacheObj = this.getTextureCacheObj(cleanId);
+    return cacheObj['1024'] || cacheObj['512'] || cacheObj['256'] || null;
+  }
+
+  /**
+   * Load the best available KTX2 texture (attempts 1024 first, fallback to 256)
+   */
+  async loadBestKTX2(scanId) {
+    const cleanId = String(scanId).replace(/^scan_/, '');
+    const cached = this.getBestCachedKTX2(cleanId);
+    if (cached) return cached;
+
+    try {
+      return await this.loadKTX2(cleanId, '1024');
+    } catch (e) {
+      return await this.loadKTX2(cleanId, '256');
+    }
   }
 
   /**
@@ -140,7 +200,8 @@ class TextureManager {
 
     const loader = new THREE.CubeTextureLoader();
     const faces = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
-    const urls = faces.map(f => `${this.baseCubemapPath}/scan_${cleanId}_${f}.jpg`);
+    const cacheBust = `?t=${Date.now()}`;
+    const urls = faces.map(f => `${this.baseCubemapPath}/scan_${cleanId}_${f}.jpg${cacheBust}`);
 
     return new Promise((resolve) => {
       loader.load(
@@ -152,7 +213,7 @@ class TextureManager {
         },
         undefined,
         () => {
-          const fallbackUrls = faces.map(f => `/cubemaps/scan_${cleanId}_${f}.jpg`);
+          const fallbackUrls = faces.map(f => `/cubemaps/scan_${cleanId}_${f}.jpg${cacheBust}`);
           loader.load(
             fallbackUrls,
             (fbTex) => {
@@ -175,16 +236,16 @@ class TextureManager {
   }
 
   /**
-   * Preload the 256-px textures for a list of scan IDs
+   * Preload 4K equirect and 1024 HD textures for nearest scan stations
    */
   async preloadBase(scanIds) {
     for (const id of scanIds) {
       this.loadEquirect(id).catch(() => {});
-      this.loadCubeMap(id).catch(() => {});
+      this.loadKTX2(id, '1024').catch(() => this.loadKTX2(id, '256').catch(() => {}));
     }
   }
 
-  disposeScanTextures(scanId, keep256 = true) {
+  disposeScanTextures(scanId, keep1024 = true) {
     const cleanId = String(scanId).replace(/^scan_/, '');
     if (!this.textureCache.has(cleanId)) return;
     
@@ -193,17 +254,9 @@ class TextureManager {
       cacheObj['2048'].dispose();
       cacheObj['2048'] = null;
     }
-    if (cacheObj['1024']) {
+    if (!keep1024 && cacheObj['1024']) {
       cacheObj['1024'].dispose();
       cacheObj['1024'] = null;
-    }
-    if (cacheObj['512']) {
-      cacheObj['512'].dispose();
-      cacheObj['512'] = null;
-    }
-    if (!keep256 && cacheObj['256']) {
-      cacheObj['256'].dispose();
-      cacheObj['256'] = null;
     }
   }
 }

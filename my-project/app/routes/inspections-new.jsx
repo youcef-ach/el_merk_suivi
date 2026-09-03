@@ -49,6 +49,26 @@ const createInspectionSchema = z.object({
   coordinateSystem: z.string().optional(),
 });
 
+const parseCsvOrJson = (text) => {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return JSON.parse(trimmed);
+  }
+  const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) throw new Error("Invalid file: No data rows found");
+  const delimiter = lines[0].includes(';') ? ';' : (lines[0].includes('\t') ? '\t' : ',');
+  const headers = lines[0].split(delimiter).map(h => h.trim().replace(/^["']|["']$/g, ''));
+  return lines.slice(1).map(line => {
+    const values = line.split(delimiter).map(v => v.trim().replace(/^["']|["']$/g, ''));
+    const obj = {};
+    headers.forEach((h, i) => {
+      const val = values[i];
+      obj[h] = !isNaN(Number(val)) && val !== '' ? Number(val) : val;
+    });
+    return obj;
+  });
+};
+
 function NewInspectionContent() {
   const navigate = useNavigate();
   const { projectId } = useParams();
@@ -71,6 +91,7 @@ function NewInspectionContent() {
   const [jsonFile, setJsonFile] = useState(null);
   const [rcJsonFile, setRcJsonFile] = useState(null);
   const [thumbnailFile, setThumbnailFile] = useState(null);
+  const [compressionMode, setCompressionMode] = useState('uastc');
 
   const { register, handleSubmit, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(createInspectionSchema),
@@ -282,13 +303,13 @@ function NewInspectionContent() {
           setUploadStatusText(`Uploading 3D model (${glbFile.name})...`);
           await uploadFileToMinio(inspectionId, glbFile, targetName);
 
-          setUploadStatusText('Converting OBJ / Applying Draco mesh compression on server...');
+          setUploadStatusText(`Converting OBJ / Applying Draco & KTX2 (${compressionMode.toUpperCase()}) on server...`);
           await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ fileName: targetName })
+            body: JSON.stringify({ fileName: targetName, compressionMode })
           });
-          incrementProgress('3D model converted, Draco compressed & ready');
+          incrementProgress(`3D model optimized (${compressionMode.toUpperCase()}) & ready`);
         })());
       }
 
@@ -309,15 +330,23 @@ function NewInspectionContent() {
       // 6. 360 Scan Telemetry Coordinates JSON
       if (jsonFile && rcJsonFile) {
         tasks.push((async () => {
-          setUploadStatusText('Aligning Matterport and RealityCapture scan coordinates...');
+          setUploadStatusText('Aligning Matterport and software scan coordinates...');
           const mpText = await jsonFile.text();
           const rcText = await rcJsonFile.text();
-          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
+          const mpData = parseCsvOrJson(mpText);
+          const rcData = parseCsvOrJson(rcText);
+
+          const processRes = await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ mpData: JSON.parse(mpText), rcData: JSON.parse(rcText) })
+            body: JSON.stringify({ mpData, rcData })
           });
-          incrementProgress('360 Scans aligned');
+
+          if (!processRes.ok) {
+            const errJson = await processRes.json().catch(() => ({}));
+            throw new Error(errJson.message || 'Failed to align scan coordinates');
+          }
+          incrementProgress('360 Scans aligned to new model');
         })());
       } else if (jsonFile) {
         tasks.push(
@@ -630,6 +659,68 @@ function NewInspectionContent() {
                     {glbFile && <div className="file-ready-badge">{glbFile.name} ({formatFileSize(glbFile.size)})</div>}
                   </div>
 
+                  {/* 3D Texture Compression Profile Selector */}
+                  <div style={{ gridColumn: '1 / -1', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '16px 20px', marginTop: '4px', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                      <Cpu className="h-4 w-4 text-cyan-400" />
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        3D Mesh Texture Compression Profile (KTX2 Basis Universal)
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      {/* UASTC Card */}
+                      <div 
+                        onClick={() => setCompressionMode('uastc')}
+                        style={{
+                          border: compressionMode === 'uastc' ? '2px solid #06b6d4' : '1px solid rgba(255, 255, 255, 0.1)',
+                          background: compressionMode === 'uastc' ? 'rgba(6, 182, 212, 0.1)' : 'rgba(30, 41, 59, 0.4)',
+                          borderRadius: '10px',
+                          padding: '14px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 600, fontSize: '14px', color: compressionMode === 'uastc' ? '#38bdf8' : '#e2e8f0' }}>
+                            🏭 Industrial Facility (UASTC)
+                          </span>
+                          <span style={{ fontSize: '11px', background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                            Recommended
+                          </span>
+                        </div>
+                        <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
+                          Photorealistic 8-bit RGBA fidelity. Preserves razor-sharp pipe labels, equipment gauges, and metallic machinery reflections with 75% VRAM savings.
+                        </p>
+                      </div>
+
+                      {/* ETC1S Card */}
+                      <div 
+                        onClick={() => setCompressionMode('etc1s')}
+                        style={{
+                          border: compressionMode === 'etc1s' ? '2px solid #10b981' : '1px solid rgba(255, 255, 255, 0.1)',
+                          background: compressionMode === 'etc1s' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(30, 41, 59, 0.4)',
+                          borderRadius: '10px',
+                          padding: '14px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 600, fontSize: '14px', color: compressionMode === 'etc1s' ? '#34d399' : '#e2e8f0' }}>
+                            🚜 Construction Site & Terrain (ETC1S)
+                          </span>
+                          <span style={{ fontSize: '11px', background: 'rgba(52, 211, 153, 0.2)', color: '#34d399', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                            Ultra Compact
+                          </span>
+                        </div>
+                        <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
+                          Extreme vector-quantized compression (up to 75% smaller files). Ideal for massive outdoor construction sites, dirt terrains, quarries, and weak 4G/5G connections.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* 2. 360° Panoramas & Cubemaps Package (panoramas.zip) */}
                   <div className="upload-dropzone-box">
                     <div className="dropzone-icon-circle">
@@ -660,6 +751,25 @@ function NewInspectionContent() {
                       className="dropzone-file-input"
                     />
                     {jsonFile && <div className="file-ready-badge">{jsonFile.name} ({formatFileSize(jsonFile.size)})</div>}
+                  </div>
+
+                  {/* 4. Optional: Reconstructed Software Registration (RealityCapture / Metashape JSON or CSV) */}
+                  <div className="upload-dropzone-box" style={{ border: rcJsonFile ? '1px solid #a855f7' : '1px dashed rgba(255, 255, 255, 0.15)' }}>
+                    <div className="dropzone-icon-circle" style={{ background: 'rgba(168, 85, 247, 0.15)' }}>
+                      <Compass className="h-6 w-6 text-purple-400" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                      <h4 className="dropzone-title">Software Registration (.json, .csv)</h4>
+                      <span style={{ fontSize: '10px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>Optional</span>
+                    </div>
+                    <p className="dropzone-desc">RealityCapture / Metashape camera export to realign coordinates</p>
+                    <input 
+                      type="file" 
+                      accept=".json,.csv"
+                      onChange={(e) => setRcJsonFile(e.target.files[0])}
+                      className="dropzone-file-input"
+                    />
+                    {rcJsonFile && <div className="file-ready-badge" style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.4)' }}>{rcJsonFile.name} ({formatFileSize(rcJsonFile.size)})</div>}
                   </div>
 
                   {/* 4. Thumbnail Cover */}

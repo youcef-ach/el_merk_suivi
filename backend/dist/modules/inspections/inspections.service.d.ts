@@ -964,7 +964,10 @@ export declare class InspectionsService {
         status: string;
         tilesetUrl: string;
     }>;
-    processGlb(id: string, userEnterpriseId: string, role: Role, uploadedFileName?: string): Promise<{
+    private checkGlbHasKtx2;
+    private getGlbVertexCount;
+    private getGlbTextureCount;
+    processGlb(id: string, userEnterpriseId: string, role: Role, targetFileName?: string, compressionMode?: 'uastc' | 'etc1s'): Promise<{
         status: string;
         glbModelUrl: string;
         fileSizeMb: number;
@@ -972,5 +975,6 @@ export declare class InspectionsService {
     processPanoramas(id: string, userEnterpriseId: string, role: Role): Promise<{
         status: string;
         filesCount: number;
+        scansProcessed: number;
     }>;
 }

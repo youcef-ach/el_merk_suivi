@@ -8,18 +8,17 @@
  *
  * The value can be overridden at build time with the VITE_API_URL env var.
  */
+const getDevHost = () => {
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    return window.location.hostname;
+  }
+  return 'localhost';
+};
+
 export const API_URL =
   import.meta.env.VITE_API_URL ??
-  (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api');
+  (import.meta.env.DEV ? `http://${getDevHost()}:3000/api` : '/api');
 
-/**
- * Centralised MinIO / object-storage base URL.
- *
- * In production Nginx proxies /virtual-inspections/* and /virtual-tours/*
- * directly to the MinIO container, so we use an empty string (relative path).
- *
- * In local development we point at localhost:9000.
- */
 export const MINIO_URL =
   import.meta.env.VITE_MINIO_URL ??
-  (import.meta.env.DEV ? 'http://localhost:9000' : '');
+  (import.meta.env.DEV ? `http://${getDevHost()}:9000` : '');

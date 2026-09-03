@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import ProtectedRoute from '../components/ProtectedRoute';
-import ModelAndScansViewer from '../components/ModelAndScansViewer';
+import IndustrialTourViewer from '../components/IndustrialTourViewer';
 import TagPanel from '../components/TagPanel';
 import { useMeasurement } from '../hooks/useMeasurement';
 import { useTags } from '../hooks/useTags';
@@ -326,7 +326,7 @@ function StudioContent() {
         <button className="studio-back-btn" onClick={() => navigate('/dashboard')}>
           ← Dashboard
         </button>
-        <ModelAndScansViewer 
+        <IndustrialTourViewer 
           ref={viewerRef}
           tourId={id} 
           activeProfileId={activeProfileId}
