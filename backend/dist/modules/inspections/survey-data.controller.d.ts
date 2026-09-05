@@ -50,6 +50,10 @@ export declare class SurveyDataController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;

@@ -72,6 +72,12 @@ model Inspection {
   videoUrl          String?
   visibility        Visibility   @default(PRIVATE)
   
+  // Asynchronous Asset Processing Queue Status
+  processingStatus    String       @default("IDLE") // IDLE, QUEUED, PROCESSING, COMPLETED, FAILED
+  processingProgress  Int          @default(0)      // 0 - 100
+  processingStage     String       @default("")     // e.g. "Generating KTX2 cubemaps for scan 3/10..."
+  processingError     String?
+  
   // Drone Survey Metadata
   surveyDate        DateTime?
   droneModel        String?

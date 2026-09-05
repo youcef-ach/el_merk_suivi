@@ -25,4 +25,10 @@ export class InspectionsDirectController {
   getBundle(@Param('id') id: string, @GetUser() user: any) {
     return this.inspectionsService.getBundle(id, user);
   }
+
+  @IsPublic()
+  @Get(':id/processing-status')
+  getProcessingStatus(@Param('id') id: string) {
+    return this.inspectionsService.getProcessingStatus(id);
+  }
 }

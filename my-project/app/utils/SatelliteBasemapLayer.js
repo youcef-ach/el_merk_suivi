@@ -92,53 +92,44 @@ function createSeamlessBasemapMaterial(texture, radiusMeters, initialOpacity = 0
       uMap: { value: texture },
       uRadius: { value: radiusMeters },
       uOpacity: { value: initialOpacity },
-      uInnerFadeRatio: { value: 0.65 }, // Start soft fade at 65% of radius
+      uInnerFadeRatio: { value: 0.70 }, // Soft fade starts at 70% of radius
       uOuterFadeRatio: { value: 0.98 }, // Fully transparent at 98% of radius
-      uFogColor: { value: new THREE.Color(0x0b1120) },
-      uFogNear: { value: 100.0 },
-      uFogFar: { value: 3000.0 }
     },
     vertexShader: `
       varying vec2 vUv;
-      varying vec3 vWorldPos;
       void main() {
         vUv = uv;
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPos = worldPosition.xyz;
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: `
       uniform sampler2D uMap;
-      uniform float uRadius;
       uniform float uOpacity;
       uniform float uInnerFadeRatio;
       uniform float uOuterFadeRatio;
       varying vec2 vUv;
-      varying vec3 vWorldPos;
 
       void main() {
         vec4 texColor = texture2D(uMap, vUv);
         
-        // Compute distance from center of ground disc in world coordinates (XZ plane)
-        float dist = length(vWorldPos.xz);
+        // Compute normalized distance from center of circular disc in UV space [0.0 = center, 1.0 = disc border]
+        float distNorm = length(vUv - vec2(0.5)) * 2.0;
         
-        // Continuous smooth radial feathering (eliminates all square tile borders)
-        float innerDist = uRadius * uInnerFadeRatio;
-        float outerDist = uRadius * uOuterFadeRatio;
-        float radialFade = 1.0 - smoothstep(innerDist, outerDist, dist);
+        // Smooth radial edge vignette (fade out gently near outer boundary)
+        float radialFade = 1.0 - smoothstep(uInnerFadeRatio, uOuterFadeRatio, distNorm);
 
         // Final output alpha with smooth falloff
         float alpha = texColor.a * uOpacity * radialFade;
 
-        // Subtle ambient ground color grading for photorealism
-        vec3 finalColor = texColor.rgb;
-
-        gl_FragColor = vec4(finalColor, alpha);
+        gl_FragColor = vec4(texColor.rgb, alpha);
       }
     `,
     transparent: true,
     depthWrite: false, // Prevent z-fighting with 3D model foundations
+    depthTest: true,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
     side: THREE.DoubleSide
   });
 }
@@ -160,8 +151,8 @@ export class SatelliteBasemapLayer {
     this.zoom = 17; // Detailed local zoom
     this.gridRadius = 2; // 5x5 tile grid
     this.providerKey = 'esri-satellite';
-    this.opacity = 0.92;
-    this.elevationOffsetY = -0.15;
+    this.opacity = 0.95;
+    this.elevationOffsetY = -0.01;
     this.manualOffsetX = 0.0;
     this.manualOffsetZ = 0.0;
     this.rotationDeg = 0.0;
@@ -208,6 +199,7 @@ export class SatelliteBasemapLayer {
     this.rotationDeg = Number(rotationDeg);
     this.opacity = Number(opacity);
     this.isVisible = Boolean(visible);
+    this.isLoaded = true;
 
     this.clear();
 
@@ -331,18 +323,20 @@ export class SatelliteBasemapLayer {
     this.lat = Number(lat);
     this.lon = Number(lon);
     this.zoom = Number(zoom);
-    if (this.isLoaded) {
-      this.load({ lat: this.lat, lon: this.lon, zoom: this.zoom });
-    }
+    this.load({ lat: this.lat, lon: this.lon, zoom: this.zoom, visible: this.isVisible });
   }
 
   setProvider(providerKey) {
     if (MAP_PROVIDERS[providerKey] && providerKey !== this.providerKey) {
       this.providerKey = providerKey;
-      if (this.isLoaded) {
-        this.load({ providerKey: this.providerKey });
-      }
+      this.load({ providerKey: this.providerKey, visible: this.isVisible });
     }
+  }
+
+  setZoomAndRadius(zoom, radius = this.gridRadius) {
+    this.zoom = Number(zoom);
+    this.gridRadius = Number(radius);
+    this.load({ zoom: this.zoom, gridRadius: this.gridRadius, visible: this.isVisible });
   }
 
   clear() {

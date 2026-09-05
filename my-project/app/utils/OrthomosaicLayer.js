@@ -60,6 +60,25 @@ export class OrthomosaicLayer {
     }
   }
 
+  load(imageUrl, options = null) {
+    const mesh = this.loadOrtho(imageUrl, options);
+    if (options?.opacity !== undefined) {
+      this.setOpacity(options.opacity);
+    }
+    if (options?.elevationOffsetY !== undefined) {
+      this.setElevationOffset(options.elevationOffsetY);
+    }
+    return mesh;
+  }
+
+  show() {
+    this.setVisible(true);
+  }
+
+  hide() {
+    this.setVisible(false);
+  }
+
   setElevationOffset(offsetY) {
     if (this.mesh) {
       this.mesh.position.y = Number(offsetY);

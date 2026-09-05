@@ -11,11 +11,22 @@ import { IsPublic } from '../../decorators/public.decorator';
 import { GetUser } from '../../decorators/get-user.decorator';
 import { Roles } from '../../decorators/roles.decorator';
 import { Role } from '@prisma/client';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { 
+  ASSET_PROCESSING_QUEUE, 
+  JOB_PROCESS_GLB, 
+  JOB_PROCESS_PANORAMAS, 
+  JOB_PROCESS_TILESET 
+} from '../queues/queue.constants';
 
 @Controller('projects/:projectId/inspections')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class InspectionsController {
-  constructor(private readonly inspectionsService: InspectionsService) {}
+  constructor(
+    private readonly inspectionsService: InspectionsService,
+    @InjectQueue(ASSET_PROCESSING_QUEUE) private readonly assetQueue: Queue,
+  ) {}
 
   @Post()
   create(@Param('projectId') projectId: string, @Body() createInspectionDto: CreateInspectionDto, @GetUser() user: any) {
@@ -117,7 +128,19 @@ export class InspectionsController {
     @Body('compressionMode') compressionMode: 'uastc' | 'etc1s',
     @GetUser() user: any,
   ) {
-    return this.inspectionsService.processGlb(id, user.enterpriseId, user.role, fileName, compressionMode);
+    await this.inspectionsService.markAsQueued(id, 'Queued 3D model processing in background worker...');
+    const job = await this.assetQueue.add(JOB_PROCESS_GLB, {
+      inspectionId: id,
+      userEnterpriseId: user.enterpriseId,
+      role: user.role,
+      fileName,
+      compressionMode,
+    });
+    return {
+      status: 'QUEUED',
+      jobId: job.id,
+      message: '3D model processing queued in background',
+    };
   }
 
   @Post(':id/process-tileset')
@@ -125,7 +148,17 @@ export class InspectionsController {
     @Param('id') id: string,
     @GetUser() user: any,
   ) {
-    return this.inspectionsService.processTileset(id, user.enterpriseId, user.role);
+    await this.inspectionsService.markAsQueued(id, 'Queued 3D tileset processing in background worker...');
+    const job = await this.assetQueue.add(JOB_PROCESS_TILESET, {
+      inspectionId: id,
+      userEnterpriseId: user.enterpriseId,
+      role: user.role,
+    });
+    return {
+      status: 'QUEUED',
+      jobId: job.id,
+      message: 'Tileset processing queued in background',
+    };
   }
 
   @Post(':id/process-panoramas')
@@ -133,7 +166,23 @@ export class InspectionsController {
     @Param('id') id: string,
     @GetUser() user: any,
   ) {
-    return this.inspectionsService.processPanoramas(id, user.enterpriseId, user.role);
+    await this.inspectionsService.markAsQueued(id, 'Queued panorama multi-LOD processing in background worker...');
+    const job = await this.assetQueue.add(JOB_PROCESS_PANORAMAS, {
+      inspectionId: id,
+      userEnterpriseId: user.enterpriseId,
+      role: user.role,
+    });
+    return {
+      status: 'QUEUED',
+      jobId: job.id,
+      message: 'Panorama multi-LOD processing queued in background',
+    };
+  }
+
+  @IsPublic()
+  @Get(':id/processing-status')
+  async getProcessingStatus(@Param('id') id: string) {
+    return this.inspectionsService.getProcessingStatus(id);
   }
 }
 

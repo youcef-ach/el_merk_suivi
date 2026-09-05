@@ -9,6 +9,7 @@ import { useAreaPointers } from '../hooks/useAreaPointers';
 import AreaPointersPanel from '../components/AreaPointersPanel';
 import FurnitureCatalog from '../components/FurnitureCatalog';
 import { bakeStaging } from '../utils/stagingRenderer';
+import { API_URL } from '../config/api';
 import './studio.css';
 
 export function meta() {
@@ -176,7 +177,7 @@ function StudioContent() {
     if (!token) return;
     try {
       // The API doesn't have a direct get profiles endpoint yet, wait, we can just fetch the inspection and get it
-      const res = await fetch(`http://localhost:3000/api/inspections/${id}`, {
+      const res = await fetch(`${API_URL}/inspections/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -197,7 +198,7 @@ function StudioContent() {
     if (!name) return;
     const token = localStorage.getItem('access_token');
     try {
-      const res = await fetch(`http://localhost:3000/api/inspections/${id}/staging-profiles`, {
+      const res = await fetch(`${API_URL}/inspections/${id}/staging-profiles`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -267,7 +268,7 @@ function StudioContent() {
 
         // 1. Get presigned URL
         const fileName = `staging/${activeProfileId}/${scanId}_${face}.jpg`;
-        const presignRes = await fetch(`http://localhost:3000/api/inspections/${id}/upload-url`, {
+        const presignRes = await fetch(`${API_URL}/inspections/${id}/upload-url`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -298,7 +299,7 @@ function StudioContent() {
       
       // 3. Save to database
       if (panoramasToSave.length > 0) {
-        await fetch(`http://localhost:3000/api/inspections/${id}/staging-profiles/${activeProfileId}/baked-panoramas`, {
+        await fetch(`${API_URL}/inspections/${id}/staging-profiles/${activeProfileId}/baked-panoramas`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

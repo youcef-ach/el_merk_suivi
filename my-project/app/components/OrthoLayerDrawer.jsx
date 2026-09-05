@@ -15,16 +15,40 @@ import {
 export default function OrthoLayerDrawer({
   isOpen,
   onClose,
-  orthoEnabled,
+  orthoEnabled = false,
   onToggleOrtho,
-  orthoType,
+  orthoType = 'dsm',
   onChangeOrthoType,
-  orthoOpacity,
+  orthoOpacity = 0.85,
   onChangeOrthoOpacity,
-  orthoOffset,
-  onChangeOrthoOffset
+  onChangeOpacity,
+  orthoOffset = 0.05,
+  onChangeOrthoOffset,
+  onChangeOffset
 }) {
   if (!isOpen) return null;
+
+  const handleType = (type) => {
+    if (typeof onChangeOrthoType === 'function') {
+      onChangeOrthoType(type);
+    }
+  };
+
+  const handleOpacity = (val) => {
+    if (typeof onChangeOrthoOpacity === 'function') {
+      onChangeOrthoOpacity(val);
+    } else if (typeof onChangeOpacity === 'function') {
+      onChangeOpacity(val);
+    }
+  };
+
+  const handleOffset = (val) => {
+    if (typeof onChangeOrthoOffset === 'function') {
+      onChangeOrthoOffset(val);
+    } else if (typeof onChangeOffset === 'function') {
+      onChangeOffset(val);
+    }
+  };
 
   return (
     <div className="engine-ortho-drawer">
@@ -76,7 +100,7 @@ export default function OrthoLayerDrawer({
           </label>
           <div className="engine-ortho-btn-grid">
             <button
-              onClick={() => onChangeOrthoType('dsm')}
+              onClick={() => handleType('dsm')}
               className={`engine-ortho-mode-btn ${orthoType === 'dsm' ? 'active' : ''}`}
             >
               <Sparkles style={{ width: 13, height: 13 }} />
@@ -87,7 +111,7 @@ export default function OrthoLayerDrawer({
             </button>
 
             <button
-              onClick={() => onChangeOrthoType('dtm')}
+              onClick={() => handleType('dtm')}
               className={`engine-ortho-mode-btn ${orthoType === 'dtm' ? 'active' : ''}`}
             >
               <Mountain style={{ width: 13, height: 13 }} />
@@ -116,7 +140,7 @@ export default function OrthoLayerDrawer({
             max="1.0"
             step="0.02"
             value={orthoOpacity}
-            onChange={(e) => onChangeOrthoOpacity(parseFloat(e.target.value))}
+            onChange={(e) => handleOpacity(parseFloat(e.target.value))}
             style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
           />
         </div>
@@ -138,7 +162,7 @@ export default function OrthoLayerDrawer({
             max="1.5"
             step="0.05"
             value={orthoOffset}
-            onChange={(e) => onChangeOrthoOffset(parseFloat(e.target.value))}
+            onChange={(e) => handleOffset(parseFloat(e.target.value))}
             style={{ width: '100%', accentColor: '#fbbf24', cursor: 'pointer' }}
           />
         </div>

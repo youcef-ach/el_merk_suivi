@@ -4,9 +4,11 @@ import { CreateScanDto } from './dto/create-scan.dto';
 import { CreatePanoramaDto } from './dto/create-panorama.dto';
 import { UpdateInspectionPermissionsDto } from './dto/update-inspection-permissions.dto';
 import { ProcessScansDto } from './dto/process-scans.dto';
+import { Queue } from 'bullmq';
 export declare class InspectionsController {
     private readonly inspectionsService;
-    constructor(inspectionsService: InspectionsService);
+    private readonly assetQueue;
+    constructor(inspectionsService: InspectionsService, assetQueue: Queue);
     create(projectId: string, createInspectionDto: CreateInspectionDto, user: any): Promise<{
         id: string;
         type: import(".prisma/client").$Enums.InspectionType;
@@ -19,6 +21,10 @@ export declare class InspectionsController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -48,6 +54,10 @@ export declare class InspectionsController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -214,6 +224,10 @@ export declare class InspectionsController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -380,6 +394,10 @@ export declare class InspectionsController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -409,6 +427,10 @@ export declare class InspectionsController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -465,6 +487,10 @@ export declare class InspectionsController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -494,6 +520,10 @@ export declare class InspectionsController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -523,6 +553,10 @@ export declare class InspectionsController {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -552,16 +586,26 @@ export declare class InspectionsController {
     }>;
     processGlb(id: string, fileName: string, compressionMode: 'uastc' | 'etc1s', user: any): Promise<{
         status: string;
-        glbModelUrl: string;
-        fileSizeMb: number;
+        jobId: string;
+        message: string;
     }>;
     processTileset(id: string, user: any): Promise<{
         status: string;
-        tilesetUrl: string;
+        jobId: string;
+        message: string;
     }>;
     processPanoramas(id: string, user: any): Promise<{
         status: string;
-        filesCount: number;
-        scansProcessed: number;
+        jobId: string;
+        message: string;
+    }>;
+    getProcessingStatus(id: string): Promise<{
+        id: string;
+        glbModelUrl: string;
+        scansJsonUrl: string;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string;
     }>;
 }

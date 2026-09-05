@@ -9,12 +9,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppModule = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
+const bullmq_1 = require("@nestjs/bullmq");
 const prisma_module_1 = require("./modules/prisma/prisma.module");
 const auth_module_1 = require("./modules/auth/auth.module");
 const enterprises_module_1 = require("./modules/enterprises/enterprises.module");
 const projects_module_1 = require("./modules/projects/projects.module");
 const inspections_module_1 = require("./modules/inspections/inspections.module");
 const storage_module_1 = require("./modules/storage/storage.module");
+const queues_module_1 = require("./modules/queues/queues.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -25,11 +27,22 @@ exports.AppModule = AppModule = __decorate([
                 isGlobal: true,
                 envFilePath: '.env',
             }),
+            bullmq_1.BullModule.forRootAsync({
+                imports: [config_1.ConfigModule],
+                inject: [config_1.ConfigService],
+                useFactory: (configService) => ({
+                    connection: {
+                        host: configService.get('REDIS_HOST', 'localhost'),
+                        port: Number(configService.get('REDIS_PORT', 6379)),
+                    },
+                }),
+            }),
             prisma_module_1.PrismaModule,
             auth_module_1.AuthModule,
             enterprises_module_1.EnterprisesModule,
             projects_module_1.ProjectsModule,
             storage_module_1.StorageModule,
+            queues_module_1.QueuesModule,
             inspections_module_1.InspectionsModule,
         ],
     })

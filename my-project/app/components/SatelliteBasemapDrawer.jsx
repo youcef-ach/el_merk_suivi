@@ -101,7 +101,7 @@ export default function SatelliteBasemapDrawer({
             {Object.entries(MAP_PROVIDERS).map(([key, provider]) => (
               <button
                 key={key}
-                onClick={() => onChangeBasemapProvider(key)}
+                onClick={() => onChangeBasemapProvider?.(key)}
                 className={`engine-ortho-mode-btn ${basemapProvider === key ? 'active' : ''}`}
                 style={basemapProvider === key ? { background: 'rgba(16, 185, 129, 0.2)', borderColor: 'rgba(16, 185, 129, 0.5)', color: '#34d399' } : {}}
               >
@@ -131,7 +131,7 @@ export default function SatelliteBasemapDrawer({
             max="1.0"
             step="0.02"
             value={basemapOpacity}
-            onChange={(e) => onChangeBasemapOpacity(parseFloat(e.target.value))}
+            onChange={(e) => onChangeBasemapOpacity?.(parseFloat(e.target.value))}
             style={{ width: '100%', accentColor: '#10b981', cursor: 'pointer' }}
           />
         </div>
@@ -175,7 +175,7 @@ export default function SatelliteBasemapDrawer({
             max="5.0"
             step="0.05"
             value={basemapElevation}
-            onChange={(e) => onChangeBasemapElevation(parseFloat(e.target.value))}
+            onChange={(e) => onChangeBasemapElevation?.(parseFloat(e.target.value))}
             style={{ width: '100%', accentColor: '#fbbf24', cursor: 'pointer' }}
           />
         </div>
@@ -245,8 +245,8 @@ export default function SatelliteBasemapDrawer({
               <button
                 key={preset.zoom}
                 onClick={() => {
-                  onChangeBasemapZoom(preset.zoom);
-                  onChangeBasemapRadius(preset.radius);
+                  onChangeBasemapZoom?.(preset.zoom);
+                  onChangeBasemapRadius?.(preset.radius);
                 }}
                 className={`engine-ortho-mode-btn ${basemapZoom === preset.zoom ? 'active' : ''}`}
                 style={{

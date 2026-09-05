@@ -139,24 +139,37 @@ export const useThreeScene = (preserveTextures = [], isZUp = false) => {
       scene.add(sunLight);
     }
 
-    // 5. OrbitControls
+    // 5. OrbitControls with Terrain-Aware Panning & Multi-Button Support
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.screenSpacePanning = true;
-    controls.rotateSpeed = 1.0;
-    controls.panSpeed = 1.0;
-    controls.zoomSpeed = 1.2;
+    controls.dampingFactor = 0.08;
+    controls.rotateSpeed = 0.85;
+    controls.panSpeed = 1.35;
+    controls.zoomSpeed = 1.3;
     controls.enableKeys = false;
     controls.keys = { LEFT: '', UP: '', RIGHT: '', BOTTOM: '' };
+
+    // Support both Right-Click and Middle-Click (wheel click) for panning
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT: THREE.MOUSE.PAN
+    };
+    controls.touches = {
+      ONE: THREE.TOUCH.ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN
+    };
     
     if (isZUp) {
+      controls.screenSpacePanning = true;
       controls.maxPolarAngle = Math.PI - 0.01;
       controls.minDistance = 0.2;
       controls.maxDistance = 500;
       controls.target.set(0, 0, 0);
     } else {
-      controls.maxPolarAngle = Math.PI / 2 - 0.01;
+      // Drone Survey GIS Mode: Panning moves along horizontal ground plane (XZ), NEVER lifting camera in Y!
+      controls.screenSpacePanning = false;
+      controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevent camera dipping below horizon
       controls.minDistance = 2.0;
       controls.maxDistance = 2500;
       controls.target.set(0, 4, 0);

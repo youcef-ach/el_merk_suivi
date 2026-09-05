@@ -26,9 +26,13 @@ const public_decorator_1 = require("../../decorators/public.decorator");
 const get_user_decorator_1 = require("../../decorators/get-user.decorator");
 const roles_decorator_1 = require("../../decorators/roles.decorator");
 const client_1 = require("@prisma/client");
+const bullmq_1 = require("@nestjs/bullmq");
+const bullmq_2 = require("bullmq");
+const queue_constants_1 = require("../queues/queue.constants");
 let InspectionsController = class InspectionsController {
-    constructor(inspectionsService) {
+    constructor(inspectionsService, assetQueue) {
         this.inspectionsService = inspectionsService;
+        this.assetQueue = assetQueue;
     }
     create(projectId, createInspectionDto, user) {
         return this.inspectionsService.create(projectId, createInspectionDto, user.id);
@@ -67,13 +71,48 @@ let InspectionsController = class InspectionsController {
         return this.inspectionsService.processAndUploadScans(id, body.mpData, body.rcData, user.enterpriseId, user.role);
     }
     async processGlb(id, fileName, compressionMode, user) {
-        return this.inspectionsService.processGlb(id, user.enterpriseId, user.role, fileName, compressionMode);
+        await this.inspectionsService.markAsQueued(id, 'Queued 3D model processing in background worker...');
+        const job = await this.assetQueue.add(queue_constants_1.JOB_PROCESS_GLB, {
+            inspectionId: id,
+            userEnterpriseId: user.enterpriseId,
+            role: user.role,
+            fileName,
+            compressionMode,
+        });
+        return {
+            status: 'QUEUED',
+            jobId: job.id,
+            message: '3D model processing queued in background',
+        };
     }
     async processTileset(id, user) {
-        return this.inspectionsService.processTileset(id, user.enterpriseId, user.role);
+        await this.inspectionsService.markAsQueued(id, 'Queued 3D tileset processing in background worker...');
+        const job = await this.assetQueue.add(queue_constants_1.JOB_PROCESS_TILESET, {
+            inspectionId: id,
+            userEnterpriseId: user.enterpriseId,
+            role: user.role,
+        });
+        return {
+            status: 'QUEUED',
+            jobId: job.id,
+            message: 'Tileset processing queued in background',
+        };
     }
     async processPanoramas(id, user) {
-        return this.inspectionsService.processPanoramas(id, user.enterpriseId, user.role);
+        await this.inspectionsService.markAsQueued(id, 'Queued panorama multi-LOD processing in background worker...');
+        const job = await this.assetQueue.add(queue_constants_1.JOB_PROCESS_PANORAMAS, {
+            inspectionId: id,
+            userEnterpriseId: user.enterpriseId,
+            role: user.role,
+        });
+        return {
+            status: 'QUEUED',
+            jobId: job.id,
+            message: 'Panorama multi-LOD processing queued in background',
+        };
+    }
+    async getProcessingStatus(id) {
+        return this.inspectionsService.getProcessingStatus(id);
     }
 };
 exports.InspectionsController = InspectionsController;
@@ -211,9 +250,19 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], InspectionsController.prototype, "processPanoramas", null);
+__decorate([
+    (0, public_decorator_1.IsPublic)(),
+    (0, common_1.Get)(':id/processing-status'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], InspectionsController.prototype, "getProcessingStatus", null);
 exports.InspectionsController = InspectionsController = __decorate([
     (0, common_1.Controller)('projects/:projectId/inspections'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, roles_guard_1.RolesGuard),
-    __metadata("design:paramtypes", [inspections_service_1.InspectionsService])
+    __param(1, (0, bullmq_1.InjectQueue)(queue_constants_1.ASSET_PROCESSING_QUEUE)),
+    __metadata("design:paramtypes", [inspections_service_1.InspectionsService,
+        bullmq_2.Queue])
 ], InspectionsController);
 //# sourceMappingURL=inspections.controller.js.map

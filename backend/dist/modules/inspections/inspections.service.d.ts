@@ -31,6 +31,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -63,6 +67,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -233,6 +241,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -402,6 +414,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -431,6 +447,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -493,6 +513,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -522,6 +546,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -551,6 +579,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -850,6 +882,10 @@ export declare class InspectionsService {
         thumbnailUrl: string | null;
         videoUrl: string | null;
         visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
         surveyDate: Date | null;
         droneModel: string | null;
         gsd: number | null;
@@ -963,18 +999,90 @@ export declare class InspectionsService {
     processTileset(id: string, userEnterpriseId: string, role: Role): Promise<{
         status: string;
         tilesetUrl: string;
+        datum: any;
+    }>;
+    extractLowestVertexFromB3DM(b3dmBuf: Buffer, orientation?: string): {
+        minY: number;
+        minVert: {
+            x: number;
+            y: number;
+            z: number;
+        };
+    } | null;
+    computeTilesetDatum(json: any, orientation?: string, rootJsonDir?: string): Promise<{
+        groundOffset: number;
+        groundAsl: number;
+        meshSnapOffset: number;
+        minYRaw: number;
+        maxYRaw: number;
+        lowestPoint: {
+            x: number;
+            y: number;
+            z: number;
+        };
+        elevationRange: {
+            min: number;
+            max: number;
+        };
+        gps: {
+            lat: number;
+            lon: number;
+        };
+        elevationSource: string;
     }>;
     private checkGlbHasKtx2;
     private getGlbVertexCount;
     private getGlbTextureCount;
-    processGlb(id: string, userEnterpriseId: string, role: Role, targetFileName?: string, compressionMode?: 'uastc' | 'etc1s'): Promise<{
+    processGlb(id: string, userEnterpriseId: string, role: Role, targetFileName?: string, compressionMode?: 'uastc' | 'etc1s', onProgress?: (progress: number, stage: string) => Promise<void>): Promise<{
         status: string;
         glbModelUrl: string;
         fileSizeMb: number;
     }>;
-    processPanoramas(id: string, userEnterpriseId: string, role: Role): Promise<{
+    processPanoramas(id: string, userEnterpriseId: string, role: Role, onProgress?: (progress: number, stage: string) => Promise<void>): Promise<{
         status: string;
         filesCount: number;
         scansProcessed: number;
+    }>;
+    getProcessingStatus(id: string): Promise<{
+        id: string;
+        glbModelUrl: string;
+        scansJsonUrl: string;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string;
+    }>;
+    markAsQueued(id: string, stage?: string): Promise<{
+        id: string;
+        type: import(".prisma/client").$Enums.InspectionType;
+        title: string;
+        description: string | null;
+        glbModelUrl: string | null;
+        scansJsonUrl: string | null;
+        rawScansJsonUrl: string | null;
+        rawCsvJsonUrl: string | null;
+        thumbnailUrl: string | null;
+        videoUrl: string | null;
+        visibility: import(".prisma/client").$Enums.Visibility;
+        processingStatus: string;
+        processingProgress: number;
+        processingStage: string;
+        processingError: string | null;
+        surveyDate: Date | null;
+        droneModel: string | null;
+        gsd: number | null;
+        flightAltitude: number | null;
+        coordinateSystem: string | null;
+        tilesetUrl: string | null;
+        orthoUrl: string | null;
+        orthoBounds: import("@prisma/client/runtime/library").JsonValue | null;
+        dsmUrl: string | null;
+        dtmUrl: string | null;
+        dsmMinElevation: number | null;
+        dsmMaxElevation: number | null;
+        contoursUrl: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        projectId: string;
     }>;
 }

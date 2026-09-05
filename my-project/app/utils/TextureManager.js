@@ -43,6 +43,42 @@ class TextureManager {
     return this.textureCache.get(cleanId);
   }
 
+  setScansMetadata(scans) {
+    this.scansMetadata = scans || {};
+  }
+
+  hasKTX2(scanId) {
+    const cleanId = String(scanId).replace(/^scan_/, '');
+    const scan = this.scansMetadata?.[`scan_${cleanId}`] || this.scansMetadata?.[cleanId];
+    if (scan) {
+      const raw = scan.raw || scan;
+      return Boolean(raw.ktx2_1024 || raw.ktx2_512 || raw.ktx2_256);
+    }
+    return false;
+  }
+
+  /**
+   * Check if a specific KTX2 resolution is already in memory cache
+   */
+  getCachedKTX2(scanId, size = '1024') {
+    const cleanId = String(scanId).replace(/^scan_/, '');
+    const cacheObj = this.getTextureCacheObj(cleanId);
+    return cacheObj[size] || null;
+  }
+
+  /**
+   * Return highest quality cached texture currently in memory (1024, native cubemap, 512, or 256)
+   */
+  getBestCachedTexture(scanId) {
+    const cleanId = String(scanId).replace(/^scan_/, '');
+    const cacheObj = this.getTextureCacheObj(cleanId);
+    if (cacheObj['1024']) return { texture: cacheObj['1024'], lod: '1024' };
+    if (this.cubeTextureCache.has(cleanId)) return { texture: this.cubeTextureCache.get(cleanId), lod: 'native' };
+    if (cacheObj['512']) return { texture: cacheObj['512'], lod: '512' };
+    if (cacheObj['256']) return { texture: cacheObj['256'], lod: '256' };
+    return null;
+  }
+
   /**
    * Load a KTX2 texture of specified size for the given scanId.
    */
@@ -57,34 +93,33 @@ class TextureManager {
       return cacheObj[size];
     }
 
-    // Try primary path first, with fallback to local public path
+    if (!this.inFlightKTX2) this.inFlightKTX2 = new Map();
+    const key = `${cleanId}_${size}`;
+    if (this.inFlightKTX2.has(key)) {
+      return this.inFlightKTX2.get(key);
+    }
+
     const url = `${this.baseKtx2Path}/scan_${cleanId}_${size}.ktx2`;
     
-    return new Promise((resolve, reject) => {
+    const p = new Promise((resolve, reject) => {
       this.ktx2Loader.load(
         url,
         (texture) => {
           texture.colorSpace = THREE.SRGBColorSpace;
           cacheObj[size] = texture;
+          this.inFlightKTX2?.delete(key);
           resolve(texture);
         },
         undefined,
-        () => {
-          // Fallback to relative local /ktx2
-          const localUrl = `/ktx2/scan_${cleanId}_${size}.ktx2`;
-          this.ktx2Loader.load(
-            localUrl,
-            (localTex) => {
-              localTex.colorSpace = THREE.SRGBColorSpace;
-              cacheObj[size] = localTex;
-              resolve(localTex);
-            },
-            undefined,
-            (err2) => reject(err2)
-          );
+        (err) => {
+          this.inFlightKTX2?.delete(key);
+          reject(err);
         }
       );
     });
+
+    this.inFlightKTX2.set(key, p);
+    return p;
   }
 
   /**
@@ -241,7 +276,9 @@ class TextureManager {
   async preloadBase(scanIds) {
     for (const id of scanIds) {
       this.loadEquirect(id).catch(() => {});
-      this.loadKTX2(id, '1024').catch(() => this.loadKTX2(id, '256').catch(() => {}));
+      if (this.hasKTX2(id)) {
+        this.loadKTX2(id, '1024').catch(() => this.loadKTX2(id, '256').catch(() => {}));
+      }
     }
   }
 

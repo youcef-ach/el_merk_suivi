@@ -162,7 +162,7 @@ function NewInspectionContent() {
     }
   };
 
-  const uploadFileToMinio = async (inspectionId, file, overrideFileName = null) => {
+  const uploadFileToMinio = async (inspectionId, file, overrideFileName = null, onProgress = null) => {
     const token = localStorage.getItem('access_token');
     const fileName = overrideFileName || file.name;
 
@@ -178,12 +178,26 @@ function NewInspectionContent() {
     if (!presignRes.ok) throw new Error("Failed to secure presigned upload link");
     const { presignedUrl } = await presignRes.json();
 
-    const putRes = await fetch(presignedUrl, {
-      method: 'PUT',
-      body: file
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', presignedUrl, true);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(e.loaded, e.total);
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(new Error(`Failed to upload ${fileName} (HTTP ${xhr.status})`));
+        }
+      };
+      xhr.onerror = () => reject(new Error(`Network error uploading ${fileName}. Check internet connection.`));
+      xhr.ontimeout = () => reject(new Error(`Upload timed out for ${fileName}`));
+      xhr.timeout = 1800000; // 30 minutes for large multi-hundred-megabyte files
+      xhr.send(file);
     });
-
-    if (!putRes.ok) throw new Error(`Failed to upload ${fileName}`);
   };
 
   const executeUploadPhase = async () => {
@@ -206,169 +220,188 @@ function NewInspectionContent() {
         thumbnailFile
       ].filter(Boolean);
 
-      let totalFiles = singleFiles.length;
-      let completed = 0;
-
-      if (totalFiles === 0) {
+      if (singleFiles.length === 0) {
         navigate(`/engine/${inspectionId}`);
         return;
       }
 
-      const incrementProgress = (status) => {
-        completed++;
-        setUploadProgress(Math.round((completed / totalFiles) * 100));
-        if (status) setUploadStatusText(status);
-      };
+      // Helper to format bytes
+      const fmtMb = (bytes) => (bytes / (1024 * 1024)).toFixed(1);
 
-      const tasks = [];
-
-      // 1. 3D Tileset (zip or single file)
-      if (tilesetFile) {
-        tasks.push((async () => {
-          if (tilesetFile.name.endsWith('.zip')) {
-            setUploadStatusText('Uploading 3D Tileset bundle (.zip)...');
-            await uploadFileToMinio(inspectionId, tilesetFile, 'tileset.zip');
-            setUploadStatusText('Extracting 3D Tileset LODs on server...');
-            await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-tileset`, {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-          } else {
-            setUploadStatusText('Uploading 3D Tileset...');
-            await uploadFileToMinio(inspectionId, tilesetFile, `tileset_${tilesetFile.name}`);
-            await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ tilesetUrl: `inspections/${inspectionId}/tileset_${tilesetFile.name}` })
-            });
-          }
-          incrementProgress('3D Tileset ready');
-        })());
+      // ── 1. Thumbnail (Fast) ──
+      if (thumbnailFile) {
+        setUploadStatusText('Uploading preview thumbnail...');
+        await uploadFileToMinio(inspectionId, thumbnailFile, `thumb_${thumbnailFile.name}`);
+        await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ thumbnailUrl: `inspections/${inspectionId}/thumb_${thumbnailFile.name}` })
+        });
       }
 
-      // 2. Orthomosaic
-      if (orthoFile) {
-        tasks.push((async () => {
-          setUploadStatusText('Uploading Orthomosaic...');
-          await uploadFileToMinio(inspectionId, orthoFile, `ortho_${orthoFile.name}`);
-          await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ orthoUrl: `inspections/${inspectionId}/ortho_${orthoFile.name}` })
-          });
-          incrementProgress('Orthomosaic ready');
-        })());
+      // ── 2. Telemetry Coordinates (scans.json) ──
+      if (jsonFile && rcJsonFile) {
+        setUploadStatusText('Aligning Matterport and scanner coordinates...');
+        const mpText = await jsonFile.text();
+        const rcText = await rcJsonFile.text();
+        const mpData = parseCsvOrJson(mpText);
+        const rcData = parseCsvOrJson(rcText);
+
+        const processRes = await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ mpData, rcData })
+        });
+        if (!processRes.ok) {
+          const errJson = await processRes.json().catch(() => ({}));
+          throw new Error(errJson.message || 'Failed to align scan coordinates');
+        }
+      } else if (jsonFile) {
+        setUploadStatusText('Uploading scan coordinates (scans.json)...');
+        await uploadFileToMinio(inspectionId, jsonFile, 'scans.json');
       }
 
-      // 3. DSM
-      if (dsmFile) {
-        tasks.push((async () => {
-          setUploadStatusText('Uploading DSM elevation raster...');
-          await uploadFileToMinio(inspectionId, dsmFile, `dsm_${dsmFile.name}`);
-          await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ dsmUrl: `inspections/${inspectionId}/dsm_${dsmFile.name}` })
-          });
-          incrementProgress('DSM ready');
-        })());
-      }
-
-      // 4. RealityScan Report
+      // ── 3. Survey Documents & Ortho/DSM ──
       if (reportFile) {
-        tasks.push((async () => {
-          setUploadStatusText('Attaching Survey Report...');
-          await uploadFileToMinio(inspectionId, reportFile, `reports/${reportFile.name}`);
-          await fetch(`${API_URL}/inspections/${inspectionId}/survey/reports`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({
-              title: `Survey Report (${reportFile.name})`,
-              reportType: 'ALIGNMENT',
-              fileUrl: `${MINIO_URL}/virtual-inspections/${inspectionId}/reports/${reportFile.name}`
-            })
-          });
-          incrementProgress('Report attached');
-        })());
+        setUploadStatusText('Attaching Survey Report...');
+        await uploadFileToMinio(inspectionId, reportFile, `reports/${reportFile.name}`);
+        await fetch(`${API_URL}/inspections/${inspectionId}/survey/reports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            title: `Survey Report (${reportFile.name})`,
+            reportType: 'ALIGNMENT',
+            fileUrl: `${MINIO_URL}/virtual-inspections/${inspectionId}/reports/${reportFile.name}`
+          })
+        });
       }
 
-      // 5. 3D Architecture Model (GLB / OBJ / ZIP)
+      if (orthoFile) {
+        setUploadStatusText('Uploading Orthomosaic raster...');
+        await uploadFileToMinio(inspectionId, orthoFile, `ortho_${orthoFile.name}`);
+        await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ orthoUrl: `inspections/${inspectionId}/ortho_${orthoFile.name}` })
+        });
+      }
+
+      if (dsmFile) {
+        setUploadStatusText('Uploading DSM elevation raster...');
+        await uploadFileToMinio(inspectionId, dsmFile, `dsm_${dsmFile.name}`);
+        await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ dsmUrl: `inspections/${inspectionId}/dsm_${dsmFile.name}` })
+        });
+      }
+
+      // ── 4. 3D Model (OBJ / GLB / ZIP) Sequential with byte progress ──
       if (glbFile) {
-        tasks.push((async () => {
-          const isZip = glbFile.name.endsWith('.zip');
-          const isObj = glbFile.name.endsWith('.obj');
-          const isGltf = glbFile.name.endsWith('.gltf');
-          const targetName = isZip ? 'model.zip' : (isObj ? 'model.obj' : (isGltf ? 'model.gltf' : 'model.glb'));
+        const isZip = glbFile.name.endsWith('.zip');
+        const isObj = glbFile.name.endsWith('.obj');
+        const isGltf = glbFile.name.endsWith('.gltf');
+        const targetName = isZip ? 'model.zip' : (isObj ? 'model.obj' : (isGltf ? 'model.gltf' : 'model.glb'));
 
-          setUploadStatusText(`Uploading 3D model (${glbFile.name})...`);
-          await uploadFileToMinio(inspectionId, glbFile, targetName);
+        setUploadStatusText(`Uploading 3D model (${fmtMb(glbFile.size)} MB)...`);
+        await uploadFileToMinio(inspectionId, glbFile, targetName, (loaded, total) => {
+          const pct = Math.round((loaded / total) * 100);
+          setUploadProgress(pct);
+          setUploadStatusText(`Uploading 3D Model: ${fmtMb(loaded)} MB / ${fmtMb(total)} MB (${pct}%)...`);
+        });
 
-          setUploadStatusText(`Converting OBJ / Applying Draco & KTX2 (${compressionMode.toUpperCase()}) on server...`);
-          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ fileName: targetName, compressionMode })
-          });
-          incrementProgress(`3D model optimized (${compressionMode.toUpperCase()}) & ready`);
-        })());
+        setUploadStatusText('Queuing 3D model decimation and KTX2 compression in background...');
+        await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ fileName: targetName, compressionMode })
+        });
       }
 
-      // 6. 360° Panoramas & Cubemaps (panoramas.zip)
+      // ── 5. 360° Panoramas & Cubemaps (panoramas.zip) Sequential with byte progress ──
       if (panoramasZipFile) {
-        tasks.push((async () => {
-          setUploadStatusText('Uploading 360° Panoramas & Cubemaps package...');
-          await uploadFileToMinio(inspectionId, panoramasZipFile, 'panoramas.zip');
-          setUploadStatusText('Unpacking 360° cubemaps & transition panoramas on server...');
-          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-panoramas`, {
+        setUploadStatusText(`Uploading 360° Panoramas (${fmtMb(panoramasZipFile.size)} MB)...`);
+        await uploadFileToMinio(inspectionId, panoramasZipFile, 'panoramas.zip', (loaded, total) => {
+          const pct = Math.round((loaded / total) * 100);
+          setUploadProgress(pct);
+          setUploadStatusText(`Uploading 360° Panoramas: ${fmtMb(loaded)} MB / ${fmtMb(total)} MB (${pct}%)...`);
+        });
+
+        setUploadStatusText('Queuing multi-LOD cubemaps & KTX2 generation in background...');
+        await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-panoramas`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      }
+
+      // ── 6. 3D Tileset (if present) ──
+      if (tilesetFile) {
+        setUploadStatusText(`Uploading 3D Tileset (${fmtMb(tilesetFile.size)} MB)...`);
+        if (tilesetFile.name.endsWith('.zip')) {
+          await uploadFileToMinio(inspectionId, tilesetFile, 'tileset.zip', (loaded, total) => {
+            const pct = Math.round((loaded / total) * 100);
+            setUploadProgress(pct);
+            setUploadStatusText(`Uploading 3D Tileset: ${fmtMb(loaded)} MB / ${fmtMb(total)} MB (${pct}%)...`);
+          });
+          setUploadStatusText('Extracting 3D Tileset LODs on server...');
+          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-tileset`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
           });
-          incrementProgress('360° Panoramas ready');
-        })());
-      }
-
-      // 6. 360 Scan Telemetry Coordinates JSON
-      if (jsonFile && rcJsonFile) {
-        tasks.push((async () => {
-          setUploadStatusText('Aligning Matterport and software scan coordinates...');
-          const mpText = await jsonFile.text();
-          const rcText = await rcJsonFile.text();
-          const mpData = parseCsvOrJson(mpText);
-          const rcData = parseCsvOrJson(rcText);
-
-          const processRes = await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-scans`, {
+        } else {
+          await uploadFileToMinio(inspectionId, tilesetFile, `tileset_${tilesetFile.name}`);
+          await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ mpData, rcData })
+            body: JSON.stringify({ tilesetUrl: `inspections/${inspectionId}/tileset_${tilesetFile.name}` })
           });
+        }
+      }
 
-          if (!processRes.ok) {
-            const errJson = await processRes.json().catch(() => ({}));
-            throw new Error(errJson.message || 'Failed to align scan coordinates');
+      // If background processing jobs were queued, poll processing-status until complete
+      const hasBackgroundJobs = Boolean(glbFile || panoramasZipFile || tilesetFile);
+      if (hasBackgroundJobs) {
+        setUploadStatusText('Assets uploaded. Initializing background optimization queue...');
+        let finished = false;
+        const startTime = Date.now();
+
+        while (!finished) {
+          await new Promise(r => setTimeout(r, 1500));
+          try {
+            const statusRes = await fetch(`${API_URL}/inspections/${inspectionId}/processing-status`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              if (statusData.processingStatus === 'PROCESSING' || statusData.processingStatus === 'QUEUED') {
+                if (statusData.processingStage) {
+                  setUploadStatusText(statusData.processingStage);
+                }
+                if (typeof statusData.processingProgress === 'number' && statusData.processingProgress > 0) {
+                  setUploadProgress(statusData.processingProgress);
+                }
+              } else if (statusData.processingStatus === 'COMPLETED') {
+                setUploadProgress(100);
+                setUploadStatusText('3D Digital Twin optimized successfully! Opening engine...');
+                finished = true;
+              } else if (statusData.processingStatus === 'FAILED') {
+                throw new Error(statusData.processingError || 'Background asset optimization failed on server');
+              }
+            }
+          } catch (pollErr) {
+            console.warn('Status poll warning:', pollErr);
+            if (pollErr.message && pollErr.message.includes('Background asset optimization failed')) {
+              throw pollErr;
+            }
+            if (Date.now() - startTime > 15 * 60 * 1000) {
+              throw new Error('Processing timed out after 15 minutes');
+            }
           }
-          incrementProgress('360 Scans aligned to new model');
-        })());
-      } else if (jsonFile) {
-        tasks.push(
-          uploadFileToMinio(inspectionId, jsonFile, 'scans.json').then(() => incrementProgress('360 Scans uploaded'))
-        );
+        }
+      } else {
+        setUploadStatusText('Ingestion Complete! Redirecting to Digital Twin Engine...');
       }
 
-      // 7. Thumbnail
-      if (thumbnailFile) {
-        tasks.push((async () => {
-          await uploadFileToMinio(inspectionId, thumbnailFile, `thumb_${thumbnailFile.name}`);
-          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ thumbnailUrl: `inspections/${inspectionId}/thumb_${thumbnailFile.name}` })
-          });
-          incrementProgress('Thumbnail ready');
-        })());
-      }
-
-      await Promise.all(tasks);
-      setUploadStatusText('Ingestion Complete! Redirecting to Digital Twin Engine...');
       setTimeout(() => {
         navigate(`/engine/${inspectionId}`);
       }, 1200);

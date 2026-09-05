@@ -17,6 +17,7 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const zlib = require("zlib");
+const THREE = require("three");
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 const client_1 = require("@prisma/client");
@@ -799,13 +800,56 @@ let InspectionsService = class InspectionsService {
                 }
             };
             await uploadRecursive(rootJsonDir);
+            let datum = null;
+            try {
+                const rootJsonFullPath = path.join(rootJsonDir, rootJsonName);
+                if (fs.existsSync(rootJsonFullPath)) {
+                    const raw = fs.readFileSync(rootJsonFullPath, 'utf-8');
+                    const parsed = JSON.parse(raw);
+                    datum = await this.computeTilesetDatum(parsed, 'rotX_neg90', rootJsonDir);
+                    if (datum) {
+                        console.log(`[processTileset] Option A Active: groundOffset=${datum.groundOffset}m ASL (source: ${datum.elevationSource || 'LOCAL'}), meshSnapOffset=${datum.meshSnapOffset}m, lowestPoint=${datum.lowestPoint ? `(${datum.lowestPoint.x}, ${datum.lowestPoint.y}, ${datum.lowestPoint.z})` : 'pending client mesh'}`);
+                    }
+                }
+            }
+            catch (datumErr) {
+                console.warn(`[processTileset] Could not compute datum from tileset JSON:`, datumErr.message);
+            }
             const relativeTilesetUrl = `inspections/${id}/tileset/${rootJsonName}`;
+            const existingMeta = inspection.orthoBounds || {};
+            const updatedBounds = {
+                ...existingMeta,
+                ...(datum ? {
+                    groundOffset: datum.groundOffset,
+                    groundAsl: datum.groundAsl,
+                    meshSnapOffset: datum.meshSnapOffset,
+                    lowestPoint: datum.lowestPoint,
+                    elevationRange: datum.elevationRange,
+                    minYRaw: datum.minYRaw,
+                    maxYRaw: datum.maxYRaw,
+                    elevationSource: datum.elevationSource,
+                } : {}),
+            };
             await this.prisma.inspection.update({
                 where: { id },
-                data: { tilesetUrl: relativeTilesetUrl },
+                data: {
+                    tilesetUrl: relativeTilesetUrl,
+                    orthoBounds: updatedBounds,
+                    ...(datum?.gps ? {
+                        latitude: datum.gps.lat,
+                        longitude: datum.gps.lon,
+                    } : {}),
+                    ...(datum?.groundAsl ? {
+                        altitude: datum.groundAsl,
+                    } : {}),
+                    ...(datum ? {
+                        dsmMinElevation: datum.elevationRange.min,
+                        dsmMaxElevation: datum.elevationRange.max,
+                    } : {}),
+                },
             });
             console.log(`[processTileset] 3D Tileset unpacked successfully. tilesetUrl = ${relativeTilesetUrl}`);
-            return { status: 'SUCCESS', tilesetUrl: relativeTilesetUrl };
+            return { status: 'SUCCESS', tilesetUrl: relativeTilesetUrl, datum };
         }
         catch (err) {
             console.error(`[processTileset] Error:`, err);
@@ -814,6 +858,208 @@ let InspectionsService = class InspectionsService {
         finally {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }
+    }
+    extractLowestVertexFromB3DM(b3dmBuf, orientation = 'rotX_neg90') {
+        try {
+            const featureTableJSONByteLength = b3dmBuf.readUInt32LE(12);
+            const featureTableBinaryByteLength = b3dmBuf.readUInt32LE(16);
+            const batchTableJSONByteLength = b3dmBuf.readUInt32LE(20);
+            const batchTableBinaryByteLength = b3dmBuf.readUInt32LE(24);
+            const glbOffset = 28 + featureTableJSONByteLength + featureTableBinaryByteLength + batchTableJSONByteLength + batchTableBinaryByteLength;
+            const glbBuf = b3dmBuf.subarray(glbOffset);
+            const chunk0Len = glbBuf.readUInt32LE(12);
+            const jsonStr = glbBuf.toString('utf-8', 20, 20 + chunk0Len);
+            const gltf = JSON.parse(jsonStr);
+            const chunk1Offset = 20 + chunk0Len;
+            const chunk1Len = glbBuf.readUInt32LE(chunk1Offset);
+            const binBuf = glbBuf.subarray(chunk1Offset + 8, chunk1Offset + 8 + chunk1Len);
+            const posAccessor = gltf.accessors?.find((a) => a.type === 'VEC3') || gltf.accessors?.[0];
+            if (!posAccessor)
+                return null;
+            const bufferView = gltf.bufferViews[posAccessor.bufferView];
+            const byteOffset = (bufferView.byteOffset || 0) + (posAccessor.byteOffset || 0);
+            const count = posAccessor.count;
+            const f32 = new Float32Array(binBuf.buffer, binBuf.byteOffset + byteOffset, count * 3);
+            const upRot = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+            let rotMat = new THREE.Matrix4().identity();
+            if (orientation === 'rotX_neg90')
+                rotMat.makeRotationX(-Math.PI / 2);
+            else if (orientation === 'rotX_90')
+                rotMat.makeRotationX(Math.PI / 2);
+            const totalMat = new THREE.Matrix4().multiplyMatrices(rotMat, upRot);
+            let minY = Infinity;
+            let minVert = null;
+            for (let i = 0; i < count; i++) {
+                const v = new THREE.Vector3(f32[i * 3], f32[i * 3 + 1], f32[i * 3 + 2]);
+                v.applyMatrix4(totalMat);
+                if (v.y < minY) {
+                    minY = v.y;
+                    minVert = v.clone();
+                }
+            }
+            if (!minVert || !isFinite(minY))
+                return null;
+            return {
+                minY,
+                minVert: {
+                    x: Number(minVert.x.toFixed(3)),
+                    y: 0.0,
+                    z: Number(minVert.z.toFixed(3))
+                }
+            };
+        }
+        catch (e) {
+            return null;
+        }
+    }
+    async computeTilesetDatum(json, orientation = 'rotX_neg90', rootJsonDir) {
+        if (!json || !json.root)
+            return null;
+        const root = json.root;
+        const rawTransform = root.transform || [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ];
+        let gps = null;
+        if (rawTransform && rawTransform.length === 16) {
+            const x = rawTransform[12];
+            const y = rawTransform[13];
+            const z = rawTransform[14];
+            const mag = Math.hypot(x, y, z);
+            if (mag > 6000000 && mag < 6500000) {
+                const a = 6378137.0;
+                const b = 6356752.314245;
+                const e2 = 1 - (b * b) / (a * a);
+                const ep2 = (a * a) / (b * b) - 1;
+                const p = Math.hypot(x, y);
+                const theta = Math.atan2(z * a, p * b);
+                const lon = (Math.atan2(y, x) * 180) / Math.PI;
+                const lat = (Math.atan2(z + ep2 * b * Math.pow(Math.sin(theta), 3), p - e2 * a * Math.pow(Math.cos(theta), 3)) * 180) / Math.PI;
+                gps = { lat: Number(lat.toFixed(6)), lon: Number(lon.toFixed(6)) };
+            }
+        }
+        if (!gps && root.boundingVolume?.region && Array.isArray(root.boundingVolume.region)) {
+            const [west, south, east, north] = root.boundingVolume.region;
+            gps = {
+                lat: Number((((south + north) * 0.5 * 180) / Math.PI).toFixed(6)),
+                lon: Number((((west + east) * 0.5 * 180) / Math.PI).toFixed(6)),
+            };
+        }
+        let groundAsl = null;
+        if (gps) {
+            try {
+                const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${gps.lat}&longitude=${gps.lon}`, {
+                    signal: AbortSignal.timeout(5000)
+                });
+                if (res.ok) {
+                    const demData = await res.json();
+                    if (Array.isArray(demData?.elevation) && typeof demData.elevation[0] === 'number') {
+                        groundAsl = Number(demData.elevation[0].toFixed(2));
+                        console.log(`[computeTilesetDatum] Option A Active: Auto-detected Copernicus DEM Elevation at (${gps.lat}°, ${gps.lon}°): ${groundAsl}m ASL`);
+                    }
+                }
+            }
+            catch (demErr) {
+                console.warn(`[computeTilesetDatum] Satellite DEM elevation lookup notice:`, demErr.message);
+            }
+        }
+        const m4Root = new THREE.Matrix4().fromArray(rawTransform);
+        const invRoot = m4Root.clone().invert();
+        let rotMat = new THREE.Matrix4().identity();
+        if (orientation === 'rotX_neg90') {
+            rotMat.makeRotationX(-Math.PI / 2);
+        }
+        else if (orientation === 'rotX_90') {
+            rotMat.makeRotationX(Math.PI / 2);
+        }
+        const finalMat = new THREE.Matrix4().multiplyMatrices(rotMat, invRoot);
+        const box = root.boundingVolume?.box;
+        if (!box || box.length !== 12)
+            return null;
+        const center = new THREE.Vector3(box[0], box[1], box[2]);
+        const xAxis = new THREE.Vector3(box[3], box[4], box[5]);
+        const yAxis = new THREE.Vector3(box[6], box[7], box[8]);
+        const zAxis = new THREE.Vector3(box[9], box[10], box[11]);
+        let minY = Infinity;
+        let maxY = -Infinity;
+        for (const sx of [-1, 1]) {
+            for (const sy of [-1, 1]) {
+                for (const sz of [-1, 1]) {
+                    const pt = center.clone()
+                        .addScaledVector(xAxis, sx)
+                        .addScaledVector(yAxis, sy)
+                        .addScaledVector(zAxis, sz);
+                    pt.applyMatrix4(m4Root);
+                    pt.applyMatrix4(finalMat);
+                    if (pt.y < minY) {
+                        minY = pt.y;
+                    }
+                    if (pt.y > maxY) {
+                        maxY = pt.y;
+                    }
+                }
+            }
+        }
+        if (!isFinite(minY))
+            return null;
+        let trueLowestPoint = null;
+        if (rootJsonDir) {
+            try {
+                const contentUri = root.content?.uri || root.content?.url;
+                let b3dmPath = null;
+                if (contentUri) {
+                    const candidate = path.join(rootJsonDir, contentUri);
+                    if (fs.existsSync(candidate))
+                        b3dmPath = candidate;
+                }
+                if (!b3dmPath) {
+                    const findB3dm = (dir) => {
+                        const list = fs.readdirSync(dir, { withFileTypes: true });
+                        for (const item of list) {
+                            const full = path.join(dir, item.name);
+                            if (item.isFile() && item.name.endsWith('.b3dm'))
+                                return full;
+                            if (item.isDirectory()) {
+                                const sub = findB3dm(full);
+                                if (sub)
+                                    return sub;
+                            }
+                        }
+                        return null;
+                    };
+                    b3dmPath = findB3dm(rootJsonDir);
+                }
+                if (b3dmPath && fs.existsSync(b3dmPath)) {
+                    const b3dmBuf = fs.readFileSync(b3dmPath);
+                    const vertexRes = this.extractLowestVertexFromB3DM(b3dmBuf, orientation);
+                    if (vertexRes && vertexRes.minVert) {
+                        trueLowestPoint = vertexRes.minVert;
+                        console.log(`[processTileset] Found true mesh lowest surface vertex: (${trueLowestPoint.x}, 0.0, ${trueLowestPoint.z})`);
+                    }
+                }
+            }
+            catch (err) {
+                console.warn(`[processTileset] B3DM vertex scan notice:`, err.message);
+            }
+        }
+        const meshSnapOffset = -minY;
+        const finalGroundAsl = groundAsl ?? Number(meshSnapOffset.toFixed(3));
+        return {
+            groundOffset: finalGroundAsl,
+            groundAsl: finalGroundAsl,
+            meshSnapOffset: Number(meshSnapOffset.toFixed(3)),
+            minYRaw: Number(minY.toFixed(3)),
+            maxYRaw: Number(maxY.toFixed(3)),
+            lowestPoint: trueLowestPoint,
+            elevationRange: {
+                min: 0.0,
+                max: Number((maxY - minY).toFixed(3)),
+            },
+            gps,
+            elevationSource: groundAsl ? 'COPERNICUS_DEM_30M' : 'LOCAL_BBOX',
+        };
     }
     checkGlbHasKtx2(filePath) {
         try {
@@ -905,7 +1151,7 @@ let InspectionsService = class InspectionsService {
             return 1;
         }
     }
-    async processGlb(id, userEnterpriseId, role, targetFileName, compressionMode = 'uastc') {
+    async processGlb(id, userEnterpriseId, role, targetFileName, compressionMode = 'uastc', onProgress) {
         const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
         if (!inspection)
             throw new common_1.NotFoundException('Inspection not found');
@@ -926,6 +1172,8 @@ let InspectionsService = class InspectionsService {
             }
             const downloadedPath = path.join(tempDir, downloadedName);
             const s3Source = `inspections/${id}/${downloadedName}`;
+            if (onProgress)
+                await onProgress(15, `Downloading source model ${downloadedName}...`);
             await this.storageService.downloadFile(bucket, s3Source, downloadedPath);
             let sourceGlbPath;
             if (downloadedName.toLowerCase().endsWith('.zip')) {
@@ -977,6 +1225,8 @@ let InspectionsService = class InspectionsService {
             else {
                 sourceGlbPath = downloadedPath;
             }
+            if (onProgress)
+                await onProgress(35, 'Analyzing 3D geometry density and texture maps...');
             const finalGlbPath = path.join(tempDir, 'model.glb');
             const isAlreadyKtx2 = this.checkGlbHasKtx2(sourceGlbPath);
             const vertexCount = this.getGlbVertexCount(sourceGlbPath);
@@ -993,9 +1243,21 @@ let InspectionsService = class InspectionsService {
             const masterTexLimit = textureCount <= 2 ? '2048' : '1024';
             const mobileTexLimit = textureCount <= 2 ? '1024' : '512';
             console.log(`[processGlb] source: ${sourceGlbPath}, isAlreadyKtx2: ${isAlreadyKtx2}, vertices: ${vertexCount}, textures: ${textureCount}, decimation: [master: ${masterSimplificationRatio}, mobile: ${mobileSimplificationRatio}], texLimits: [master: ${masterTexLimit}px, mobile: ${mobileTexLimit}px]`);
-            const gltfpackBin = path.resolve(process.cwd(), 'gltfpack.exe');
+            let gltfpackBin = 'gltfpack';
+            if (process.platform === 'win32') {
+                const localWin = path.resolve(process.cwd(), 'gltfpack.exe');
+                if (fs.existsSync(localWin))
+                    gltfpackBin = localWin;
+            }
+            else {
+                if (fs.existsSync('/usr/local/bin/gltfpack'))
+                    gltfpackBin = '/usr/local/bin/gltfpack';
+            }
             let usedGltfpack = false;
-            if (fs.existsSync(gltfpackBin)) {
+            if (onProgress)
+                await onProgress(50, 'Encoding Basis Universal KTX2 textures and Draco geometry...');
+            const hasGltfpack = fs.existsSync(gltfpackBin) || gltfpackBin === 'gltfpack';
+            if (hasGltfpack) {
                 try {
                     const { execFile } = require('child_process');
                     const util = require('util');
@@ -1005,14 +1267,8 @@ let InspectionsService = class InspectionsService {
                         args.push('-si', String(masterSimplificationRatio), '-slb');
                     }
                     if (!isAlreadyKtx2) {
-                        if (compressionMode === 'etc1s') {
-                            args.push('-tc', '-tl', masterTexLimit);
-                            console.log(`[processGlb] Compressing textures with KTX2 ETC1S (max ${masterTexLimit}px) + Mesh Merging...`);
-                        }
-                        else {
-                            args.push('-tc', '-tl', masterTexLimit);
-                            console.log(`[processGlb] Compressing textures with KTX2 BasisU (max ${masterTexLimit}px) + Mesh Merging...`);
-                        }
+                        args.push('-tc', '-tl', masterTexLimit, '-tq', '6', '-tj', '2');
+                        console.log(`[processGlb] Compressing textures with KTX2 BasisU (max ${masterTexLimit}px, q=6, threads=2) + Mesh Merging...`);
                     }
                     else {
                         console.log(`[processGlb] Model already has KTX2 textures. Preserving textures, merging meshes and optimizing geometry.`);
@@ -1028,9 +1284,11 @@ let InspectionsService = class InspectionsService {
                     const lod1GlbPath = path.join(tempDir, 'model_lod1.glb');
                     const lod1Args = ['-i', sourceGlbPath, '-o', lod1GlbPath, '-si', String(mobileSimplificationRatio), '-slb', '-cc', '-mm'];
                     if (!isAlreadyKtx2) {
-                        lod1Args.push('-tc', '-tl', mobileTexLimit);
+                        lod1Args.push('-tc', '-tl', mobileTexLimit, '-tq', '5', '-tj', '2');
                     }
                     try {
+                        if (onProgress)
+                            await onProgress(75, 'Generating 35% decimated mobile LOD1 mesh...');
                         console.log(`[processGlb] Generating automated Mobile LOD1 decimated mesh (-si ${mobileSimplificationRatio} -slb, max ${mobileTexLimit}px)...`);
                         const { stdout: lod1Out } = await execFilePromise(gltfpackBin, lod1Args, { maxBuffer: 100 * 1024 * 1024 });
                         if (lod1Out)
@@ -1065,6 +1323,8 @@ let InspectionsService = class InspectionsService {
             }
             const optimizedSize = fs.statSync(finalGlbPath).size;
             console.log(`[processGlb] Optimization complete! Final model size: ${(optimizedSize / 1024 / 1024).toFixed(2)} MB`);
+            if (onProgress)
+                await onProgress(90, 'Uploading optimized 3D Digital Twin models to storage...');
             const s3Dest = `inspections/${id}/model.glb`;
             await this.storageService.uploadFile(bucket, s3Dest, finalGlbPath, 'model/gltf-binary');
             const lod1GlbPath = path.join(tempDir, 'model_lod1.glb');
@@ -1091,7 +1351,7 @@ let InspectionsService = class InspectionsService {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }
     }
-    async processPanoramas(id, userEnterpriseId, role) {
+    async processPanoramas(id, userEnterpriseId, role, onProgress) {
         const inspection = await this.prisma.inspection.findUnique({ where: { id }, include: { project: true } });
         if (!inspection)
             throw new common_1.NotFoundException('Inspection not found');
@@ -1109,6 +1369,8 @@ let InspectionsService = class InspectionsService {
             const zip = new AdmZip(zipPath);
             const extractDir = path.join(tempDir, 'extracted');
             zip.extractAllTo(extractDir, true);
+            if (onProgress)
+                await onProgress(10, 'Unpacking scan archives and discovering stations...');
             const outputDir = path.join(tempDir, 'output');
             const cubemapsDir = path.join(outputDir, 'cubemaps');
             const equirectDir = path.join(outputDir, 'equirect');
@@ -1201,13 +1463,28 @@ let InspectionsService = class InspectionsService {
                 });
             }
             console.log(`[processPanoramas] Found ${scanIds.size} scan stations to process.`);
-            const wasmtimeBin = path.resolve(process.cwd(), 'bin/wasmtime.exe');
+            let wasmtimeBin = 'wasmtime';
+            if (process.platform === 'win32') {
+                const localWin = path.resolve(process.cwd(), 'bin/wasmtime.exe');
+                if (fs.existsSync(localWin))
+                    wasmtimeBin = localWin;
+            }
+            else {
+                if (fs.existsSync('/usr/local/bin/wasmtime'))
+                    wasmtimeBin = '/usr/local/bin/wasmtime';
+            }
             const wasmModule = path.resolve(process.cwd(), 'bin/basisu_st.wasm');
-            const hasWasmEncoder = fs.existsSync(wasmtimeBin) && fs.existsSync(wasmModule);
+            const hasWasmEncoder = (fs.existsSync(wasmtimeBin) || wasmtimeBin === 'wasmtime') && fs.existsSync(wasmModule);
             const metadataOut = {};
+            let scanIdx = 0;
             for (const scanId of scanIds) {
+                scanIdx++;
                 const cleanId = String(scanId).replace(/^scan_/, '');
                 const fullScanKey = `scan_${cleanId}`;
+                const scanPct = Math.min(88, 10 + Math.floor((scanIdx / Math.max(1, scanIds.size)) * 75));
+                if (onProgress) {
+                    await onProgress(scanPct, `Generating multi-LOD cubemaps & KTX2 for station ${scanIdx}/${scanIds.size} (${fullScanKey})...`);
+                }
                 console.log(`[processPanoramas] Processing ${fullScanKey}...`);
                 const origEquirect = scanEquirects.get(cleanId) || scanEquirects.get(fullScanKey);
                 const origEquirectLow = scanEquirectLows.get(cleanId) || scanEquirectLows.get(fullScanKey);
@@ -1295,9 +1572,9 @@ let InspectionsService = class InspectionsService {
                     ],
                     equirect_url: `equirect/${fullScanKey}_equirect.jpg`,
                     equirect_low_url: `equirect_low/${fullScanKey}_equirect_low.jpg`,
-                    ktx2_256: `ktx2/${fullScanKey}_256.ktx2`,
-                    ktx2_512: `ktx2/${fullScanKey}_512.ktx2`,
-                    ktx2_1024: `ktx2/${fullScanKey}_1024.ktx2`,
+                    ktx2_256: fs.existsSync(path.join(outputDir, `output/ktx2/${fullScanKey}_256.ktx2`)) || fs.existsSync(path.join(ktx2Dir, `${fullScanKey}_256.ktx2`)) ? `ktx2/${fullScanKey}_256.ktx2` : null,
+                    ktx2_512: fs.existsSync(path.join(outputDir, `output/ktx2/${fullScanKey}_512.ktx2`)) || fs.existsSync(path.join(ktx2Dir, `${fullScanKey}_512.ktx2`)) ? `ktx2/${fullScanKey}_512.ktx2` : null,
+                    ktx2_1024: fs.existsSync(path.join(outputDir, `output/ktx2/${fullScanKey}_1024.ktx2`)) || fs.existsSync(path.join(ktx2Dir, `${fullScanKey}_1024.ktx2`)) ? `ktx2/${fullScanKey}_1024.ktx2` : null,
                 };
             }
             fs.writeFileSync(path.join(outputDir, 'scan_metadata.json'), JSON.stringify(metadataOut, null, 2), 'utf8');
@@ -1328,6 +1605,8 @@ let InspectionsService = class InspectionsService {
                     }
                 }
             };
+            if (onProgress)
+                await onProgress(90, 'Uploading multi-LOD textures and metadata to storage...');
             await uploadRecursive(outputDir);
             console.log(`[processPanoramas] Uploaded ${uploadedCount} optimized panorama assets (KTX2, LODs, equirects) to inspections/${id}/`);
             const scansJsonS3 = `inspections/${id}/scans.json`;
@@ -1346,6 +1625,34 @@ let InspectionsService = class InspectionsService {
         finally {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }
+    }
+    async getProcessingStatus(id) {
+        const inspection = await this.prisma.inspection.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                processingStatus: true,
+                processingProgress: true,
+                processingStage: true,
+                processingError: true,
+                glbModelUrl: true,
+                scansJsonUrl: true,
+            },
+        });
+        if (!inspection)
+            throw new common_1.NotFoundException('Inspection not found');
+        return inspection;
+    }
+    async markAsQueued(id, stage = 'Queued in background asset processing worker...') {
+        return this.prisma.inspection.update({
+            where: { id },
+            data: {
+                processingStatus: 'QUEUED',
+                processingProgress: 0,
+                processingStage: stage,
+                processingError: null,
+            },
+        });
     }
 };
 exports.InspectionsService = InspectionsService;

@@ -18,12 +18,17 @@ const staging_controller_1 = require("./staging.controller");
 const survey_data_controller_1 = require("./survey-data.controller");
 const prisma_module_1 = require("../prisma/prisma.module");
 const storage_module_1 = require("../storage/storage.module");
+const queues_module_1 = require("../queues/queues.module");
 let InspectionsModule = class InspectionsModule {
 };
 exports.InspectionsModule = InspectionsModule;
 exports.InspectionsModule = InspectionsModule = __decorate([
     (0, common_1.Module)({
-        imports: [prisma_module_1.PrismaModule, storage_module_1.StorageModule],
+        imports: [
+            prisma_module_1.PrismaModule,
+            storage_module_1.StorageModule,
+            (0, common_1.forwardRef)(() => queues_module_1.QueuesModule),
+        ],
         controllers: [
             inspections_controller_1.InspectionsController,
             inspections_direct_controller_1.InspectionsDirectController,
@@ -34,6 +39,7 @@ exports.InspectionsModule = InspectionsModule = __decorate([
             survey_data_controller_1.SurveyDataController,
         ],
         providers: [inspections_service_1.InspectionsService],
+        exports: [inspections_service_1.InspectionsService],
     })
 ], InspectionsModule);
 //# sourceMappingURL=inspections.module.js.map

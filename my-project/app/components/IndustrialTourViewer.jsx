@@ -397,6 +397,7 @@ const IndustrialTourViewer = forwardRef(({
         });
 
         scansDataRef.current = metadataMap;
+        textureManager.setScansMetadata(metadataMap);
         setScansData(scansArray);
 
         // Load 3D GLB Model Mesh
@@ -715,12 +716,46 @@ const IndustrialTourViewer = forwardRef(({
       const flightTier = tierConfig?.flightEquirectTier || 'auto';
       const nextEquirect = await textureManager.loadEquirect(nextScanIdNum, flightTier);
 
-      // Load best available KTX2 (instant cached 1024, or stream 1024 with 256 fallback)
-      let nextCubeMap;
-      try {
-        nextCubeMap = await textureManager.loadBestKTX2(nextScanIdNum);
-      } catch (e) {
-        console.warn(`[KTX2] Fallback to cubemap for scan_${nextScanIdNum}:`, e);
+      // Check if target scan has KTX2 generated
+      const targetScanRaw = targetScan?.raw || targetScan || {};
+      const hasKTX2 = Boolean(
+        targetScanRaw.ktx2_1024 ||
+        targetScanRaw.ktx2_512 ||
+        targetScanRaw.ktx2_256 ||
+        textureManager.hasKTX2(nextScanIdNum)
+      );
+
+      let nextCubeMap = null;
+      let load1024Promise = null;
+      if (hasKTX2) {
+        // Dynamic Progressive LOD Strategy:
+        const cached1024 = textureManager.getCachedKTX2(nextScanIdNum, '1024');
+        if (cached1024) {
+          // If high-quality 1024 is already cached in memory, use it directly!
+          nextCubeMap = cached1024;
+        } else {
+          // Kick off background download of 1024 immediately so network streams during flight
+          load1024Promise = textureManager.loadKTX2(nextScanIdNum, '1024').catch(() => null);
+
+          // Check if lower LOD is already in memory cache (512 or 256 from preloading)
+          const bestCached = textureManager.getBestCachedTexture(nextScanIdNum);
+          if (bestCached) {
+            nextCubeMap = bestCached.texture;
+          } else {
+            // Race: Try to fetch fast 256 preview (~40 KB) without stalling flight launch
+            const fast256Promise = textureManager.loadKTX2(nextScanIdNum, '256').catch(() => null);
+            nextCubeMap = await Promise.race([
+              load1024Promise,
+              fast256Promise,
+              new Promise((r) => setTimeout(() => r(null), 150)) // Cap pre-flight launch delay to 150ms max
+            ]);
+            if (!nextCubeMap) {
+              nextCubeMap = dummyTex;
+            }
+          }
+        }
+      } else {
+        // High-fidelity standard cubemap faces (crisp native JPGs, instant, zero 404s)
         try {
           nextCubeMap = await textureManager.loadCubeMap(nextScanIdNum);
         } catch (e2) {
@@ -886,19 +921,47 @@ const IndustrialTourViewer = forwardRef(({
             bubbleRef.current.material = bubbleStaticMatRef.current;
             bubbleRef.current.quaternion.copy(targetScan.quaternion);
             bubbleRef.current.position.copy(targetScan.positionVec);
-            bubbleRef.current.material.uniforms.uCubeMap.value = nextCubeMap;
-            bubbleRef.current.material.uniforms.uNextCubeMap.value = nextCubeMap;
+            // Dynamic Progressive Landing:
+            // Check if 1024 finished downloading during the 1.1s flight:
+            const ready1024 = textureManager.getCachedKTX2(nextScanIdNum, '1024');
+            const displayTex = ready1024 || nextCubeMap || dummyTex;
+
+            bubbleRef.current.material.uniforms.uCubeMap.value = displayTex;
+            bubbleRef.current.material.uniforms.uNextCubeMap.value = displayTex;
             bubbleRef.current.material.uniforms.uTransitionProgress.value = 1.0;
             bubbleRef.current.material.uniforms.uOpacity.value = 1.0;
             bubbleRef.current.visible = true;
 
-            // Upgrade to 1024px KTX2 in background for crisp HD look-around
-            textureManager.loadKTX2(nextScanIdNum, '1024').then((hdTex) => {
-              if (activeScanIdRef.current === targetScanId && bubbleRef.current?.material?.uniforms) {
-                bubbleRef.current.material.uniforms.uCubeMap.value = hdTex;
-                bubbleRef.current.material.uniforms.uNextCubeMap.value = hdTex;
-              }
-            }).catch(() => { });
+            // Upgrade dynamically to 1024px KTX2 as soon as network finishes downloading it:
+            if (hasKTX2 && !ready1024) {
+              const fetch1024 = load1024Promise || textureManager.loadKTX2(nextScanIdNum, '1024');
+              fetch1024.then((hdTex) => {
+                if (hdTex && activeScanIdRef.current === targetScanId && bubbleRef.current?.material?.uniforms) {
+                  bubbleRef.current.material.uniforms.uCubeMap.value = hdTex;
+                  bubbleRef.current.material.uniforms.uNextCubeMap.value = hdTex;
+                }
+              }).catch(() => { });
+            }
+
+            // Background-preload 256 LOD for closest 3 adjacent scans for instant next hops
+            if (scansDataRef.current && typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+              window.requestIdleCallback(() => {
+                try {
+                  const currPos = targetScan.positionVec;
+                  const adjacent = Object.values(scansDataRef.current)
+                    .filter((s) => s.id !== targetScanId)
+                    .map((s) => ({ id: s.id, dist: s.positionVec.distanceTo(currPos) }))
+                    .sort((a, b) => a.dist - b.dist)
+                    .slice(0, 3);
+                  for (const adj of adjacent) {
+                    const adjNum = adj.id.replace('scan_', '');
+                    if (textureManager.hasKTX2(adjNum)) {
+                      textureManager.loadKTX2(adjNum, '256').catch(() => {});
+                    }
+                  }
+                } catch (_) {}
+              });
+            }
           }
 
           // Restore model mesh original material and hide inside scan

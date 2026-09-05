@@ -4,34 +4,42 @@ export declare class ProjectsController {
     private readonly projectsService;
     constructor(projectsService: ProjectsService);
     create(createProjectDto: CreateProjectDto, user: any): Promise<{
-        enterpriseId: string;
         id: string;
-        createdAt: Date;
-        name: string;
         description: string | null;
+        createdAt: Date;
         updatedAt: Date;
+        name: string;
+        enterpriseId: string;
     }>;
     findAll(user: any): Promise<({
         _count: {
             inspections: number;
         };
     } & {
-        enterpriseId: string;
         id: string;
-        createdAt: Date;
-        name: string;
         description: string | null;
+        createdAt: Date;
         updatedAt: Date;
+        name: string;
+        enterpriseId: string;
     })[]>;
     findOne(id: string, user: any): Promise<{
         inspections: {
             id: string;
-            createdAt: Date;
-            description: string | null;
-            updatedAt: Date;
             type: import(".prisma/client").$Enums.InspectionType;
             title: string;
+            description: string | null;
+            glbModelUrl: string | null;
+            scansJsonUrl: string | null;
+            rawScansJsonUrl: string | null;
+            rawCsvJsonUrl: string | null;
+            thumbnailUrl: string | null;
+            videoUrl: string | null;
             visibility: import(".prisma/client").$Enums.Visibility;
+            processingStatus: string;
+            processingProgress: number;
+            processingStage: string;
+            processingError: string | null;
             surveyDate: Date | null;
             droneModel: string | null;
             gsd: number | null;
@@ -42,31 +50,27 @@ export declare class ProjectsController {
             orthoBounds: import("@prisma/client/runtime/library").JsonValue | null;
             dsmUrl: string | null;
             dtmUrl: string | null;
-            contoursUrl: string | null;
             dsmMinElevation: number | null;
             dsmMaxElevation: number | null;
-            glbModelUrl: string | null;
-            scansJsonUrl: string | null;
-            rawScansJsonUrl: string | null;
-            rawCsvJsonUrl: string | null;
-            thumbnailUrl: string | null;
-            videoUrl: string | null;
+            contoursUrl: string | null;
+            createdAt: Date;
+            updatedAt: Date;
             projectId: string;
         }[];
     } & {
-        enterpriseId: string;
         id: string;
-        createdAt: Date;
-        name: string;
         description: string | null;
+        createdAt: Date;
         updatedAt: Date;
+        name: string;
+        enterpriseId: string;
     }>;
     remove(id: string, user: any): Promise<{
-        enterpriseId: string;
         id: string;
-        createdAt: Date;
-        name: string;
         description: string | null;
+        createdAt: Date;
         updatedAt: Date;
+        name: string;
+        enterpriseId: string;
     }>;
 }

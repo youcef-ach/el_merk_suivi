@@ -20,23 +20,23 @@ export declare class EnterprisesService {
         name: string;
     }>;
     addMember(dto: AddMemberDto, callerEnterpriseId: string): Promise<{
-        email: string;
         id: string;
-        role: import(".prisma/client").$Enums.Role;
         createdAt: Date;
+        email: string;
+        role: import(".prisma/client").$Enums.Role;
     }>;
     getMembers(enterpriseId: string): Promise<{
-        email: string;
         id: string;
-        role: import(".prisma/client").$Enums.Role;
         createdAt: Date;
+        email: string;
+        role: import(".prisma/client").$Enums.Role;
     }[]>;
     removeMember(memberId: string, callerEnterpriseId: string, callerId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        enterpriseId: string | null;
         email: string;
         password: string;
-        enterpriseId: string | null;
-        id: string;
         role: import(".prisma/client").$Enums.Role;
-        createdAt: Date;
     }>;
 }

@@ -92,11 +92,11 @@ export function getDeviceTier() {
     if (/swiftshader|llvmpipe/i.test(gpuLower)) {
       // Software emulation -> Tier 1
       tier = 1;
-    } else if (ramGB <= 4 || cpuCores <= 2) {
-      // Very old/weak legacy PC -> Tier 2
+    } else if (/intel|uhd|iris|hd graphics/i.test(gpuLower) || !isDedicatedGpu) {
+      // Integrated GPU on desktop/laptop (Intel UHD, Iris, Vega APU) -> Tier 2 (Balanced: smooth 60 FPS, no 4K choke)
       tier = 2;
     } else {
-      // All modern PC workstations, laptops, i5/i7/i9, Ryzen, Apple Macs, GTX/RTX -> Tier 3 Ultra!
+      // Dedicated GPU (NVIDIA RTX/GTX, AMD Radeon dedicated, Apple M1-M4) -> Tier 3 Ultra!
       tier = 3;
     }
   } else {
@@ -146,7 +146,7 @@ function buildConfig(tier, label) {
       useLogDepth: false,                // Restores mobile hardware Early-Z
       cameraNear: 0.15,
       cameraFar: 600,
-      flightEquirectTier: '2k',          // 2K Transition Equirect for smooth 60 FPS flights
+      flightEquirectTier: isMobileOrTouch ? '2k' : '4k',          // 4K on desktop, 2K on mobile
       cubemapLod: '1024',                // Standard crisp 1024 KTX2 cubemap
       preferredModel: 'model.glb',
       useDrs: true,
