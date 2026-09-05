@@ -10,6 +10,7 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-
 import { TilesetEngine } from '../utils/TilesetEngine';
 import { OrthomosaicLayer } from '../utils/OrthomosaicLayer';
 import { SatelliteBasemapLayer } from '../utils/SatelliteBasemapLayer';
+import { createMatterportRingMaterial } from '../shaders/MatterportRingShader';
 import { API_URL, MINIO_URL } from '../config/api';
 
 // Inject BVH methods into Three.js prototypes
@@ -252,13 +253,13 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
           setIsModelLoaded(true);
 
-          // ─── 5. Place 360 Scan Red Rings on Floor / Ground ───
+          // ─── 5. Place Matterport-Style Scan Navigation Pucks on Floor / Ground ───
           if (Array.isArray(scanData) && scanData.length > 0) {
-            const ringGeo = new THREE.RingGeometry(0.12, 0.18, 32);
-            const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true });
+            const ringGeo = new THREE.PlaneGeometry(0.72, 0.72);
+            const markerMat = createMatterportRingMaterial();
 
             const instancedMesh = new THREE.InstancedMesh(ringGeo, markerMat, scanData.length);
-            instancedMesh.renderOrder = 10;
+            instancedMesh.renderOrder = 999;
             
             const dummy = new THREE.Object3D();
             const scanMetadata = [];

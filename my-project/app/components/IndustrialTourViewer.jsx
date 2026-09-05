@@ -13,6 +13,7 @@ import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
 import { createTagSpriteMaterial } from '../hooks/useTags';
 import { EquirectProjectiveShader } from '../shaders/EquirectProjectiveShader';
 import { StaticCubemapShader } from '../shaders/StaticCubemapShader';
+import { createMatterportRingMaterial } from '../shaders/MatterportRingShader';
 import { textureManager } from '../utils/TextureManager';
 import { API_URL, MINIO_URL } from '../config/api';
 import { Compass } from 'lucide-react';
@@ -56,6 +57,57 @@ const IndustrialTourViewer = forwardRef(({
     tierConfig,
     setDynamicDpr
   } = useThreeScene([dummyTex], true);
+
+  // Click Feedback Ripple Mesh Ref
+  const rippleMeshRef = useRef(null);
+
+  const createClickRipple = useCallback((hitPoint) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    if (!rippleMeshRef.current) {
+      const geo = new THREE.RingGeometry(0.1, 0.22, 36);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        depthTest: true,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 1002;
+      scene.add(mesh);
+      rippleMeshRef.current = mesh;
+    }
+
+    const ripple = rippleMeshRef.current;
+    ripple.position.set(hitPoint.x, hitPoint.y, hitPoint.z + 0.025);
+    ripple.rotation.set(0, 0, 0); // Flat on XY floor plane facing +Z
+    ripple.scale.set(0.6, 0.6, 0.6);
+    ripple.material.opacity = 0.95;
+    ripple.visible = true;
+
+    gsap.killTweensOf(ripple.scale);
+    gsap.killTweensOf(ripple.material);
+
+    gsap.to(ripple.scale, {
+      x: 3.5,
+      y: 3.5,
+      z: 3.5,
+      duration: 0.52,
+      ease: 'power2.out',
+    });
+
+    gsap.to(ripple.material, {
+      opacity: 0.0,
+      duration: 0.52,
+      ease: 'power2.out',
+      onComplete: () => {
+        ripple.visible = false;
+      },
+    });
+  }, [sceneRef]);
 
   // Viewer State: 'DOLLHOUSE' | 'TRANSITION' | 'INSIDE'
   const [viewerState, setViewerState] = useState('DOLLHOUSE');
@@ -510,30 +562,28 @@ const IndustrialTourViewer = forwardRef(({
                 return floorZ;
               });
 
-              const sphereGeo = new THREE.TorusGeometry(0.3, 0.05, 16, 32);
-              const sphereMat = new THREE.MeshBasicMaterial({
-                color: 0xffffff,
-                transparent: true,
-                opacity: 0.85,
-                depthTest: true,
-                depthWrite: false
-              });
+              // Matterport-grade vector pucks lying flat on the floor in Z-up
+              const ringGeo = new THREE.PlaneGeometry(0.72, 0.72);
+              const hoverBuffer = new Float32Array(scansArray.length);
+              ringGeo.setAttribute('aHover', new THREE.InstancedBufferAttribute(hoverBuffer, 1));
 
-              const instMesh = new THREE.InstancedMesh(sphereGeo, sphereMat, scansArray.length);
+              const ringMat = createMatterportRingMaterial();
+              const instMesh = new THREE.InstancedMesh(ringGeo, ringMat, scansArray.length);
               instMesh.renderOrder = 999;
 
               const dummy = new THREE.Object3D();
-              const tubeRadius = 0.05;
               const markerMetadata = [];
 
               scansArray.forEach((scan, index) => {
                 const scanKey = scan['#name'] || scan.id || `scan_${index}`;
                 const sObj = metadataMap[scanKey];
                 const pos = sObj ? sObj.positionVec : new THREE.Vector3();
-                const floorZ = ringPositions[index] + tubeRadius;
+                // Elevation offset +0.02m above floor to completely eliminate Z-fighting
+                const floorZ = (ringPositions[index] !== undefined ? ringPositions[index] : (pos.z - 1.55)) + 0.02;
 
                 dummy.position.set(pos.x, pos.y, floorZ);
-                dummy.rotation.set(0, 0, 0);
+                dummy.rotation.set(0, 0, 0); // Flat on XY floor plane facing +Z
+                dummy.scale.set(1, 1, 1);
                 dummy.updateMatrix();
                 instMesh.setMatrixAt(index, dummy.matrix);
 
@@ -1038,6 +1088,9 @@ const IndustrialTourViewer = forwardRef(({
 
     const updateVisibility = () => {
       rafId = requestAnimationFrame(updateVisibility);
+      if (instancedMesh.material?.uniforms?.uTime) {
+        instancedMesh.material.uniforms.uTime.value = performance.now() * 0.001;
+      }
       const cameraPos = cameraRef.current.position;
       let needsUpdate = false;
       const showAll = viewerState === 'DOLLHOUSE' || isMeshView;
@@ -1155,9 +1208,65 @@ const IndustrialTourViewer = forwardRef(({
       }
     };
 
+    let hoveredInstanceId = -1;
+
     const onMove = (e) => {
       if (wasDraggingRef.current && onPointerDragMoveRef.current) {
         onPointerDragMoveRef.current(e);
+        return;
+      }
+
+      // Matterport-style puck hover detection & cursor handling
+      if (scanSpheresRef.current && renderer?.domElement && camera) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        const instMesh = scanSpheresRef.current;
+        const aHover = instMesh.geometry?.attributes?.aHover;
+        const ringHits = raycaster.intersectObject(instMesh);
+
+        if (ringHits.length > 0) {
+          const hitInstanceId = ringHits[0].instanceId;
+          const targetMeta = instMesh.userData?.metadata?.[hitInstanceId];
+
+          if (targetMeta && targetMeta.id !== activeScanIdRef.current) {
+            renderer.domElement.style.cursor = 'pointer';
+
+            if (hoveredInstanceId !== hitInstanceId) {
+              if (hoveredInstanceId !== -1 && aHover) {
+                aHover.setX(hoveredInstanceId, 0.0);
+              }
+              hoveredInstanceId = hitInstanceId;
+              if (aHover) {
+                aHover.setX(hitInstanceId, 1.0);
+                aHover.needsUpdate = true;
+              }
+            }
+            return;
+          }
+        }
+
+        // Reset previous hovered ring when cursor leaves
+        if (hoveredInstanceId !== -1) {
+          if (aHover) {
+            aHover.setX(hoveredInstanceId, 0.0);
+            aHover.needsUpdate = true;
+          }
+          hoveredInstanceId = -1;
+        }
+
+        // If hovering over 3D model/floor in exploration mode, show pointer cursor for click-to-move
+        if (modelRef.current && !measurementModeRef.current && !tagModeRef.current && !pointersModeRef.current) {
+          const meshHits = raycaster.intersectObject(modelRef.current, true);
+          if (meshHits.length > 0) {
+            renderer.domElement.style.cursor = 'pointer';
+            return;
+          }
+        }
+
+        renderer.domElement.style.cursor = 'default';
       }
     };
 
@@ -1170,6 +1279,13 @@ const IndustrialTourViewer = forwardRef(({
     const onClick = (e) => {
       if (wasDraggingRef.current) {
         wasDraggingRef.current = false;
+        return;
+      }
+
+      // Check drag displacement (ignore clicks if user was orbiting / panning)
+      const dx = e.clientX - pointerDownPosRef.current.x;
+      const dy = e.clientY - pointerDownPosRef.current.y;
+      if (Math.hypot(dx, dy) > 8) {
         return;
       }
 
@@ -1214,16 +1330,61 @@ const IndustrialTourViewer = forwardRef(({
         if (handled) return;
       }
 
-      // 6. Scan Marker Teleport Click
+      // 6. Direct Click on Scan Ring Marker
+      let targetScanId = null;
+
       if (scanSpheresRef.current) {
         const intersects = raycaster.intersectObject(scanSpheresRef.current);
         if (intersects.length > 0) {
           const instanceId = intersects[0].instanceId;
           const targetMeta = scanSpheresRef.current.userData.metadata?.[instanceId];
           if (targetMeta && targetMeta.id !== activeScanIdRef.current) {
-            triggerTransition(targetMeta.id);
+            targetScanId = targetMeta.id;
           }
         }
+      }
+
+      // 7. Matterport-style Click Anywhere (Floor / 3D Building Mesh) -> Teleport to Nearest Scan Ring
+      if (!targetScanId && modelRef.current && scanSpheresRef.current?.userData?.metadata) {
+        const meshIntersects = raycaster.intersectObject(modelRef.current, true);
+        if (meshIntersects.length > 0) {
+          const hitPoint = meshIntersects[0].point;
+          const metadata = scanSpheresRef.current.userData.metadata;
+
+          let closestScan = null;
+          let minDistance = Infinity;
+
+          for (let i = 0; i < metadata.length; i++) {
+            const scanMeta = metadata[i];
+            const scanPos = scanMeta.ringPosition || scanMeta.realPosition;
+
+            // In Z-up coordinate system: X & Y is horizontal plane, Z is elevation
+            const distX = scanPos.x - hitPoint.x;
+            const distY = scanPos.y - hitPoint.y;
+            const horizDist = Math.hypot(distX, distY);
+
+            // Vertical height difference
+            const vertDist = Math.abs(scanPos.z - hitPoint.z);
+
+            // Floor-aware weighting: penalize vertical difference heavily to stay on the same floor level
+            const effectiveDist = horizDist + vertDist * 3.0;
+
+            if (effectiveDist < minDistance) {
+              minDistance = effectiveDist;
+              closestScan = scanMeta;
+            }
+          }
+
+          if (closestScan && closestScan.id !== activeScanIdRef.current) {
+            targetScanId = closestScan.id;
+            // Spawn an animated Matterport-style floor ripple at the clicked spot
+            createClickRipple(hitPoint);
+          }
+        }
+      }
+
+      if (targetScanId) {
+        triggerTransition(targetScanId);
       }
     };
 
