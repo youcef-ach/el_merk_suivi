@@ -26,7 +26,8 @@ import {
   Cpu,
   Image as ImageIcon,
   Boxes,
-  FileCheck
+  FileCheck,
+  Zap
 } from 'lucide-react';
 import './new-inspection.css';
 import { API_URL, MINIO_URL } from '../config/api';
@@ -87,11 +88,14 @@ function NewInspectionContent() {
   const [dsmFile, setDsmFile] = useState(null);
   const [reportFile, setReportFile] = useState(null);
   const [glbFile, setGlbFile] = useState(null);
+  const [lod1GlbFile, setLod1GlbFile] = useState(null);
   const [panoramasZipFile, setPanoramasZipFile] = useState(null);
   const [jsonFile, setJsonFile] = useState(null);
+  const [scanMetadataFile, setScanMetadataFile] = useState(null);
   const [rcJsonFile, setRcJsonFile] = useState(null);
   const [thumbnailFile, setThumbnailFile] = useState(null);
   const [compressionMode, setCompressionMode] = useState('uastc');
+  const [isPreprocessedAssets, setIsPreprocessedAssets] = useState(true);
 
   const { register, handleSubmit, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(createInspectionSchema),
@@ -215,8 +219,10 @@ function NewInspectionContent() {
         dsmFile,
         reportFile,
         glbFile,
+        lod1GlbFile,
         panoramasZipFile,
         jsonFile,
+        scanMetadataFile,
         thumbnailFile
       ].filter(Boolean);
 
@@ -227,6 +233,98 @@ function NewInspectionContent() {
 
       // Helper to format bytes
       const fmtMb = (bytes) => (bytes / (1024 * 1024)).toFixed(1);
+
+      // ── SPECIAL FAST INGESTION FOR PRE-PROCESSED VIRTUAL TOUR DELIVERABLES ──
+      if (selectedType === 'VIRTUAL_TOUR' && isPreprocessedAssets) {
+        // 1. Thumbnail Cover
+        if (thumbnailFile) {
+          setUploadStatusText('Uploading preview thumbnail...');
+          await uploadFileToMinio(inspectionId, thumbnailFile, `thumb_${thumbnailFile.name}`);
+          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ thumbnailUrl: `inspections/${inspectionId}/thumb_${thumbnailFile.name}` })
+          });
+        }
+
+        // 2. Scan Telemetry (scans.json)
+        if (jsonFile) {
+          setUploadStatusText('Uploading scan coordinates (scans.json)...');
+          await uploadFileToMinio(inspectionId, jsonFile, 'scans.json');
+        }
+
+        // 3. Scan Metadata (scan_metadata.json)
+        if (scanMetadataFile) {
+          setUploadStatusText('Uploading scan metadata (scan_metadata.json)...');
+          await uploadFileToMinio(inspectionId, scanMetadataFile, 'scan_metadata.json');
+        }
+
+        // 4. Pre-Optimized Master 3D Model (model.glb)
+        if (glbFile) {
+          setUploadStatusText(`Uploading optimized 3D model (${fmtMb(glbFile.size)} MB)...`);
+          await uploadFileToMinio(inspectionId, glbFile, 'model.glb', (loaded, total) => {
+            const pct = Math.round((loaded / total) * 100);
+            setUploadProgress(pct);
+            setUploadStatusText(`Uploading 3D Model: ${fmtMb(loaded)} MB / ${fmtMb(total)} MB (${pct}%)...`);
+          });
+        }
+
+        // 5. Mobile LOD1 Model (model_lod1.glb) if provided
+        if (lod1GlbFile) {
+          setUploadStatusText(`Uploading mobile LOD1 model (${fmtMb(lod1GlbFile.size)} MB)...`);
+          await uploadFileToMinio(inspectionId, lod1GlbFile, 'model_lod1.glb', (loaded, total) => {
+            const pct = Math.round((loaded / total) * 100);
+            setUploadProgress(pct);
+            setUploadStatusText(`Uploading Mobile LOD1: ${fmtMb(loaded)} MB / ${fmtMb(total)} MB (${pct}%)...`);
+          });
+        }
+
+        // 6. Pre-Processed Panoramas Archive (panoramas.zip)
+        if (panoramasZipFile) {
+          setUploadStatusText(`Uploading 360° Panoramas Package (${fmtMb(panoramasZipFile.size)} MB)...`);
+          await uploadFileToMinio(inspectionId, panoramasZipFile, 'panoramas.zip', (loaded, total) => {
+            const pct = Math.round((loaded / total) * 100);
+            setUploadProgress(pct);
+            setUploadStatusText(`Uploading 360° Panoramas: ${fmtMb(loaded)} MB / ${fmtMb(total)} MB (${pct}%)...`);
+          });
+
+          setUploadStatusText('Direct ingestion: unpacking cubemaps & KTX2 textures on server...');
+          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-panoramas`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+        }
+
+        // Brief poll for fast unpack completion (takes 2-4 seconds)
+        setUploadStatusText('Finalizing pre-processed tour registration...');
+        let finished = false;
+        let pollCount = 0;
+        while (!finished && pollCount < 20) {
+          pollCount++;
+          await new Promise(r => setTimeout(r, 1000));
+          try {
+            const statusRes = await fetch(`${API_URL}/inspections/${inspectionId}/processing-status`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              if (statusData.processingStatus === 'COMPLETED') {
+                finished = true;
+              } else if (statusData.processingStage) {
+                setUploadStatusText(statusData.processingStage);
+              }
+            }
+          } catch (e) {
+            // Ignore temporary blips
+          }
+        }
+
+        setUploadStatusText('Virtual Tour ready! Launching 3D Viewer...');
+        setUploadProgress(100);
+        await new Promise(r => setTimeout(r, 600));
+        navigate(`/engine/${inspectionId}`);
+        return;
+      }
 
       // ── 1. Thumbnail (Fast) ──
       if (thumbnailFile) {
@@ -674,152 +772,398 @@ function NewInspectionContent() {
 
               {/* ─── VIRTUAL TOUR DELIVERABLES ─── */}
               {selectedType === 'VIRTUAL_TOUR' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  
-                  {/* 1. 3D Building Mesh (GLB / OBJ / ZIP) */}
-                  <div className="upload-dropzone-box">
-                    <div className="dropzone-icon-circle">
-                      <Boxes className="h-6 w-6 text-cyan-400" />
-                    </div>
-                    <h4 className="dropzone-title">3D Building Mesh (.glb, .obj, .zip)</h4>
-                    <p className="dropzone-desc">Matterport OBJ/ZIP or GLB (Auto-converted & Draco compressed)</p>
-                    <input 
-                      type="file" 
-                      accept=".glb,.gltf,.obj,.zip"
-                      onChange={(e) => setGlbFile(e.target.files[0])}
-                      className="dropzone-file-input"
-                    />
-                    {glbFile && <div className="file-ready-badge">{glbFile.name} ({formatFileSize(glbFile.size)})</div>}
-                  </div>
-
-                  {/* 3D Texture Compression Profile Selector */}
-                  <div style={{ gridColumn: '1 / -1', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '16px 20px', marginTop: '4px', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                      <Cpu className="h-4 w-4 text-cyan-400" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        3D Mesh Texture Compression Profile (KTX2 Basis Universal)
+                <div>
+                  {/* Prompt: Pre-Processed Assets vs Raw Assets */}
+                  <div style={{ marginBottom: '24px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                      <label className="field-label" style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>
+                        Virtual Tour Asset Ingestion Mode
+                      </label>
+                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                        Choose whether your assets are already processed or require server transcoding
                       </span>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                      {/* UASTC Card */}
-                      <div 
-                        onClick={() => setCompressionMode('uastc')}
+                    <div className="prompt-selector-grid">
+                      {/* Option 1: Already Processed Assets (Recommended) */}
+                      <div
+                        onClick={() => setIsPreprocessedAssets(true)}
                         style={{
-                          border: compressionMode === 'uastc' ? '2px solid #06b6d4' : '1px solid rgba(255, 255, 255, 0.1)',
-                          background: compressionMode === 'uastc' ? 'rgba(6, 182, 212, 0.1)' : 'rgba(30, 41, 59, 0.4)',
-                          borderRadius: '10px',
-                          padding: '14px',
+                          padding: '18px 20px',
+                          borderRadius: '14px',
                           cursor: 'pointer',
-                          transition: 'all 0.2s'
+                          background: isPreprocessedAssets ? 'rgba(6, 182, 212, 0.12)' : 'rgba(15, 23, 42, 0.5)',
+                          border: isPreprocessedAssets ? '2px solid #06b6d4' : '1px solid rgba(255, 255, 255, 0.08)',
+                          boxShadow: isPreprocessedAssets ? '0 0 20px rgba(6, 182, 212, 0.18)' : 'none',
+                          transition: 'all 0.2s',
+                          position: 'relative'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                          <span style={{ fontWeight: 600, fontSize: '14px', color: compressionMode === 'uastc' ? '#38bdf8' : '#e2e8f0' }}>
-                            🏭 Industrial Facility (UASTC)
-                          </span>
-                          <span style={{ fontSize: '11px', background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
-                            Recommended
-                          </span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ padding: '8px', borderRadius: '10px', background: isPreprocessedAssets ? 'rgba(6, 182, 212, 0.25)' : 'rgba(255, 255, 255, 0.05)', color: '#38bdf8' }}>
+                              <Zap className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#ffffff' }}>
+                                Upload Already Processed Deliverables
+                              </h4>
+                              <span style={{ fontSize: '11px', color: '#38bdf8', fontWeight: 600 }}>
+                                Fast Direct Ingestion • Ready in Seconds
+                              </span>
+                            </div>
+                          </div>
+                          {isPreprocessedAssets && (
+                            <div style={{ color: '#06b6d4' }}>
+                              <CheckCircle2 className="h-5 w-5" />
+                            </div>
+                          )}
                         </div>
                         <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
-                          Photorealistic 8-bit RGBA fidelity. Preserves razor-sharp pipe labels, equipment gauges, and metallic machinery reflections with 75% VRAM savings.
+                          Upload deliverables already generated by the pipeline (<code style={{ color: '#38bdf8' }}>panoramas.zip</code>, <code style={{ color: '#38bdf8' }}>model.glb</code>, <code style={{ color: '#38bdf8' }}>scans.json</code>). Bypasses server transcoding.
                         </p>
                       </div>
 
-                      {/* ETC1S Card */}
-                      <div 
-                        onClick={() => setCompressionMode('etc1s')}
+                      {/* Option 2: Raw Scan Assets (Process on Server) */}
+                      <div
+                        onClick={() => setIsPreprocessedAssets(false)}
                         style={{
-                          border: compressionMode === 'etc1s' ? '2px solid #10b981' : '1px solid rgba(255, 255, 255, 0.1)',
-                          background: compressionMode === 'etc1s' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(30, 41, 59, 0.4)',
-                          borderRadius: '10px',
-                          padding: '14px',
+                          padding: '18px 20px',
+                          borderRadius: '14px',
                           cursor: 'pointer',
-                          transition: 'all 0.2s'
+                          background: !isPreprocessedAssets ? 'rgba(168, 85, 247, 0.12)' : 'rgba(15, 23, 42, 0.5)',
+                          border: !isPreprocessedAssets ? '2px solid #a855f7' : '1px solid rgba(255, 255, 255, 0.08)',
+                          boxShadow: !isPreprocessedAssets ? '0 0 20px rgba(168, 85, 247, 0.18)' : 'none',
+                          transition: 'all 0.2s',
+                          position: 'relative'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                          <span style={{ fontWeight: 600, fontSize: '14px', color: compressionMode === 'etc1s' ? '#34d399' : '#e2e8f0' }}>
-                            🚜 Construction Site & Terrain (ETC1S)
-                          </span>
-                          <span style={{ fontSize: '11px', background: 'rgba(52, 211, 153, 0.2)', color: '#34d399', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
-                            Ultra Compact
-                          </span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ padding: '8px', borderRadius: '10px', background: !isPreprocessedAssets ? 'rgba(168, 85, 247, 0.25)' : 'rgba(255, 255, 255, 0.05)', color: '#c084fc' }}>
+                              <Cpu className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#ffffff' }}>
+                                Process Raw Assets on Server
+                              </h4>
+                              <span style={{ fontSize: '11px', color: '#c084fc', fontWeight: 600 }}>
+                                Cloud Transcoding • Server Pipeline
+                              </span>
+                            </div>
+                          </div>
+                          {!isPreprocessedAssets && (
+                            <div style={{ color: '#a855f7' }}>
+                              <CheckCircle2 className="h-5 w-5" />
+                            </div>
+                          )}
                         </div>
                         <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
-                          Extreme vector-quantized compression (up to 75% smaller files). Ideal for massive outdoor construction sites, dirt terrains, quarries, and weak 4G/5G connections.
+                          Upload raw meshes (.glb/.obj/.zip) and raw panoramas. The cloud server will transcode cubemaps and compress textures to Basis Universal KTX2.
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* 2. 360° Panoramas & Cubemaps Package (panoramas.zip) */}
-                  <div className="upload-dropzone-box">
-                    <div className="dropzone-icon-circle">
-                      <Camera className="h-6 w-6 text-emerald-400" />
-                    </div>
-                    <h4 className="dropzone-title">360° Panoramas & Cubemaps (.zip)</h4>
-                    <p className="dropzone-desc">Extracted cubemaps & transition panoramas package</p>
-                    <input 
-                      type="file" 
-                      accept=".zip"
-                      onChange={(e) => setPanoramasZipFile(e.target.files[0])}
-                      className="dropzone-file-input"
-                    />
-                    {panoramasZipFile && <div className="file-ready-badge">{panoramasZipFile.name} ({formatFileSize(panoramasZipFile.size)})</div>}
-                  </div>
+                  {/* ─── CASE A: PRE-PROCESSED DELIVERABLES DROPZONES ─── */}
+                  {isPreprocessedAssets ? (
+                    <div>
+                      <div className="fast-ingestion-banner">
+                        <Zap className="h-5 w-5 text-cyan-400 flex-shrink-0" />
+                        <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.4' }}>
+                          <strong style={{ color: '#38bdf8' }}>Fast Direct Ingestion Active:</strong> Assets will be stored directly to MinIO storage. You can select the files generated in <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px', color: '#34d399' }}>d:\3d-viewer\processed_tour_deliverables\</code>.
+                        </div>
+                      </div>
 
-                  {/* 3. Scans Telemetry JSON / CSV */}
-                  <div className="upload-dropzone-box">
-                    <div className="dropzone-icon-circle">
-                      <FileCheck className="h-6 w-6 text-indigo-400" />
-                    </div>
-                    <h4 className="dropzone-title">Scan Telemetry (scans.json)</h4>
-                    <p className="dropzone-desc">E57 / Matterport scanner coordinates & quaternions</p>
-                    <input 
-                      type="file" 
-                      accept=".json,.csv"
-                      onChange={(e) => setJsonFile(e.target.files[0])}
-                      className="dropzone-file-input"
-                    />
-                    {jsonFile && <div className="file-ready-badge">{jsonFile.name} ({formatFileSize(jsonFile.size)})</div>}
-                  </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        {/* 1. Panoramas ZIP (panoramas.zip) */}
+                        <div className={`upload-dropzone-box ${panoramasZipFile ? 'has-file' : ''}`}>
+                          <div className="dropzone-icon-circle" style={{ background: 'rgba(16, 185, 129, 0.15)' }}>
+                            <Camera className="h-6 w-6 text-emerald-400" />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <h4 className="dropzone-title">Panoramas Archive (.zip)</h4>
+                            <span style={{ fontSize: '10px', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>Required</span>
+                          </div>
+                          <p className="dropzone-desc">panoramas.zip with all 198 stations, cubemaps & KTX2</p>
+                          <input 
+                            type="file" 
+                            accept=".zip"
+                            onChange={(e) => setPanoramasZipFile(e.target.files[0])}
+                            className="dropzone-file-input"
+                          />
+                          {panoramasZipFile && (
+                            <div className="file-ready-badge">
+                              {panoramasZipFile.name} ({formatFileSize(panoramasZipFile.size)})
+                            </div>
+                          )}
+                        </div>
 
-                  {/* 4. Optional: Reconstructed Software Registration (RealityCapture / Metashape JSON or CSV) */}
-                  <div className="upload-dropzone-box" style={{ border: rcJsonFile ? '1px solid #a855f7' : '1px dashed rgba(255, 255, 255, 0.15)' }}>
-                    <div className="dropzone-icon-circle" style={{ background: 'rgba(168, 85, 247, 0.15)' }}>
-                      <Compass className="h-6 w-6 text-purple-400" />
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                      <h4 className="dropzone-title">Software Registration (.json, .csv)</h4>
-                      <span style={{ fontSize: '10px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>Optional</span>
-                    </div>
-                    <p className="dropzone-desc">RealityCapture / Metashape camera export to realign coordinates</p>
-                    <input 
-                      type="file" 
-                      accept=".json,.csv"
-                      onChange={(e) => setRcJsonFile(e.target.files[0])}
-                      className="dropzone-file-input"
-                    />
-                    {rcJsonFile && <div className="file-ready-badge" style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.4)' }}>{rcJsonFile.name} ({formatFileSize(rcJsonFile.size)})</div>}
-                  </div>
+                        {/* 2. Master 3D Model (model.glb) */}
+                        <div className={`upload-dropzone-box ${glbFile ? 'has-file' : ''}`}>
+                          <div className="dropzone-icon-circle" style={{ background: 'rgba(6, 182, 212, 0.15)' }}>
+                            <Boxes className="h-6 w-6 text-cyan-400" />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <h4 className="dropzone-title">Master 3D Model (model.glb)</h4>
+                            <span style={{ fontSize: '10px', background: 'rgba(6, 182, 212, 0.2)', color: '#38bdf8', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>Required</span>
+                          </div>
+                          <p className="dropzone-desc">Pre-optimized Draco GLB master mesh for desktop</p>
+                          <input 
+                            type="file" 
+                            accept=".glb"
+                            onChange={(e) => setGlbFile(e.target.files[0])}
+                            className="dropzone-file-input"
+                          />
+                          {glbFile && (
+                            <div className="file-ready-badge">
+                              {glbFile.name} ({formatFileSize(glbFile.size)})
+                            </div>
+                          )}
+                        </div>
 
-                  {/* 4. Thumbnail Cover */}
-                  <div className="upload-dropzone-box">
-                    <div className="dropzone-icon-circle">
-                      <ImageIcon className="h-6 w-6 text-amber-400" />
+                        {/* 3. Mobile LOD1 Model (model_lod1.glb) */}
+                        <div className={`upload-dropzone-box ${lod1GlbFile ? 'has-file' : ''}`}>
+                          <div className="dropzone-icon-circle" style={{ background: 'rgba(245, 158, 11, 0.15)' }}>
+                            <Cpu className="h-6 w-6 text-amber-400" />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <h4 className="dropzone-title">Mobile LOD1 Model (.glb)</h4>
+                            <span style={{ fontSize: '10px', background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>Mobile LOD</span>
+                          </div>
+                          <p className="dropzone-desc">model_lod1.glb lightweight mesh for phones & tablets</p>
+                          <input 
+                            type="file" 
+                            accept=".glb"
+                            onChange={(e) => setLod1GlbFile(e.target.files[0])}
+                            className="dropzone-file-input"
+                          />
+                          {lod1GlbFile && (
+                            <div className="file-ready-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', borderColor: 'rgba(245, 158, 11, 0.35)' }}>
+                              {lod1GlbFile.name} ({formatFileSize(lod1GlbFile.size)})
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 4. Scan Coordinates (scans.json) */}
+                        <div className={`upload-dropzone-box ${jsonFile ? 'has-file' : ''}`}>
+                          <div className="dropzone-icon-circle" style={{ background: 'rgba(99, 102, 241, 0.15)' }}>
+                            <FileCheck className="h-6 w-6 text-indigo-400" />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <h4 className="dropzone-title">Scan Telemetry (scans.json)</h4>
+                            <span style={{ fontSize: '10px', background: 'rgba(99, 102, 241, 0.2)', color: '#818cf8', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>Required</span>
+                          </div>
+                          <p className="dropzone-desc">Scanner positions & quaternions coordinate data</p>
+                          <input 
+                            type="file" 
+                            accept=".json,.csv"
+                            onChange={(e) => setJsonFile(e.target.files[0])}
+                            className="dropzone-file-input"
+                          />
+                          {jsonFile && (
+                            <div className="file-ready-badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.35)' }}>
+                              {jsonFile.name} ({formatFileSize(jsonFile.size)})
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 5. Scan Metadata (scan_metadata.json) */}
+                        <div className={`upload-dropzone-box ${scanMetadataFile ? 'has-file' : ''}`}>
+                          <div className="dropzone-icon-circle" style={{ background: 'rgba(168, 85, 247, 0.15)' }}>
+                            <FileText className="h-6 w-6 text-purple-400" />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <h4 className="dropzone-title">Multi-Res Manifest (.json)</h4>
+                            <span style={{ fontSize: '10px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>Multi-Res</span>
+                          </div>
+                          <p className="dropzone-desc">scan_metadata.json resolution index and manifests</p>
+                          <input 
+                            type="file" 
+                            accept=".json"
+                            onChange={(e) => setScanMetadataFile(e.target.files[0])}
+                            className="dropzone-file-input"
+                          />
+                          {scanMetadataFile && (
+                            <div className="file-ready-badge" style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', borderColor: 'rgba(168, 85, 247, 0.4)' }}>
+                              {scanMetadataFile.name} ({formatFileSize(scanMetadataFile.size)})
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 6. Dashboard Cover Thumbnail (thumbnail.jpg) */}
+                        <div className={`upload-dropzone-box ${thumbnailFile ? 'has-file' : ''}`}>
+                          <div className="dropzone-icon-circle" style={{ background: 'rgba(244, 63, 94, 0.15)' }}>
+                            <ImageIcon className="h-6 w-6 text-rose-400" />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <h4 className="dropzone-title">Cover Thumbnail (.jpg / .png)</h4>
+                            <span style={{ fontSize: '10px', background: 'rgba(255, 255, 255, 0.1)', color: '#94a3b8', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>Optional</span>
+                          </div>
+                          <p className="dropzone-desc">thumbnail.jpg preview image for project list</p>
+                          <input 
+                            type="file" 
+                            accept="image/*"
+                            onChange={(e) => setThumbnailFile(e.target.files[0])}
+                            className="dropzone-file-input"
+                          />
+                          {thumbnailFile && (
+                            <div className="file-ready-badge" style={{ background: 'rgba(244, 63, 94, 0.15)', color: '#fb7185', borderColor: 'rgba(244, 63, 94, 0.35)' }}>
+                              {thumbnailFile.name} ({formatFileSize(thumbnailFile.size)})
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <h4 className="dropzone-title">Cover Thumbnail (.jpg / .png)</h4>
-                    <p className="dropzone-desc">Preview image for the project dashboard</p>
-                    <input 
-                      type="file" 
-                      accept="image/*"
-                      onChange={(e) => setThumbnailFile(e.target.files[0])}
-                      className="dropzone-file-input"
-                    />
-                    {thumbnailFile && <div className="file-ready-badge">{thumbnailFile.name}</div>}
-                  </div>
+                  ) : (
+                    /* ─── CASE B: RAW UPLOAD & SERVER PROCESSING DROPZONES ─── */
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                      {/* 1. 3D Building Mesh (GLB / OBJ / ZIP) */}
+                      <div className="upload-dropzone-box">
+                        <div className="dropzone-icon-circle">
+                          <Boxes className="h-6 w-6 text-cyan-400" />
+                        </div>
+                        <h4 className="dropzone-title">3D Building Mesh (.glb, .obj, .zip)</h4>
+                        <p className="dropzone-desc">Matterport OBJ/ZIP or GLB (Auto-converted & Draco compressed)</p>
+                        <input 
+                          type="file" 
+                          accept=".glb,.gltf,.obj,.zip"
+                          onChange={(e) => setGlbFile(e.target.files[0])}
+                          className="dropzone-file-input"
+                        />
+                        {glbFile && <div className="file-ready-badge">{glbFile.name} ({formatFileSize(glbFile.size)})</div>}
+                      </div>
+
+                      {/* 3D Texture Compression Profile Selector */}
+                      <div style={{ gridColumn: '1 / -1', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '16px 20px', marginTop: '4px', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                          <Cpu className="h-4 w-4 text-cyan-400" />
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            3D Mesh Texture Compression Profile (KTX2 Basis Universal)
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                          {/* UASTC Card */}
+                          <div 
+                            onClick={() => setCompressionMode('uastc')}
+                            style={{
+                              border: compressionMode === 'uastc' ? '2px solid #06b6d4' : '1px solid rgba(255, 255, 255, 0.1)',
+                              background: compressionMode === 'uastc' ? 'rgba(6, 182, 212, 0.1)' : 'rgba(30, 41, 59, 0.4)',
+                              borderRadius: '10px',
+                              padding: '14px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                              <span style={{ fontWeight: 600, fontSize: '14px', color: compressionMode === 'uastc' ? '#38bdf8' : '#e2e8f0' }}>
+                                🏭 Industrial Facility (UASTC)
+                              </span>
+                              <span style={{ fontSize: '11px', background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                                Recommended
+                              </span>
+                            </div>
+                            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
+                              Photorealistic 8-bit RGBA fidelity. Preserves razor-sharp pipe labels, equipment gauges, and metallic machinery reflections with 75% VRAM savings.
+                            </p>
+                          </div>
+
+                          {/* ETC1S Card */}
+                          <div 
+                            onClick={() => setCompressionMode('etc1s')}
+                            style={{
+                              border: compressionMode === 'etc1s' ? '2px solid #10b981' : '1px solid rgba(255, 255, 255, 0.1)',
+                              background: compressionMode === 'etc1s' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(30, 41, 59, 0.4)',
+                              borderRadius: '10px',
+                              padding: '14px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                              <span style={{ fontWeight: 600, fontSize: '14px', color: compressionMode === 'etc1s' ? '#34d399' : '#e2e8f0' }}>
+                                🚜 Construction Site & Terrain (ETC1S)
+                              </span>
+                              <span style={{ fontSize: '11px', background: 'rgba(52, 211, 153, 0.2)', color: '#34d399', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                                Ultra Compact
+                              </span>
+                            </div>
+                            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
+                              Extreme vector-quantized compression (up to 75% smaller files). Ideal for massive outdoor construction sites, dirt terrains, quarries, and weak 4G/5G connections.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 2. 360° Panoramas & Cubemaps Package (panoramas.zip) */}
+                      <div className="upload-dropzone-box">
+                        <div className="dropzone-icon-circle">
+                          <Camera className="h-6 w-6 text-emerald-400" />
+                        </div>
+                        <h4 className="dropzone-title">360° Panoramas & Cubemaps (.zip)</h4>
+                        <p className="dropzone-desc">Extracted cubemaps & transition panoramas package</p>
+                        <input 
+                          type="file" 
+                          accept=".zip"
+                          onChange={(e) => setPanoramasZipFile(e.target.files[0])}
+                          className="dropzone-file-input"
+                        />
+                        {panoramasZipFile && <div className="file-ready-badge">{panoramasZipFile.name} ({formatFileSize(panoramasZipFile.size)})</div>}
+                      </div>
+
+                      {/* 3. Scans Telemetry JSON / CSV */}
+                      <div className="upload-dropzone-box">
+                        <div className="dropzone-icon-circle">
+                          <FileCheck className="h-6 w-6 text-indigo-400" />
+                        </div>
+                        <h4 className="dropzone-title">Scan Telemetry (scans.json)</h4>
+                        <p className="dropzone-desc">E57 / Matterport scanner coordinates & quaternions</p>
+                        <input 
+                          type="file" 
+                          accept=".json,.csv"
+                          onChange={(e) => setJsonFile(e.target.files[0])}
+                          className="dropzone-file-input"
+                        />
+                        {jsonFile && <div className="file-ready-badge">{jsonFile.name} ({formatFileSize(jsonFile.size)})</div>}
+                      </div>
+
+                      {/* 4. Software Registration */}
+                      <div className="upload-dropzone-box" style={{ border: rcJsonFile ? '1px solid #a855f7' : '1px dashed rgba(255, 255, 255, 0.15)' }}>
+                        <div className="dropzone-icon-circle" style={{ background: 'rgba(168, 85, 247, 0.15)' }}>
+                          <Compass className="h-6 w-6 text-purple-400" />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                          <h4 className="dropzone-title">Software Registration (.json, .csv)</h4>
+                          <span style={{ fontSize: '10px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>Optional</span>
+                        </div>
+                        <p className="dropzone-desc">RealityCapture / Metashape camera export to realign coordinates</p>
+                        <input 
+                          type="file" 
+                          accept=".json,.csv"
+                          onChange={(e) => setRcJsonFile(e.target.files[0])}
+                          className="dropzone-file-input"
+                        />
+                        {rcJsonFile && <div className="file-ready-badge" style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.4)' }}>{rcJsonFile.name} ({formatFileSize(rcJsonFile.size)})</div>}
+                      </div>
+
+                      {/* 5. Thumbnail Cover */}
+                      <div className="upload-dropzone-box">
+                        <div className="dropzone-icon-circle">
+                          <ImageIcon className="h-6 w-6 text-amber-400" />
+                        </div>
+                        <h4 className="dropzone-title">Cover Thumbnail (.jpg / .png)</h4>
+                        <p className="dropzone-desc">Preview image for the project dashboard</p>
+                        <input 
+                          type="file" 
+                          accept="image/*"
+                          onChange={(e) => setThumbnailFile(e.target.files[0])}
+                          className="dropzone-file-input"
+                        />
+                        {thumbnailFile && <div className="file-ready-badge">{thumbnailFile.name}</div>}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -924,8 +1268,17 @@ function NewInspectionContent() {
                 className="btn-primary-gradient"
                 style={{ padding: '12px 28px', fontSize: '15px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
               >
-                <span>Upload & Launch Digital Twin</span>
-                <ArrowRight className="h-4 w-4" />
+                {selectedType === 'VIRTUAL_TOUR' && isPreprocessedAssets ? (
+                  <>
+                    <Zap className="h-4 w-4 text-amber-300 fill-amber-300" />
+                    <span>Start Fast Ingestion & Launch Mission</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Upload & Launch Digital Twin</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
               </button>
             </div>
           </div>

@@ -53,7 +53,7 @@ export default function VolumeListPanel({
         (s.result?.netVolume ?? 0).toFixed(2),
         (s.result?.estimatedMassTons ?? 0).toFixed(2),
         (s.result?.area2D ?? 0).toFixed(2),
-        s.baseMethod || 'TIN'
+        s.baseMethod || 'Lowest'
       ]);
     });
 
@@ -156,7 +156,7 @@ export default function VolumeListPanel({
       {stockpiles.length > 0 && (
         <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1 custom-scrollbar">
           {stockpiles.map((s, idx) => {
-            const isSelected = s.id === selectedStockpileId || (selectedStockpileId === null && idx === stockpiles.length - 1);
+            const isSelected = !isDrawing && (s.id === selectedStockpileId || (selectedStockpileId === null && idx === stockpiles.length - 1));
             const isAccumulated = accumulatedStockpileIds.includes(s.id);
             return (
               <div
@@ -204,7 +204,7 @@ export default function VolumeListPanel({
                       <span className="text-slate-600">•</span>
                       <span className="text-amber-300 font-medium">Mass: {(s.result?.estimatedMassTons ?? 0).toFixed(0)}t</span>
                       <span className="text-slate-600">•</span>
-                      <span className="text-slate-400">{s.baseMethod?.toUpperCase() || 'TIN'}</span>
+                      <span className="text-slate-400">{s.baseMethod?.toUpperCase() || 'LOWEST'}</span>
                     </div>
                   </div>
                 </div>

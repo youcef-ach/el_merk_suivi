@@ -28,93 +28,176 @@ export const iconMap = {
   accessibility: faWheelchair, lightning: faBolt, lock: faLock, water: faTint, fire: faFire
 };
 
+// Standard screen-space base scale for tags (invariant to distance, crisp and legible from 1m to 1000m)
+export const TAG_BASE_SCALE_Y = 0.11;
+export const TAG_BASE_SCALE_X = TAG_BASE_SCALE_Y * (384 / 512); // 0.0825 (matches 384x512 aspect ratio)
+
 /**
- * Creates a Matterport-style tag-pin sprite texture via Canvas API.
+ * Creates a modern, high-DPI Matterport-style tag-pin sprite texture via Canvas API.
+ * Features:
+ * - Ground target ring at the exact 3D surface contact point
+ * - Sleek connecting stem
+ * - Glowing circular pin head with centered FontAwesome icon
+ * - Dark-glass pill badge with glowing border for 100% title legibility against any terrain
+ * - Screen-space constant sizing (sizeAttenuation: false)
  */
 export function createTagSpriteMaterial(title, icon = 'info', color = '#00e5ff', isSelected = false) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  canvas.width = 200;
-  canvas.height = 300;
-  const cx = 100;
+  canvas.width = 384;
+  canvas.height = 512;
+  const cx = 192;
 
-  const baseColor = color;
+  const baseColor = color || '#00e5ff';
 
-  // 1. Base Dot (This will physically touch the 3D model)
+  // 1. Ground Target Ring & Anchor Point (contacts 3D model at center.set(0.5, 0.0))
+  // Elliptical ground contact pulse ring
   ctx.beginPath();
-  ctx.arc(cx, 290, 6, 0, Math.PI * 2);
-  ctx.fillStyle = hexToRgba(baseColor, 0.9);
-  ctx.shadowColor = ctx.fillStyle;
-  ctx.shadowBlur = 10;
+  ctx.ellipse(cx, 500, 22, 8, 0, 0, Math.PI * 2);
+  ctx.fillStyle = hexToRgba(baseColor, 0.25);
   ctx.fill();
-  ctx.shadowBlur = 0; // reset
-
-  // 2. Stem Line (Connecting base to the main circle)
-  ctx.beginPath();
-  ctx.moveTo(cx, 140);
-  ctx.lineTo(cx, 284);
-  ctx.strokeStyle = hexToRgba(baseColor, 0.9);
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = hexToRgba(baseColor, 0.85);
   ctx.stroke();
 
-  // 3. Main Circle (Head)
+  // Contact center dot
   ctx.beginPath();
-  ctx.arc(cx, 100, 42, 0, Math.PI * 2);
-  
-  const grad = ctx.createRadialGradient(cx, 100, 5, cx, 100, 42);
-  grad.addColorStop(0, hexToRgba(baseColor, 1));
-  grad.addColorStop(1, hexToRgba(baseColor, 0.7));
-  ctx.fillStyle = grad;
-  ctx.shadowColor = hexToRgba(baseColor, isSelected ? 0.9 : 0.6);
-  ctx.shadowBlur = isSelected ? 30 : 20;
+  ctx.arc(cx, 500, 6, 0, Math.PI * 2);
+  ctx.fillStyle = hexToRgba(baseColor, 1.0);
+  ctx.shadowColor = hexToRgba(baseColor, 0.9);
+  ctx.shadowBlur = 10;
   ctx.fill();
   ctx.shadowBlur = 0;
-  
-  // 4. Inner Ring/Icon
-  ctx.beginPath();
-  ctx.arc(cx, 100, 24, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-  ctx.fill();
 
+  // 2. Stem Line (Connecting ground anchor to pin head)
+  ctx.beginPath();
+  ctx.moveTo(cx, 262);
+  ctx.lineTo(cx, 494);
+  ctx.strokeStyle = hexToRgba(baseColor, 0.45);
+  ctx.lineWidth = 6;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(cx, 262);
+  ctx.lineTo(cx, 494);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // 3. Main Pin Head Circle
+  const headY = 215;
+  const headRadius = 46;
+
+  // Outer glowing halo when selected
+  if (isSelected) {
+    ctx.beginPath();
+    ctx.arc(cx, headY, 62, 0, Math.PI * 2);
+    ctx.strokeStyle = hexToRgba(baseColor, 0.65);
+    ctx.lineWidth = 4;
+    ctx.shadowColor = hexToRgba(baseColor, 0.95);
+    ctx.shadowBlur = 25;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  // Outer circular head with radial gradient
+  ctx.beginPath();
+  ctx.arc(cx, headY, headRadius, 0, Math.PI * 2);
+  const grad = ctx.createRadialGradient(cx, headY - 10, 5, cx, headY, headRadius);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.25, hexToRgba(baseColor, 1.0));
+  grad.addColorStop(1, hexToRgba(baseColor, 0.85));
+  ctx.fillStyle = grad;
+  ctx.shadowColor = hexToRgba(baseColor, isSelected ? 0.95 : 0.65);
+  ctx.shadowBlur = isSelected ? 24 : 14;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.stroke();
+
+  // Inner white circle
+  ctx.beginPath();
+  ctx.arc(cx, headY, 28, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+  ctx.shadowBlur = 6;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // FontAwesome Icon inside inner circle
   const iconDef = iconMap[icon] || faInfoCircle;
-  // FontAwesome icon format: [width, height, ligatures, unicode, svgPath]
   const [width, height, _ligatures, _unicode, svgPath] = iconDef.icon;
 
   ctx.save();
-  const targetSize = 26; // 26x26 icon scaling inside 48x48 space
+  const targetSize = 32;
   const scale = targetSize / Math.max(width, height);
-  
   const scaledWidth = width * scale;
   const scaledHeight = height * scale;
-  
-  ctx.translate(cx - scaledWidth / 2, 100 - scaledHeight / 2);
+
+  ctx.translate(cx - scaledWidth / 2, headY - scaledHeight / 2);
   ctx.scale(scale, scale);
-  
+
   const p = new Path2D(svgPath);
-  ctx.fillStyle = '#1e293b'; // professional slate-800 color for the icon core
+  ctx.fillStyle = '#0f172a'; // Crisp slate-900 icon core
   ctx.fill(p);
   ctx.restore();
 
-  // 5. Title Label (Floating above the head)
+  // 4. Title Label (Floating above the head with sleek dark-glass pill)
   if (title) {
-    const label = title.length > 15 ? title.slice(0, 14) + '…' : title;
-    ctx.font = 'bold 16px Inter, Arial, sans-serif';
+    const label = title.length > 20 ? title.slice(0, 19) + '…' : title;
+    ctx.font = 'bold 22px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    const textMetrics = ctx.measureText(label);
+    const pillWidth = Math.min(350, Math.max(120, textMetrics.width + 36));
+    const pillHeight = 44;
+    const pillX = cx - pillWidth / 2;
+    const pillY = 95;
+
+    // Dark-glass pill background
+    ctx.save();
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(pillX, pillY, pillWidth, pillHeight, 22);
+    } else {
+      ctx.rect(pillX, pillY, pillWidth, pillHeight);
+    }
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+    ctx.shadowColor = isSelected ? hexToRgba(baseColor, 0.85) : 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = isSelected ? 16 : 8;
+    ctx.fill();
+
+    ctx.lineWidth = isSelected ? 2.5 : 1.5;
+    ctx.strokeStyle = isSelected ? '#ffffff' : hexToRgba(baseColor, 0.75);
+    ctx.stroke();
+    ctx.restore();
+
+    // Bottom pointer arrow
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, pillY + pillHeight);
+    ctx.lineTo(cx, pillY + pillHeight + 8);
+    ctx.lineTo(cx + 8, pillY + pillHeight);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+    ctx.fill();
+
+    // Text inside pill
+    ctx.font = 'bold 22px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.lineWidth = 3;
-    ctx.strokeText(label, cx, 40);
-    ctx.fillText(label, cx, 40);
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, cx, pillY + pillHeight / 2);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
 
   return new THREE.SpriteMaterial({
     map: texture,
     depthTest: false,
     transparent: true,
-    sizeAttenuation: true,
+    sizeAttenuation: false,
   });
 }
 
@@ -129,6 +212,7 @@ export const useTags = (viewerRef, tourId) => {
   const [tags, setTags] = useState([]);
   const [selectedTagId, setSelectedTagId] = useState(null);
   const tagsGroupRef = useRef(null);
+  const isCreatingRef = useRef(false);
 
   const getToken = () => localStorage.getItem('access_token');
 
@@ -173,6 +257,14 @@ export const useTags = (viewerRef, tourId) => {
     const group = ensureTagsGroup();
     if (!group) return null;
 
+    // Remove any pre-existing sprite for this tagId to guarantee no duplicate 3D pins
+    const existing = group.children.find(child => child.userData?.tagId === tag.id);
+    if (existing) {
+      group.remove(existing);
+      if (existing.material?.map) existing.material.map.dispose();
+      if (existing.material) existing.material.dispose();
+    }
+
     const mat = createTagSpriteMaterial(tag.title, tag.icon, tag.color, false);
     const sprite = new THREE.Sprite(mat);
     sprite.position.set(tag.posX, tag.posY, tag.posZ);
@@ -182,8 +274,8 @@ export const useTags = (viewerRef, tourId) => {
     sprite.center.set(0.5, 0.0);
     
     // Base scale modified by custom tag size value
-    const sizeMult = tag.size ?? 1.0;
-    sprite.scale.set(0.4 * sizeMult, 0.6 * sizeMult, 1);
+    const sizeMult = Math.min(2.0, Math.max(0.6, Number(tag.size) || 1.0));
+    sprite.scale.set(TAG_BASE_SCALE_X * sizeMult, TAG_BASE_SCALE_Y * sizeMult, 1);
     
     sprite.renderOrder = 1000;
     sprite.userData = {
@@ -191,7 +283,7 @@ export const useTags = (viewerRef, tourId) => {
       title: tag.title,
       icon: tag.icon,
       color: tag.color,
-      size: tag.size ?? 1.0,
+      size: sizeMult,
       isActive: false
     };
     group.add(sprite);
@@ -210,10 +302,15 @@ export const useTags = (viewerRef, tourId) => {
       .then(r => r.json())
       .then(tour => {
         if (tour.tags && tour.tags.length > 0) {
-          const loaded = tour.tags.map(t => ({
-            ...t,
-            sprite: null, // will be set once group is ready
-          }));
+          // Deduplicate tags by id
+          const seen = new Set();
+          const loaded = [];
+          for (const t of tour.tags) {
+            if (!seen.has(t.id)) {
+              seen.add(t.id);
+              loaded.push({ ...t, sprite: null });
+            }
+          }
           setTags(loaded);
         }
       })
@@ -345,7 +442,9 @@ export const useTags = (viewerRef, tourId) => {
   // ─── Create Tag (after title prompt) ──────────────
   const createTag = useCallback(async (title, position) => {
     const token = getToken();
-    if (!token || !tourId) return;
+    if (!token || !tourId) return null;
+    if (isCreatingRef.current) return null; // Prevent double-trigger
+    isCreatingRef.current = true;
 
     try {
       const res = await fetch(`${API}/inspections/${tourId}/tags`, {
@@ -366,13 +465,19 @@ export const useTags = (viewerRef, tourId) => {
       const newTag = await res.json();
 
       const sprite = addTagSprite(newTag);
-      setTags(prev => [...prev, { ...newTag, sprite }]);
+      setTags(prev => {
+        if (prev.some(t => t.id === newTag.id)) return prev;
+        return [...prev, { ...newTag, sprite }];
+      });
       setSelectedTagId(newTag.id);
       updateSpriteSelection(newTag.id);
 
       return newTag;
     } catch (err) {
       console.error('Tag creation failed:', err);
+      return null;
+    } finally {
+      isCreatingRef.current = false;
     }
   }, [tourId, addTagSprite]);
 
@@ -396,27 +501,30 @@ export const useTags = (viewerRef, tourId) => {
 
       setTags(prev => prev.map(t => {
         if (t.id === tagId) {
-          if (t.sprite) {
+          const sprite = t.sprite || tagsGroupRef.current?.children.find(c => c.userData?.tagId === tagId);
+          if (sprite) {
             if (data.title !== undefined || data.icon !== undefined || data.color !== undefined) {
               const newTitle = data.title !== undefined ? data.title : t.title;
               const newIcon = data.icon !== undefined ? data.icon : t.icon;
               const newColor = data.color !== undefined ? data.color : t.color;
               const mat = createTagSpriteMaterial(newTitle, newIcon, newColor, selectedTagId === tagId);
-              t.sprite.material.map?.dispose();
-              t.sprite.material.dispose();
-              t.sprite.material = mat;
+              if (sprite.material.map) sprite.material.map.dispose();
+              sprite.material.dispose();
+              sprite.material = mat;
               
-              t.sprite.userData.title = newTitle;
-              t.sprite.userData.icon = newIcon;
-              t.sprite.userData.color = newColor;
+              sprite.userData.title = newTitle;
+              sprite.userData.icon = newIcon;
+              sprite.userData.color = newColor;
             }
             if (data.size !== undefined) {
-              const sizeMult = data.size;
-              t.sprite.scale.set(0.4 * sizeMult, 0.6 * sizeMult, 1);
-              t.sprite.userData.size = sizeMult;
+              const sizeMult = Math.min(2.0, Math.max(0.6, Number(data.size) || 1.0));
+              const isActive = selectedTagId === tagId;
+              const activeBump = isActive ? 1.15 : 1.0;
+              sprite.scale.set(TAG_BASE_SCALE_X * sizeMult * activeBump, TAG_BASE_SCALE_Y * sizeMult * activeBump, 1);
+              sprite.userData.size = sizeMult;
             }
           }
-          return { ...t, ...updated };
+          return { ...t, ...updated, sprite: sprite || t.sprite };
         }
         return t;
       }));
@@ -542,12 +650,13 @@ export const useTags = (viewerRef, tourId) => {
     if (!tagsGroupRef.current) return;
     tagsGroupRef.current.children.forEach(sprite => {
       const isActive = sprite.userData.tagId === activeId;
-      const baseMult = sprite.userData.size ?? 1.0;
+      const baseMult = Math.min(2.0, Math.max(0.6, Number(sprite.userData.size) || 1.0));
+      const activeBump = isActive ? 1.15 : 1.0;
       
       // Update Selection Scale
       sprite.scale.set(
-        (isActive ? 0.48 : 0.4) * baseMult, 
-        (isActive ? 0.72 : 0.6) * baseMult, 
+        TAG_BASE_SCALE_X * baseMult * activeBump, 
+        TAG_BASE_SCALE_Y * baseMult * activeBump, 
         1
       );
       

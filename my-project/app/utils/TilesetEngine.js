@@ -103,8 +103,8 @@ export class TilesetEngine {
     // Hypsometric Elevation Colormap Shader Uniforms (Calibrated from RealityScan DSM: 95.67m -> 103.92m ASL)
     this.heatmapUniforms = {
       uHeatmapEnabled: { value: false },
-      uMinElevation: { value: -3.64 },
-      uMaxElevation: { value: 4.61 },
+      uMinElevation: { value: 0.0 },
+      uMaxElevation: { value: 6.2 },
       uHeatmapOpacity: { value: 0.85 },
       uContourSpacing: { value: 0.5 },
       uContourEnabled: { value: true }
@@ -118,14 +118,16 @@ export class TilesetEngine {
       uSlopeCriticalAngle: { value: 35.0 }
     };
 
-    // Stockpile Area Localized Mesh Transparency Uniforms
-    const defaultPoly = new Array(16).fill(0).map(() => new THREE.Vector2(0, 0));
+    // Stockpile Area Localized Cut & Fill Volumetric Colormap Uniforms
+    const defaultPoly = new Array(32).fill(0).map(() => new THREE.Vector2(0, 0));
     this.volumeCutoutUniforms = {
       uVolumeCutoutEnabled: { value: false },
       uVolumePolyCount: { value: 0 },
       uVolumePolygon: { value: defaultPoly },
+      uVolumePlaneEq: { value: new THREE.Vector4(0, 1, 0, 0) },
       uVolumeOpacity: { value: 0.35 }
     };
+
 
     // Dense Point Cloud (LIDAR) Mode State & Uniforms
     this.pointCloudUniforms = {
@@ -215,9 +217,15 @@ export class TilesetEngine {
         this.surfaceCenterPoint = { ...initialPt };
       }
       if (options.initialElevationRange) {
-        this.elevationRange = { ...options.initialElevationRange };
-        this.heatmapUniforms.uMinElevation.value = options.initialElevationRange.min ?? -5.0;
-        this.heatmapUniforms.uMaxElevation.value = options.initialElevationRange.max ?? 5.0;
+        let rawMin = options.initialElevationRange.min ?? 0;
+        let rawMax = options.initialElevationRange.max ?? 12;
+        let span = (rawMax - rawMin) > 0 ? (rawMax - rawMin) : 10;
+        let effectiveMin = rawMin < 0 ? 0.0 : rawMin;
+        let effectiveMax = rawMin < 0 ? parseFloat(Math.max(span * 1.15, 12.0).toFixed(2)) : rawMax;
+
+        this.elevationRange = { min: effectiveMin, max: effectiveMax };
+        this.heatmapUniforms.uMinElevation.value = effectiveMin;
+        this.heatmapUniforms.uMaxElevation.value = effectiveMax;
       }
       console.log('[TilesetEngine] Pre-loaded datum applied: groundAsl =', this.groundAsl, 'meshSnap =', this.meshSnapOffsetY, 'surfaceCenterPoint =', this.surfaceCenterPoint);
     }
@@ -356,7 +364,7 @@ export class TilesetEngine {
             }
 
             // Set custom cache key to force unique shader compilation
-            child.material.customProgramCacheKey = () => 'engine_gis_shaders_v7';
+            child.material.customProgramCacheKey = () => 'engine_gis_shaders_v11';
 
             // Inject High-Definition Hypsometric Elevation & Slope Colormap Shader
             child.material.onBeforeCompile = (shader) => {
@@ -378,6 +386,7 @@ export class TilesetEngine {
               shader.uniforms.uVolumeCutoutEnabled = this.volumeCutoutUniforms.uVolumeCutoutEnabled;
               shader.uniforms.uVolumePolyCount = this.volumeCutoutUniforms.uVolumePolyCount;
               shader.uniforms.uVolumePolygon = this.volumeCutoutUniforms.uVolumePolygon;
+              shader.uniforms.uVolumePlaneEq = this.volumeCutoutUniforms.uVolumePlaneEq;
               shader.uniforms.uVolumeOpacity = this.volumeCutoutUniforms.uVolumeOpacity;
 
               shader.vertexShader = shader.vertexShader.replace(
@@ -414,38 +423,46 @@ export class TilesetEngine {
 
                  uniform bool uVolumeCutoutEnabled;
                  uniform int uVolumePolyCount;
-                 uniform vec2 uVolumePolygon[16];
+                 uniform vec2 uVolumePolygon[32];
+                 uniform vec4 uVolumePlaneEq;
                  uniform float uVolumeOpacity;
 
                  vec3 getElevationColor(float t) {
-                   t = clamp(t, 0.0, 1.0);
-                   if (t < 0.2) {
-                     return mix(vec3(0.02, 0.12, 0.85), vec3(0.0, 0.78, 0.98), t / 0.2);
-                   } else if (t < 0.4) {
-                     return mix(vec3(0.0, 0.78, 0.98), vec3(0.05, 0.88, 0.25), (t - 0.2) / 0.2);
-                   } else if (t < 0.6) {
-                     return mix(vec3(0.05, 0.88, 0.25), vec3(1.0, 0.92, 0.05), (t - 0.4) / 0.2);
-                   } else if (t < 0.8) {
-                     return mix(vec3(1.0, 0.92, 0.05), vec3(1.0, 0.4, 0.02), (t - 0.6) / 0.2);
-                   } else {
-                     return mix(vec3(1.0, 0.4, 0.02), vec3(0.92, 0.08, 0.12), (t - 0.8) / 0.2);
-                   }
-                 }
+                    t = clamp(t, 0.0, 1.0);
+                    if (t < 0.20) {
+                      // 0.00 to 0.20: Deep Royal Blue to Sky Cyan
+                      return mix(vec3(0.02, 0.20, 0.90), vec3(0.0, 0.80, 1.0), t / 0.20);
+                    } else if (t < 0.42) {
+                      // 0.20 to 0.42: Sky Cyan to Lush Emerald Green
+                      return mix(vec3(0.0, 0.80, 1.0), vec3(0.06, 0.86, 0.28), (t - 0.20) / 0.22);
+                    } else if (t < 0.65) {
+                      // 0.42 to 0.65: Emerald Green to Vibrant Sun Yellow
+                      return mix(vec3(0.06, 0.86, 0.28), vec3(1.0, 0.90, 0.06), (t - 0.42) / 0.23);
+                    } else if (t < 0.84) {
+                      // 0.65 to 0.84: Sun Yellow to Intense Orange
+                      return mix(vec3(1.0, 0.90, 0.06), vec3(1.0, 0.42, 0.02), (t - 0.65) / 0.19);
+                    } else {
+                      // 0.84 to 1.00: Intense Orange to Crimson Red
+                      return mix(vec3(1.0, 0.42, 0.02), vec3(0.94, 0.08, 0.12), (t - 0.84) / 0.16);
+                    }
+                  }
 
-                 vec3 getSlopeColor(float t) {
-                   t = clamp(t, 0.0, 1.0);
-                   if (t < 0.2) {
-                     return mix(vec3(0.06, 0.78, 0.38), vec3(0.65, 0.92, 0.15), t / 0.2);
-                   } else if (t < 0.45) {
-                     return mix(vec3(0.65, 0.92, 0.15), vec3(0.98, 0.75, 0.08), (t - 0.2) / 0.25);
-                   } else if (t < 0.7) {
-                     return mix(vec3(0.98, 0.75, 0.08), vec3(0.95, 0.35, 0.05), (t - 0.45) / 0.25);
-                   } else if (t < 0.9) {
-                     return mix(vec3(0.95, 0.35, 0.05), vec3(0.92, 0.08, 0.15), (t - 0.7) / 0.2);
-                   } else {
-                     return mix(vec3(0.92, 0.08, 0.15), vec3(0.75, 0.1, 0.85), (t - 0.9) / 0.1);
-                   }
-                 }`
+                  vec3 getSlopeColor(float t) {
+                    t = clamp(t, 0.0, 1.0);
+                    if (t < 0.25) {
+                      // 0° to ~15°: Flat / Stable Ground (Emerald Green to Yellow-Green)
+                      return mix(vec3(0.06, 0.78, 0.38), vec3(0.65, 0.92, 0.15), t / 0.25);
+                    } else if (t < 0.50) {
+                      // ~15° to ~30°: Moderate Ramp (Yellow-Green to Amber Yellow)
+                      return mix(vec3(0.65, 0.92, 0.15), vec3(0.98, 0.78, 0.08), (t - 0.25) / 0.25);
+                    } else if (t < 0.75) {
+                      // ~30° to ~45°: Steep Slope / Berm (Amber Yellow to Bright Orange)
+                      return mix(vec3(0.98, 0.78, 0.08), vec3(0.98, 0.40, 0.04), (t - 0.50) / 0.25);
+                    } else {
+                      // ~45° to 60°+: Extreme / Big Slopes (Orange to Solid Vivid Red - Last Color, No Purple)
+                      return mix(vec3(0.98, 0.40, 0.04), vec3(0.92, 0.08, 0.12), (t - 0.75) / 0.25);
+                    }
+                  }`
               );
 
               shader.fragmentShader = shader.fragmentShader.replace(
@@ -489,11 +506,11 @@ export class TilesetEngine {
                    gl_FragColor.rgb = mix(gl_FragColor.rgb, shadedSlope, uSlopeOpacity);
                  }
 
-                 // 3. Localized Cut/Fill Volume Mesh Transparency
+                 // 3. Stockpile Volumetric Coloring (Only Green Area Above Reference Plane)
                  if (uVolumeCutoutEnabled && uVolumePolyCount >= 3) {
                    bool inPoly = false;
                    vec2 p = vSceneWorldPos.xz;
-                   for (int i = 0; i < 16; i++) {
+                   for (int i = 0; i < 32; i++) {
                      if (i >= uVolumePolyCount) break;
                      int j = (i == 0) ? (uVolumePolyCount - 1) : (i - 1);
                      vec2 pi = uVolumePolygon[i];
@@ -503,7 +520,12 @@ export class TilesetEngine {
                      }
                    }
                    if (inPoly) {
-                     gl_FragColor.a = min(gl_FragColor.a, uVolumeOpacity);
+                     float cutPlaneY = (-uVolumePlaneEq.x * vSceneWorldPos.x - uVolumePlaneEq.z * vSceneWorldPos.z - uVolumePlaneEq.w) / max(0.0001, uVolumePlaneEq.y);
+                     if (vSceneWorldPos.y >= cutPlaneY) {
+                       // Stockpile Fill Volume: Continuously emerald green
+                       gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.06, 0.85, 0.42), 0.72);
+                     }
+                     // Area below cut plane remains standard natural terrain texture
                    }
                  }`
               );
@@ -648,13 +670,13 @@ export class TilesetEngine {
     }
   }
 
-  setVolumePolygonCutout(polygonPoints, opacity = 0.35) {
+  setVolumePolygonCutout(polygonPoints, planeEq = null, opacity = 0.35) {
     if (!polygonPoints || polygonPoints.length < 3) {
       this.clearVolumePolygonCutout();
       return;
     }
-    const count = Math.min(16, polygonPoints.length);
-    const arr = new Array(16).fill(0).map((_, i) => {
+    const count = Math.min(32, polygonPoints.length);
+    const arr = new Array(32).fill(0).map((_, i) => {
       if (i < count) {
         return new THREE.Vector2(polygonPoints[i].x, polygonPoints[i].z);
       }
@@ -663,13 +685,16 @@ export class TilesetEngine {
 
     this.volumeCutoutUniforms.uVolumePolygon.value = arr;
     this.volumeCutoutUniforms.uVolumePolyCount.value = count;
+    if (planeEq) {
+      this.volumeCutoutUniforms.uVolumePlaneEq.value.copy(planeEq);
+    }
     this.volumeCutoutUniforms.uVolumeOpacity.value = opacity;
     this.volumeCutoutUniforms.uVolumeCutoutEnabled.value = true;
 
     if (this.tilesRenderer && this.tilesRenderer.group) {
       this.tilesRenderer.group.traverse((child) => {
         if (child.isMesh && child.material) {
-          child.material.transparent = true;
+          child.material.transparent = false;
           child.material.depthWrite = true;
           child.material.needsUpdate = true;
         }
@@ -684,6 +709,7 @@ export class TilesetEngine {
       this.tilesRenderer.group.traverse((child) => {
         if (child.isMesh && child.material) {
           child.material.transparent = false;
+          child.material.depthWrite = true;
           child.material.needsUpdate = true;
         }
       });
@@ -1034,8 +1060,8 @@ export class TilesetEngine {
         _isEstimate: true
       },
       elevationRange: {
-        min: Number((-heightSpan * 0.5).toFixed(3)),
-        max: Number((heightSpan * 0.5).toFixed(3))
+        min: 0.0,
+        max: 6.2
       }
     };
   }

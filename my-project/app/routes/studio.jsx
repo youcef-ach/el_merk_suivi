@@ -35,6 +35,8 @@ function StudioContent() {
   // ─── Tag title prompt state ───
   const [titlePrompt, setTitlePrompt] = useState(null); // { position: Vector3 } or null
   const [promptTitle, setPromptTitle] = useState('');
+  const [isSubmittingTag, setIsSubmittingTag] = useState(false);
+  const isSubmittingTagRef = useRef(false);
 
   // ─── Area Pointer prompt state ───
   const [pointerPrompt, setPointerPrompt] = useState(null);
@@ -135,11 +137,21 @@ function StudioContent() {
   }, [handleTagClick]);
 
   const confirmTagPlacement = useCallback(async () => {
-    if (!titlePrompt || !promptTitle.trim()) return;
-    await createTag(promptTitle.trim(), titlePrompt.position);
-    setTitlePrompt(null);
-    setPromptTitle('');
-  }, [titlePrompt, promptTitle, createTag]);
+    if (!titlePrompt || !promptTitle.trim() || isSubmittingTagRef.current) return;
+    isSubmittingTagRef.current = true;
+    setIsSubmittingTag(true);
+    try {
+      const placed = await createTag(promptTitle.trim(), titlePrompt.position);
+      setTitlePrompt(null);
+      setPromptTitle('');
+      if (placed?.id) {
+        selectTag(placed.id);
+      }
+    } finally {
+      isSubmittingTagRef.current = false;
+      setIsSubmittingTag(false);
+    }
+  }, [titlePrompt, promptTitle, createTag, selectTag]);
 
   const cancelTagPlacement = useCallback(() => {
     setTitlePrompt(null);
@@ -643,19 +655,23 @@ function StudioContent() {
               value={promptTitle}
               onChange={(e) => setPromptTitle(e.target.value)}
               placeholder="e.g. Main Entrance, Skylight, Column A4..."
+              disabled={isSubmittingTag}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && promptTitle.trim()) confirmTagPlacement();
+                if (e.key === 'Enter' && promptTitle.trim() && !isSubmittingTag) {
+                  e.preventDefault();
+                  confirmTagPlacement();
+                }
                 if (e.key === 'Escape') cancelTagPlacement();
               }}
             />
             <div className="tag-title-prompt-actions">
-              <button className="tag-prompt-cancel" onClick={cancelTagPlacement}>Cancel</button>
+              <button className="tag-prompt-cancel" onClick={cancelTagPlacement} disabled={isSubmittingTag}>Cancel</button>
               <button
                 className="tag-prompt-confirm"
                 onClick={confirmTagPlacement}
-                disabled={!promptTitle.trim()}
+                disabled={!promptTitle.trim() || isSubmittingTag}
               >
-                Place Tag
+                {isSubmittingTag ? 'Placing Tag...' : 'Place Tag'}
               </button>
             </div>
           </div>

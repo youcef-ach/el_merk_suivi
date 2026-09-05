@@ -1033,6 +1033,10 @@ export declare class InspectionsService {
     processPanoramas(id: string, userEnterpriseId: string, role: Role, onProgress?: (progress: number, stage: string) => Promise<void>): Promise<{
         status: string;
         filesCount: number;
+        scansProcessed: string;
+    } | {
+        status: string;
+        filesCount: number;
         scansProcessed: number;
     }>;
     getProcessingStatus(id: string): Promise<{

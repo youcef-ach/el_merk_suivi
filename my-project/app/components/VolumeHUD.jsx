@@ -42,7 +42,7 @@ export default function VolumeHUD({
   onDelete,
   onNewStockpile,
   isCalculating = false,
-  baseMethod = 'tin',
+  baseMethod = 'lowest',
   customBaseAsl = 100.0,
   density = '1.65',
   onComplete,
@@ -55,7 +55,7 @@ export default function VolumeHUD({
   isVisible = true
 }) {
   const actualPoints = polygonPoints && polygonPoints.length ? polygonPoints : (points || []);
-  const actualResult = volumeResult || result;
+  const actualResult = isDrawing ? null : (volumeResult || result);
   const pointsCount = actualPoints.length;
 
   if (isVisible === false && !actualResult && pointsCount === 0) {
@@ -115,9 +115,14 @@ export default function VolumeHUD({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-bold tracking-tight text-white">Stockpile Volumetrics</h3>
-              {totalStockpiles > 1 && (
-                <span className="px-2 py-0.5 text-xs font-bold font-mono rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+              {!isDrawing && totalStockpiles > 1 && (
+                <span className="px-2.5 py-0.5 text-xs font-bold font-mono rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                   {stockpileIndex || 1} of {totalStockpiles}
+                </span>
+              )}
+              {isDrawing && (
+                <span className="px-2.5 py-0.5 text-xs font-bold font-mono rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                  {totalStockpiles > 0 ? `Stockpile #${totalStockpiles + 1}` : 'New'}
                 </span>
               )}
             </div>
@@ -152,7 +157,7 @@ export default function VolumeHUD({
             </div>
           )}
 
-          {onNewStockpile && actualResult && (
+          {onNewStockpile && !isDrawing && actualResult && (
             <button
               onClick={onNewStockpile}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-bold shadow-sm transition active:scale-95"
@@ -163,7 +168,7 @@ export default function VolumeHUD({
             </button>
           )}
 
-          {onDelete && actualResult && (
+          {onDelete && !isDrawing && actualResult && (
             <button
               onClick={onDelete}
               className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/15 border border-transparent hover:border-rose-500/30 transition"
@@ -183,8 +188,8 @@ export default function VolumeHUD({
         </div>
       </div>
 
-      {/* ─── Mode 1: Drawing Polygon ─── */}
-      {!actualResult && (
+      {/* ─── Mode 1: Drawing Polygon & Calculate Button ─── */}
+      {(isDrawing || !actualResult) && (
         <div className="space-y-3.5">
           <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-center justify-between gap-2.5 shadow-inner">
             <div className="flex items-center gap-2">
@@ -236,7 +241,7 @@ export default function VolumeHUD({
       )}
 
       {/* ─── Mode 2: Calculated Volume Results ─── */}
-      {actualResult && (
+      {!isDrawing && actualResult && (
         <div className="space-y-3.5">
           {/* Primary Volume & Mass Hero Grid */}
           <div className="grid grid-cols-2 gap-3">
@@ -294,91 +299,93 @@ export default function VolumeHUD({
             </div>
           </div>
 
-          {/* Material Density Selector */}
+          {/* Material Density Selector & Custom Value Input */}
           <div className="pt-1">
-            <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-2">
-              <Scale className="h-3.5 w-3.5 text-amber-400" />
-              <span>Material Density Preset</span>
-            </label>
-            <select
-              value={density}
-              onChange={(e) => onDensityChange(e.target.value)}
-              className="w-full bg-slate-900/90 border border-white/10 hover:border-white/20 rounded-xl px-3.5 py-2 text-xs text-slate-200 outline-none cursor-pointer transition shadow-inner"
-            >
-              {DENSITY_PRESETS.map((preset) => (
-                <option key={preset.value} value={preset.value} className="bg-slate-900 text-slate-200">
-                  {preset.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Base Plane Reference Method Tabs */}
-          <div className="pt-1">
-            <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-2">
-              <Layers className="h-3.5 w-3.5 text-cyan-400" />
-              <span>Base Plane Reference Method</span>
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => onBaseMethodChange('tin')}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold transition border text-center ${
-                  baseMethod === 'tin'
-                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/60 shadow-sm shadow-cyan-500/20'
-                    : 'bg-white/[0.03] text-slate-400 border-white/5 hover:border-white/15 hover:text-slate-200'
-                }`}
-                title="Continuous Triangulated Irregular Network interpolated from boundary terrain"
-              >
-                Natural Terrain (TIN)
-              </button>
-              <button
-                onClick={() => onBaseMethodChange('lowest')}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold transition border text-center ${
-                  baseMethod === 'lowest'
-                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/60 shadow-sm shadow-cyan-500/20'
-                    : 'bg-white/[0.03] text-slate-400 border-white/5 hover:border-white/15 hover:text-slate-200'
-                }`}
-                title="Horizontal plane pinned to lowest perimeter vertex"
-              >
-                Lowest Point
-              </button>
-              <button
-                onClick={() => onBaseMethodChange('mean')}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold transition border text-center ${
-                  baseMethod === 'mean'
-                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/60 shadow-sm shadow-cyan-500/20'
-                    : 'bg-white/[0.03] text-slate-400 border-white/5 hover:border-white/15 hover:text-slate-200'
-                }`}
-                title="Horizontal plane at mean perimeter elevation"
-              >
-                Mean Plane
-              </button>
-              <button
-                onClick={() => onBaseMethodChange('custom')}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold transition border text-center ${
-                  baseMethod === 'custom'
-                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/60 shadow-sm shadow-cyan-500/20'
-                    : 'bg-white/[0.03] text-slate-400 border-white/5 hover:border-white/15 hover:text-slate-200'
-                }`}
-                title="User-defined absolute design elevation datum"
-              >
-                Custom ASL
-              </button>
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-2">
+              <span className="flex items-center gap-2">
+                <Scale className="h-3.5 w-3.5 text-amber-400" />
+                <span>Material & Density</span>
+              </span>
+              <span className="text-[11px] text-amber-400 font-mono font-bold">
+                {Number(density || 1.65).toFixed(2)} t/m³
+              </span>
             </div>
 
-            {baseMethod === 'custom' && (
-              <div className="flex items-center gap-2.5 mt-2.5 p-2.5 rounded-xl bg-slate-900/80 border border-cyan-500/40">
-                <span className="text-xs text-slate-400 font-medium">Target Datum:</span>
+            <div className="space-y-2">
+              <select
+                value={
+                  DENSITY_PRESETS.some(p => p.value === String(density)) 
+                    ? String(density) 
+                    : 'custom'
+                }
+                onChange={(e) => {
+                  if (e.target.value === 'custom') {
+                    // keep density as is for custom editing
+                  } else {
+                    onDensityChange(e.target.value);
+                  }
+                }}
+                className="w-full bg-slate-900/90 border border-white/10 hover:border-white/20 rounded-xl px-3.5 py-2 text-xs text-slate-200 outline-none cursor-pointer transition shadow-inner"
+              >
+                {DENSITY_PRESETS.map((preset) => (
+                  <option key={preset.value} value={preset.value} className="bg-slate-900 text-slate-200">
+                    {preset.label}
+                  </option>
+                ))}
+                <option value="custom" className="bg-slate-900 text-amber-300 font-semibold">
+                  Custom Density Value...
+                </option>
+              </select>
+
+              {/* Editable Custom Value for Crushed Limestone / Custom Material */}
+              <div className="flex items-center gap-2 p-2 rounded-xl bg-slate-900/80 border border-amber-500/30 shadow-inner">
+                <span className="text-xs text-slate-400 font-medium whitespace-nowrap pl-1">
+                  Custom Value:
+                </span>
                 <input
                   type="number"
-                  step="0.2"
-                  value={customBaseAsl}
-                  onChange={(e) => onCustomBaseAslChange(e.target.value)}
-                  className="w-24 bg-slate-950 border border-cyan-500/50 rounded-lg px-2.5 py-1.5 text-xs text-cyan-300 font-mono outline-none"
+                  step="0.01"
+                  min="0.1"
+                  max="20.0"
+                  value={density}
+                  onChange={(e) => onDensityChange(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-amber-500/40 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono font-bold outline-none transition"
+                  placeholder="1.65"
                 />
-                <span className="text-xs text-cyan-400 font-mono font-semibold">m ASL</span>
+                <span className="text-xs text-amber-400 font-mono font-semibold pr-1">
+                  t/m³
+                </span>
+                {String(density) !== '1.65' && (
+                  <button
+                    type="button"
+                    onClick={() => onDensityChange('1.65')}
+                    className="text-[10px] text-slate-400 hover:text-amber-300 px-2 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/5 transition shrink-0"
+                    title="Reset to default Crushed Limestone (1.65 t/m³)"
+                  >
+                    Reset (1.65)
+                  </button>
+                )}
               </div>
-            )}
+            </div>
+          </div>
+
+          {/* Base Plane Reference (Locked to Lowest Point per user requirement) */}
+          <div className="pt-1">
+            <div className="flex items-center justify-between text-xs mb-1.5">
+              <span className="flex items-center gap-2 font-semibold text-slate-300">
+                <Layers className="h-3.5 w-3.5 text-cyan-400" />
+                <span>Reference Cut Plane</span>
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono">
+                Lowest Point
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900/70 border border-white/5 text-[11px] text-slate-300/90 flex items-center justify-between">
+              <span className="text-slate-400">Base Elevation:</span>
+              <span className="font-mono font-bold text-cyan-300">
+                {actualResult ? `${(actualResult.minPerimeterAsl ?? 0).toFixed(2)} m ASL` : 'Pinned to Lowest Vertex'}
+              </span>
+            </div>
           </div>
 
           {/* Footer Actions */}

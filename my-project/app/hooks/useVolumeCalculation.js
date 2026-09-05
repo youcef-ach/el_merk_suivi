@@ -80,35 +80,31 @@ function interpolateBaseHeight(px, pz, triangles, fallbackMeanY) {
 }
 
 /**
- * Append a 3D box column prism (12 triangles) to vertices array
+ * Compute Best-Fit Plane Equation (A, B, C, D) for Cut Plane where A*x + B*y + C*z + D = 0
+ * y_plane = (-A*x - C*z - D) / B
+ * Per requirement: Pinned horizontally to the lowest perimeter point of the stockpile
  */
-function addBoxPrism(vertices, x0, y0, z0, x1, y1, z1) {
-  // Top face (y1)
-  vertices.push(x0, y1, z0,  x1, y1, z0,  x1, y1, z1);
-  vertices.push(x0, y1, z0,  x1, y1, z1,  x0, y1, z1);
-  // Bottom face (y0)
-  vertices.push(x0, y0, z1,  x1, y0, z1,  x1, y0, z0);
-  vertices.push(x0, y0, z1,  x1, y0, z0,  x0, y0, z0);
-  // Front face (z1)
-  vertices.push(x0, y0, z1,  x1, y0, z1,  x1, y1, z1);
-  vertices.push(x0, y0, z1,  x1, y1, z1,  x0, y1, z1);
-  // Back face (z0)
-  vertices.push(x1, y0, z0,  x0, y0, z0,  x0, y1, z0);
-  vertices.push(x1, y0, z0,  x0, y1, z0,  x1, y1, z0);
-  // Left face (x0)
-  vertices.push(x0, y0, z0,  x0, y0, z1,  x0, y1, z1);
-  vertices.push(x0, y0, z0,  x0, y1, z1,  x0, y1, z0);
-  // Right face (x1)
-  vertices.push(x1, y0, z1,  x1, y0, z0,  x1, y1, z0);
+function computeReferencePlaneEquation(points, method = 'lowest', customAsl, groundOffset) {
+  if (!points || points.length === 0) return new THREE.Vector4(0, 1, 0, 0);
+
+  let minY = Infinity;
+  points.forEach(p => {
+    if (p.y < minY) minY = p.y;
+  });
+
+  // Locked to lowest perimeter point
+  return new THREE.Vector4(0, 1, 0, -minY);
 }
 
 
 /**
  * Custom Hook: Multi-Stockpile Cut & Fill Volumetric Engine
  * Features:
- * - Differentiates click vs orbit/drag (stops listening after calculation until "+ New Stockpile")
- * - Manages multiple stockpiles (list, selection, 3D highlight, deletion)
- * - Accumulates multiple stockpiles together into aggregated net/fill/cut totals
+ *  - Interactive 3D polygon drawing directly on RealityScan 3D mesh
+ *  - Closed perimeter with live vertex handles
+ *  - Volumetric integration (Cut & Fill) relative to lowest perimeter point
+ *  - Live recalculation upon vertex dragging
+ *  - Multi-stockpile accumulation and per-stockpile isolation
  */
 export function useVolumeCalculation(viewerRef) {
   const [stockpiles, setStockpiles] = useState([]);
@@ -120,8 +116,8 @@ export function useVolumeCalculation(viewerRef) {
   const [isDrawing, setIsDrawing] = useState(true);
   const [isCalculating, setIsCalculating] = useState(false);
   
-  // Calculation parameters
-  const [baseMethod, setBaseMethod] = useState('tin');
+  // Calculation parameters: Locked to lowest point
+  const [baseMethod, setBaseMethod] = useState('lowest');
   const [customBaseAsl, setCustomBaseAsl] = useState(99.0);
   const [density, setDensity] = useState(1.65);
 
@@ -129,11 +125,16 @@ export function useVolumeCalculation(viewerRef) {
   const activeDrawingGroupRef = useRef(null);
   const nextIdRef = useRef(1);
 
-  // Active selected stockpile
+  // Active selected stockpile (null while user is actively drawing a new polygon)
   const selectedStockpile = useMemo(() => {
+    if (isDrawing) return null;
     if (stockpiles.length === 0) return null;
-    return stockpiles.find(s => s.id === selectedStockpileId) || stockpiles[stockpiles.length - 1];
-  }, [stockpiles, selectedStockpileId]);
+    if (selectedStockpileId !== null) {
+      const found = stockpiles.find(s => s.id === selectedStockpileId);
+      if (found) return found;
+    }
+    return stockpiles[stockpiles.length - 1];
+  }, [stockpiles, selectedStockpileId, isDrawing]);
 
   // Active volume result for HUD compatibility
   const volumeResult = selectedStockpile?.result || null;
@@ -219,11 +220,11 @@ export function useVolumeCalculation(viewerRef) {
         s.lineMesh.renderOrder = isSelected ? 1006 : 999;
       }
       if (s.baseMesh?.material) {
-        s.baseMesh.material.opacity = isSelected ? 0.55 : 0.2;
+        s.baseMesh.material.opacity = isSelected ? 0.65 : 0.25;
         s.baseMesh.material.color.set(isSelected ? 0x0284c7 : 0x0369a1);
       }
       if (s.wireMesh?.material) {
-        s.wireMesh.material.opacity = isSelected ? 0.8 : 0.35;
+        s.wireMesh.material.opacity = isSelected ? 0.90 : 0.40;
       }
       if (s.fillMesh) {
         s.fillMesh.visible = isSelected;
@@ -238,14 +239,16 @@ export function useVolumeCalculation(viewerRef) {
         });
       }
       if (isSelected && engine) {
-        engine.setVolumePolygonCutout?.(s.points, 0.35);
+        const groundOffset = viewerRef.current?.datumInfo?.groundOffset || DSM_DATUM_OFFSET;
+        const planeEq = s.planeEq || computeReferencePlaneEquation(s.points, s.baseMethod || baseMethod, s.customBaseAsl || customBaseAsl, groundOffset);
+        engine.setVolumePolygonCutout?.(s.points, planeEq, 0.35);
       }
     });
 
     if (!hasSelected && engine) {
       engine.clearVolumePolygonCutout?.();
     }
-  }, [stockpiles, viewerRef]);
+  }, [stockpiles, viewerRef, baseMethod, customBaseAsl]);
 
   // Sync 3D highlights on selection changes
   useEffect(() => {
@@ -255,6 +258,7 @@ export function useVolumeCalculation(viewerRef) {
 
   // Select a stockpile
   const selectStockpile = useCallback((id) => {
+    setIsDrawing(false);
     setSelectedStockpileId(id);
     update3DHighlights(id);
   }, [update3DHighlights]);
@@ -327,20 +331,17 @@ export function useVolumeCalculation(viewerRef) {
 
       const groundOffset = viewerRef.current?.datumInfo?.groundOffset || DSM_DATUM_OFFSET;
 
-      for (let x = minX + gridStep * 0.5; x <= maxX; x += gridStep) {
-        for (let z = minZ + gridStep * 0.5; z <= maxZ; z += gridStep) {
+      const numX = Math.ceil(spanX / gridStep) + 1;
+      const numZ = Math.ceil(spanZ / gridStep) + 1;
+      const sampleGrid = new Array(numX).fill(null).map(() => new Array(numZ).fill(null));
+
+      for (let ix = 0; ix < numX; ix++) {
+        const x = minX + ix * gridStep;
+        for (let iz = 0; iz < numZ; iz++) {
+          const z = minZ + iz * gridStep;
           if (!isPointInPolygon2D(x, z, points)) continue;
 
-          let baseHeight = meanY;
-          if (method === 'lowest') {
-            baseHeight = minY;
-          } else if (method === 'mean') {
-            baseHeight = meanY;
-          } else if (method === 'custom') {
-            baseHeight = customAsl - groundOffset;
-          } else {
-            baseHeight = interpolateBaseHeight(x, z, triangles, meanY);
-          }
+          const baseHeight = minY;
 
           raycaster.set(new THREE.Vector3(x, startHeight, z), downVector);
           const intersections = raycaster.intersectObjects(meshes, true);
@@ -350,17 +351,11 @@ export function useVolumeCalculation(viewerRef) {
             const deltaH = surfaceY - baseHeight;
             sampledPointsCount++;
 
-            const halfStep = gridStep * 0.48;
-            const x0 = x - halfStep, x1 = x + halfStep;
-            const z0 = z - halfStep, z1 = z + halfStep;
-
             if (deltaH >= 0.05) {
               fillVolume += deltaH * cellArea;
               if (deltaH > maxPileHeight) maxPileHeight = deltaH;
-              addBoxPrism(fillVertices, x0, baseHeight, z0, x1, surfaceY, z1);
             } else if (deltaH <= -0.05) {
               cutVolume += Math.abs(deltaH) * cellArea;
-              addBoxPrism(cutVertices, x0, surfaceY, z0, x1, baseHeight, z1);
             }
 
             if (intersections[0].face?.normal) {
@@ -369,9 +364,13 @@ export function useVolumeCalculation(viewerRef) {
             } else {
               surfaceArea3D += cellArea;
             }
+
+            sampleGrid[ix][iz] = { x, z, surfaceY, baseHeight, deltaH };
           }
         }
       }
+
+
 
       if (surfaceArea3D < area2D) {
         surfaceArea3D = area2D * 1.04;
@@ -449,74 +448,17 @@ export function useVolumeCalculation(viewerRef) {
       lineMesh.userData = { stockpileId: id, type: 'stockpile_line' };
       stockpileGroup.add(lineMesh);
 
-      // Translucent Base Plane
-      const vertices = [];
-      triangles.forEach(tri => {
-        tri.forEach(p => vertices.push(p.x, p.y, p.z));
-      });
-      const baseGeo = new THREE.BufferGeometry();
-      baseGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-      baseGeo.computeVertexNormals();
+      // Cut plane and grid are hidden per user requirement (only points & green area above remain visible)
+      const baseMesh = null;
+      const wireMesh = null;
 
-      const baseMat = new THREE.MeshBasicMaterial({
-        color: 0x0284c7, // Cyan blue reference plane
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.55
-      });
-      const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-      baseMesh.renderOrder = 997;
-      baseMesh.userData = { stockpileId: id, type: 'stockpile_plane' };
-      stockpileGroup.add(baseMesh);
+      // Calculate reference plane equation and apply continuous volumetric colormap in 3D Tiles shader
+      const planeEq = computeReferencePlaneEquation(points, method, customAsl, groundOffset);
+      const engine = viewerRef.current?.tilesetEngine || viewerRef.current?.tilesetEngineRef?.current;
+      engine?.setVolumePolygonCutout?.(points, planeEq, 0.35);
 
-      // Wireframe overlay for base plane
-      const wireMat = new THREE.MeshBasicMaterial({
-        color: 0x38bdf8,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.75
-      });
-      const wireMesh = new THREE.Mesh(baseGeo.clone(), wireMat);
-      wireMesh.renderOrder = 998;
-      stockpileGroup.add(wireMesh);
-
-      // ─── 3D Volumetric Fill Mass (Above Plane - Emerald Green) ───
-      let fillMesh = null;
-      if (fillVertices.length > 0) {
-        const fillGeo = new THREE.BufferGeometry();
-        fillGeo.setAttribute('position', new THREE.Float32BufferAttribute(fillVertices, 3));
-        fillGeo.computeVertexNormals();
-        const fillMat = new THREE.MeshBasicMaterial({
-          color: 0x10b981, // Emerald Green
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.65,
-          depthWrite: false
-        });
-        fillMesh = new THREE.Mesh(fillGeo, fillMat);
-        fillMesh.renderOrder = 1002;
-        fillMesh.userData = { stockpileId: id, type: 'stockpile_fill_mesh' };
-        stockpileGroup.add(fillMesh);
-      }
-
-      // ─── 3D Volumetric Cut Mass (Under Plane - Crimson Red) ───
-      let cutMesh = null;
-      if (cutVertices.length > 0) {
-        const cutGeo = new THREE.BufferGeometry();
-        cutGeo.setAttribute('position', new THREE.Float32BufferAttribute(cutVertices, 3));
-        cutGeo.computeVertexNormals();
-        const cutMat = new THREE.MeshBasicMaterial({
-          color: 0xef4444, // Crimson Red
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.65,
-          depthWrite: false
-        });
-        cutMesh = new THREE.Mesh(cutGeo, cutMat);
-        cutMesh.renderOrder = 1002;
-        cutMesh.userData = { stockpileId: id, type: 'stockpile_cut_mesh' };
-        stockpileGroup.add(cutMesh);
-      }
+      const fillMesh = null;
+      const cutMesh = null;
 
       // Clear active drawing preview
       if (activeDrawingGroupRef.current) {
@@ -542,6 +484,7 @@ export function useVolumeCalculation(viewerRef) {
         density: activeDensity,
         baseMethod: method,
         customBaseAsl: customAsl,
+        planeEq,
         stockpileGroup,
         lineMesh,
         baseMesh,
@@ -558,10 +501,6 @@ export function useVolumeCalculation(viewerRef) {
         setAccumulatedStockpileIds(prev => [...prev, id]); // Automatically included in accumulation
       }
       setSelectedStockpileId(id);
-
-      // Trigger localized mesh cutout on tileset
-      const engine = viewerRef.current?.tilesetEngine || viewerRef.current?.tilesetEngineRef?.current;
-      engine?.setVolumePolygonCutout?.(points, 0.35);
     }, 40);
   }, [viewerRef, baseMethod, customBaseAsl, density, ensureRootGroup]);
 
@@ -577,6 +516,23 @@ export function useVolumeCalculation(viewerRef) {
   // Start New Stockpile (unlocks drawing mode)
   const startNewStockpile = useCallback(() => {
     setIsDrawing(true);
+    setSelectedStockpileId(null);
+    setPolygonPoints([]);
+    if (activeDrawingGroupRef.current) {
+      while (activeDrawingGroupRef.current.children.length > 0) {
+        const c = activeDrawingGroupRef.current.children[0];
+        activeDrawingGroupRef.current.remove(c);
+        if (c.geometry) c.geometry.dispose();
+        if (c.material) c.material.dispose();
+      }
+    }
+    update3DHighlights(null);
+    const engine = viewerRef.current?.tilesetEngine || viewerRef.current?.tilesetEngineRef?.current;
+    engine?.clearVolumePolygonCutout?.();
+  }, [viewerRef, update3DHighlights]);
+
+  // Clear only active drawing polygon points
+  const clearActiveDrawing = useCallback(() => {
     setPolygonPoints([]);
     if (activeDrawingGroupRef.current) {
       while (activeDrawingGroupRef.current.children.length > 0) {
@@ -662,7 +618,9 @@ export function useVolumeCalculation(viewerRef) {
 
       // Update localized cutout if selected
       const engine = viewerRef.current?.tilesetEngine || viewerRef.current?.tilesetEngineRef?.current;
-      engine?.setVolumePolygonCutout?.(updatedPoints, 0.35);
+      const groundOffset = viewerRef.current?.datumInfo?.groundOffset || DSM_DATUM_OFFSET;
+      const planeEq = computeReferencePlaneEquation(updatedPoints, s.baseMethod || baseMethod, s.customBaseAsl || customBaseAsl, groundOffset);
+      engine?.setVolumePolygonCutout?.(updatedPoints, planeEq, 0.35);
 
       return {
         ...s,
@@ -800,12 +758,13 @@ export function useVolumeCalculation(viewerRef) {
     selectStockpile,
     deleteStockpile,
     clearAllStockpiles,
+    clearActiveDrawing,
     checkVolumeHit,
     updateStockpileVertexPosition,
     commitStockpileVertexChange,
     handleBaseMethodChange,
     handleCustomBaseAslChange,
     handleDensityChange,
-    clearVolume: clearAllStockpiles
+    clearVolume: clearActiveDrawing
   };
 }

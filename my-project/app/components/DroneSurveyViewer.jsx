@@ -20,6 +20,9 @@ const DroneSurveyViewer = forwardRef(({
   crossSectionMode,
   onCrossSectionClick,
   onSelectSection,
+  tagMode,
+  onTagClick,
+  onSelectTag,
   onGeoCoordinates,
 }, ref) => {
 
@@ -65,6 +68,13 @@ const DroneSurveyViewer = forwardRef(({
   crossSectionModeRef.current = crossSectionMode;
   onCrossSectionClickRef.current = onCrossSectionClick;
   onSelectSectionRef.current = onSelectSection;
+
+  const tagModeRef = useRef(false);
+  const onTagClickRef = useRef(null);
+  const onSelectTagRef = useRef(null);
+  tagModeRef.current = tagMode;
+  onTagClickRef.current = onTagClick;
+  onSelectTagRef.current = onSelectTag;
 
   const onGeoCoordinatesRef = useRef(null);
   onGeoCoordinatesRef.current = onGeoCoordinates;
@@ -329,7 +339,20 @@ const DroneSurveyViewer = forwardRef(({
             if (hoverHandle) break;
           }
         }
-        renderer.domElement.style.cursor = hoverHandle ? 'grab' : 'crosshair';
+        if (volumeModeRef.current) {
+          renderer.domElement.style.cursor = hoverHandle ? 'grab' : 'crosshair';
+        } else if (measurementModeRef.current || crossSectionModeRef.current || tagModeRef.current) {
+          renderer.domElement.style.cursor = 'crosshair';
+        }
+
+        // Hover feedback over existing 3D tags
+        const tagGroup = sceneRef.current?.getObjectByName('tagMarkers');
+        if (tagGroup && tagGroup.children.length > 0) {
+          const tagHits = raycaster.intersectObjects(tagGroup.children, false);
+          if (tagHits.length > 0) {
+            renderer.domElement.style.cursor = 'pointer';
+          }
+        }
       }
     };
 
@@ -445,6 +468,19 @@ const DroneSurveyViewer = forwardRef(({
             }
           }
         }
+
+        // Tag selection in 3D
+        const tagGroup = scene.getObjectByName('tagMarkers');
+        if (tagGroup && tagGroup.children.length > 0) {
+          const tagHits = raycaster.intersectObjects(tagGroup.children, false);
+          if (tagHits.length > 0) {
+            const clickedTagId = tagHits[0].object.userData?.tagId;
+            if (clickedTagId) {
+              onSelectTagRef.current?.(clickedTagId);
+              return; // Selected tag in 3D!
+            }
+          }
+        }
       }
 
       // 3. Terrain Raycasting for Tool Actions
@@ -465,12 +501,14 @@ const DroneSurveyViewer = forwardRef(({
         onVolumeClickRef.current(hitPoint);
       } else if (crossSectionModeRef.current && onCrossSectionClickRef.current) {
         onCrossSectionClickRef.current(hitPoint);
+      } else if (tagModeRef.current && onTagClickRef.current) {
+        onTagClickRef.current(hitPoint);
       }
     };
 
     // ─── Double Click: Smooth Focus & Pivot Centering ───
     const onDblClick = (e) => {
-      if (measurementModeRef.current || volumeModeRef.current || crossSectionModeRef.current) return;
+      if (measurementModeRef.current || volumeModeRef.current || crossSectionModeRef.current || tagModeRef.current) return;
 
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;

@@ -5,7 +5,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
-import { createTagSpriteMaterial } from './useTags';
+import { createTagSpriteMaterial, TAG_BASE_SCALE_X, TAG_BASE_SCALE_Y } from './useTags';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { TilesetEngine } from '../utils/TilesetEngine';
 import { OrthomosaicLayer } from '../utils/OrthomosaicLayer';
@@ -306,8 +306,8 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
               sprite.position.set(tag.posX, tag.posY, tag.posZ);
               sprite.center.set(0.5, 0.0);
 
-              const sizeMult = tag.size ?? 1.0;
-              sprite.scale.set(0.4 * sizeMult, 0.6 * sizeMult, 1);
+              const sizeMult = Math.min(2.0, Math.max(0.6, Number(tag.size) || 1.0));
+              sprite.scale.set(TAG_BASE_SCALE_X * sizeMult, TAG_BASE_SCALE_Y * sizeMult, 1);
               sprite.renderOrder = 1000;
               sprite.userData.tagId = tag.id;
               tagGroup.add(sprite);

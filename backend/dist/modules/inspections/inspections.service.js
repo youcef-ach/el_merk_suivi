@@ -1293,6 +1293,30 @@ let InspectionsService = class InspectionsService {
             fs.mkdirSync(equirectDir, { recursive: true });
             fs.mkdirSync(equirectLowDir, { recursive: true });
             fs.mkdirSync(ktx2Dir, { recursive: true });
+            let uploadedCount = 0;
+            const uploadRecursive = async (currDir, relPath = '') => {
+                const entries = fs.readdirSync(currDir, { withFileTypes: true });
+                for (const entry of entries) {
+                    const fullPath = path.join(currDir, entry.name);
+                    const s3Rel = relPath ? `${relPath}/${entry.name}` : entry.name;
+                    if (entry.isDirectory()) {
+                        await uploadRecursive(fullPath, s3Rel);
+                    }
+                    else {
+                        let contentType = 'image/jpeg';
+                        const lower = entry.name.toLowerCase();
+                        if (lower.endsWith('.png'))
+                            contentType = 'image/png';
+                        else if (lower.endsWith('.json'))
+                            contentType = 'application/json';
+                        else if (lower.endsWith('.ktx2'))
+                            contentType = 'image/ktx2';
+                        const s3Dest = `inspections/${id}/${s3Rel}`;
+                        await this.storageService.uploadFile(bucket, s3Dest, fullPath, contentType);
+                        uploadedCount++;
+                    }
+                }
+            };
             const allExtractedFiles = [];
             const findFilesRecursive = (curr) => {
                 const entries = fs.readdirSync(curr, { withFileTypes: true });
@@ -1307,6 +1331,42 @@ let InspectionsService = class InspectionsService {
                 }
             };
             findFilesRecursive(extractDir);
+            const hasPreprocessedKtx2 = allExtractedFiles.some(f => f.name.toLowerCase().endsWith('.ktx2'));
+            const hasPreprocessedCubemaps = allExtractedFiles.some(f => f.fullPath.includes('cubemaps') || f.name.toLowerCase().includes('_px.'));
+            const preprocessedMetadata = allExtractedFiles.find(f => f.name.toLowerCase() === 'scan_metadata.json');
+            if (hasPreprocessedKtx2 || (hasPreprocessedCubemaps && preprocessedMetadata)) {
+                console.log(`[processPanoramas] Detected PRE-PROCESSED tour package (${allExtractedFiles.length} files)! Fast direct ingestion active.`);
+                if (onProgress)
+                    await onProgress(25, `Pre-processed tour package detected. Unpacking ${allExtractedFiles.length} assets...`);
+                for (const f of allExtractedFiles) {
+                    const rel = path.relative(extractDir, f.fullPath).replace(/\\/g, '/');
+                    const dest = path.join(outputDir, rel);
+                    fs.mkdirSync(path.dirname(dest), { recursive: true });
+                    fs.copyFileSync(f.fullPath, dest);
+                }
+                if (onProgress)
+                    await onProgress(70, 'Syncing optimized multi-resolution textures with storage...');
+                await uploadRecursive(outputDir);
+                const scansJsonS3 = `inspections/${id}/scans.json`;
+                if (!inspection.scansJsonUrl) {
+                    await this.prisma.inspection.update({
+                        where: { id },
+                        data: { scansJsonUrl: scansJsonS3 },
+                    });
+                }
+                if (onProgress)
+                    await onProgress(100, 'Tour Ready');
+                await this.prisma.inspection.update({
+                    where: { id },
+                    data: {
+                        processingStatus: 'COMPLETED',
+                        processingStage: 'Tour Ready (Pre-processed)',
+                        processingProgress: 100,
+                    }
+                });
+                console.log(`[processPanoramas] Direct ingestion completed! Uploaded ${uploadedCount} pre-processed assets.`);
+                return { status: 'SUCCESS', filesCount: uploadedCount, scansProcessed: 'preprocessed' };
+            }
             let scansJsonPath = null;
             let rawScansData = null;
             for (const f of allExtractedFiles) {
@@ -1494,30 +1554,6 @@ let InspectionsService = class InspectionsService {
             if (scansJsonPath) {
                 fs.copyFileSync(scansJsonPath, path.join(outputDir, 'scans.json'));
             }
-            let uploadedCount = 0;
-            const uploadRecursive = async (currDir, relPath = '') => {
-                const entries = fs.readdirSync(currDir, { withFileTypes: true });
-                for (const entry of entries) {
-                    const fullPath = path.join(currDir, entry.name);
-                    const s3Rel = relPath ? `${relPath}/${entry.name}` : entry.name;
-                    if (entry.isDirectory()) {
-                        await uploadRecursive(fullPath, s3Rel);
-                    }
-                    else {
-                        let contentType = 'image/jpeg';
-                        const lower = entry.name.toLowerCase();
-                        if (lower.endsWith('.png'))
-                            contentType = 'image/png';
-                        else if (lower.endsWith('.json'))
-                            contentType = 'application/json';
-                        else if (lower.endsWith('.ktx2'))
-                            contentType = 'image/ktx2';
-                        const s3Dest = `inspections/${id}/${s3Rel}`;
-                        await this.storageService.uploadFile(bucket, s3Dest, fullPath, contentType);
-                        uploadedCount++;
-                    }
-                }
-            };
             if (onProgress)
                 await onProgress(90, 'Uploading multi-LOD textures and metadata to storage...');
             await uploadRecursive(outputDir);

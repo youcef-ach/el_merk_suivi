@@ -163,18 +163,82 @@ export default function TagPanel({ tag, onUpdate, onUploadDocument, onDeleteDocu
             ))}
           </div>
 
-          <label className="tag-field-label">Pin Size</label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <label className="tag-field-label" style={{ margin: 0 }}>Pin Size</label>
+            <span style={{ fontSize: '11px', color: '#00e5ff', fontWeight: 600, fontFamily: 'monospace' }}>
+              {Math.abs(Number(tagSize) - 0.75) < 0.05
+                ? 'Compact (0.75x)'
+                : Math.abs(Number(tagSize) - 1.0) < 0.05
+                ? 'Standard (1.0x)'
+                : Math.abs(Number(tagSize) - 1.35) < 0.05
+                ? 'Large (1.35x)'
+                : `${Number(tagSize).toFixed(2)}x Custom`}
+            </span>
+          </div>
+
+          {/* Quick Standard Size Presets */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '10px' }}>
+            {[
+              { id: 'compact', label: 'Compact', value: 0.75, sub: 'Small' },
+              { id: 'standard', label: 'Standard', value: 1.0, sub: 'Default' },
+              { id: 'large', label: 'Large', value: 1.35, sub: 'Prominent' },
+            ].map((p) => {
+              const isSelectedPreset = Math.abs(Number(tagSize) - p.value) < 0.05;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setTagSize(p.value)}
+                  style={{
+                    background: isSelectedPreset ? 'rgba(0, 229, 255, 0.18)' : 'rgba(255, 255, 255, 0.05)',
+                    border: isSelectedPreset ? '1.5px solid #00e5ff' : '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '8px',
+                    padding: '8px 4px',
+                    cursor: 'pointer',
+                    color: isSelectedPreset ? '#00e5ff' : 'rgba(255, 255, 255, 0.8)',
+                    textAlign: 'center',
+                    transition: 'all 0.2s',
+                    boxShadow: isSelectedPreset ? '0 0 12px rgba(0, 229, 255, 0.25)' : 'none',
+                  }}
+                >
+                  <div style={{ fontSize: '12px', fontWeight: 600 }}>{p.label}</div>
+                  <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '2px' }}>{p.sub}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Fine-Tuning Slider */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
             <input
               type="range"
-              min="0.5"
-              max="4.0"
-              step="0.1"
+              min="0.6"
+              max="1.8"
+              step="0.05"
               value={tagSize}
-              onChange={(e) => setTagSize(e.target.value)}
-              style={{ flex: 1 }}
+              onChange={(e) => setTagSize(parseFloat(e.target.value))}
+              style={{ flex: 1, accentColor: '#00e5ff', cursor: 'pointer' }}
+              title="Fine-tune pin scale"
             />
-            <span style={{ fontSize: '12px', width: '30px', color: '#ff4d6d' }}>{tagSize}x</span>
+            {Math.abs(Number(tagSize) - 1.0) >= 0.05 && (
+              <button
+                type="button"
+                onClick={() => setTagSize(1.0)}
+                style={{
+                  fontSize: '11px',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: 'rgba(255, 255, 255, 0.8)',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+                title="Reset to standard 1.0x size"
+              >
+                Reset
+              </button>
+            )}
           </div>
 
           <button
@@ -194,7 +258,13 @@ export default function TagPanel({ tag, onUpdate, onUploadDocument, onDeleteDocu
               <div className="tag-documents-list" style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
                 {tag.documents.map(doc => (
                   <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.05)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+                    <a
+                      href={doc.fileUrl ? (doc.fileUrl.startsWith('http') ? doc.fileUrl : `${MINIO_URL}/virtual-inspections/${doc.fileUrl}`) : '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', textDecoration: 'none', flex: 1, minWidth: 0 }}
+                      title="Open / Download PDF Document"
+                    >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(0, 229, 255, 0.9)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                         <polyline points="14 2 14 8 20 8" />
@@ -205,7 +275,12 @@ export default function TagPanel({ tag, onUpdate, onUploadDocument, onDeleteDocu
                       <span style={{ fontSize: '12px', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {doc.title}
                       </span>
-                    </div>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(0, 229, 255, 0.6)" strokeWidth="2" style={{ flexShrink: 0, marginLeft: '4px' }}>
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                        <polyline points="15 3 21 3 21 9"></polyline>
+                        <line x1="10" y1="14" x2="21" y2="3"></line>
+                      </svg>
+                    </a>
                     <button
                       onClick={() => onDeleteDocument(tag.id, doc.id)}
                       style={{ background: 'none', border: 'none', color: 'rgba(255,100,100,0.8)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}

@@ -188,9 +188,18 @@ export default function EnginePage() {
         setInspectionData(data);
         const bounds = data?.orthoBounds;
         const gOffset = bounds?.groundAsl ?? bounds?.groundOffset ?? 0;
-        const elevRange = bounds?.elevationRange ?? { min: 0, max: 8 };
-        setMinAsl(parseFloat((gOffset + elevRange.min).toFixed(2)));
-        setMaxAsl(parseFloat((gOffset + elevRange.max).toFixed(2)));
+        let relMin = 0.0;
+        let relMax = 6.2;
+        if (bounds?.elevationRange) {
+          relMin = bounds.elevationRange.min ?? 0.0;
+          relMax = bounds.elevationRange.max ?? 6.2;
+        } else if (bounds?.maxYRaw !== undefined && bounds?.minYRaw !== undefined) {
+          const span = bounds.maxYRaw - bounds.minYRaw;
+          relMin = 0.0;
+          relMax = parseFloat(Math.min(span, 6.2).toFixed(1));
+        }
+        setMinAsl(parseFloat((gOffset + relMin).toFixed(2)));
+        setMaxAsl(parseFloat((gOffset + relMax).toFixed(2)));
         setIsLoadingInspection(false);
       } catch (err) {
         console.error("Failed to fetch inspection details:", err);
@@ -260,18 +269,55 @@ export default function EnginePage() {
 
   const {
     tags,
-    activeTag,
-    isTagPanelOpen,
-    tagFormState,
+    selectedTag,
+    selectedTagId,
+    trySelectTag,
     handleTagClick,
-    handleTagSelect,
-    handleSaveTag,
-    handleDeleteTag,
-    handleUploadDocument,
-    handleDeleteDocument,
-    closeTagPanel,
-    updateTagFormField
+    createTag,
+    updateTag,
+    addTagDocument,
+    deleteTagDocument,
+    deleteTag,
+    selectTag,
+    deselectTag,
   } = useTags(viewerRef, id);
+
+  // Tag creation modal state (Title Prompt)
+  const [titlePrompt, setTitlePrompt] = useState(null);
+  const [promptTitle, setPromptTitle] = useState('');
+  const [isSubmittingTag, setIsSubmittingTag] = useState(false);
+  const isSubmittingTagRef = useRef(false);
+
+  const onTagClickHandler = useCallback((hitPoint) => {
+    setTitlePrompt({ position: hitPoint });
+    setPromptTitle('');
+  }, []);
+
+  const confirmTagPlacement = useCallback(async () => {
+    if (!titlePrompt || !promptTitle.trim() || isSubmittingTagRef.current) return;
+    isSubmittingTagRef.current = true;
+    setIsSubmittingTag(true);
+    try {
+      const placed = await createTag(promptTitle.trim(), titlePrompt.position);
+      setTitlePrompt(null);
+      setPromptTitle('');
+      if (placed?.id) {
+        selectTag(placed.id);
+      }
+    } finally {
+      isSubmittingTagRef.current = false;
+      setIsSubmittingTag(false);
+    }
+  }, [titlePrompt, promptTitle, createTag, selectTag]);
+
+  const cancelTagPlacement = useCallback(() => {
+    setTitlePrompt(null);
+    setPromptTitle('');
+  }, []);
+
+  const handleDeleteTag = useCallback(async (tagId) => {
+    await deleteTag(tagId);
+  }, [deleteTag]);
 
   // ─── Multi-Stockpile Volumetric Cut / Fill Hook ───
   const {
@@ -524,12 +570,22 @@ export default function EnginePage() {
 
   const handleResetRange = () => {
     const dOffset = getDatumOffset();
-    const elevRange = inspectionData?.orthoBounds?.elevationRange ?? { min: 0, max: 8 };
-    const defaultMin = parseFloat((dOffset + elevRange.min).toFixed(2));
-    const defaultMax = parseFloat((dOffset + elevRange.max).toFixed(2));
+    const bounds = inspectionData?.orthoBounds;
+    let relMin = 0.0;
+    let relMax = 6.2;
+    if (bounds?.elevationRange) {
+      relMin = bounds.elevationRange.min ?? 0.0;
+      relMax = bounds.elevationRange.max ?? 6.2;
+    } else if (bounds?.maxYRaw !== undefined && bounds?.minYRaw !== undefined) {
+      const span = bounds.maxYRaw - bounds.minYRaw;
+      relMin = 0.0;
+      relMax = parseFloat(Math.min(span, 6.2).toFixed(1));
+    }
+    const defaultMin = parseFloat((dOffset + relMin).toFixed(2));
+    const defaultMax = parseFloat((dOffset + relMax).toFixed(2));
     setMinAsl(defaultMin);
     setMaxAsl(defaultMax);
-    viewerRef.current?.tilesetEngine?.setHeatmapRange?.(elevRange.min, elevRange.max);
+    viewerRef.current?.tilesetEngine?.setHeatmapRange?.(relMin, relMax);
   };
 
   const handleSlopeCriticalAngleChange = (val) => {
@@ -1138,6 +1194,19 @@ export default function EnginePage() {
               )}
             </button>
 
+            {/* 4. Equipment & Inspection Tags */}
+            <button 
+              onClick={() => toggleTool('tag')}
+              className={`engine-btn ${activeTool === 'tag' ? 'engine-btn-cyan' : ''}`}
+              title="Equipment Inspection Tags & PDF Manuals"
+            >
+              <MapPin style={{ width: 14, height: 14 }} />
+              <span>Tags</span>
+              {tags?.length > 0 && (
+                <span className="engine-active-count-badge">{tags.length}</span>
+              )}
+            </button>
+
             <div className="engine-divider" />
 
             {/* 4. GIS Layers & Visual Overlays Menu */}
@@ -1186,7 +1255,8 @@ export default function EnginePage() {
                     <span className={`engine-switch-dot ${slopeEnabled ? 'on' : ''}`} />
                   </button>
 
-                  {/* Point Cloud LIDAR */}
+                  {/* Point Cloud LIDAR (temporarily disabled) */}
+                  {/*
                   <button 
                     onClick={() => { setIsPointCloudDrawerOpen(true); setIsLayersMenuOpen(false); }}
                     className={`engine-dropdown-item ${pointCloudActive ? 'active' : ''}`}
@@ -1198,8 +1268,10 @@ export default function EnginePage() {
                     </div>
                     <span className={`engine-switch-dot ${pointCloudActive ? 'on' : ''}`} />
                   </button>
+                  */}
 
-                  {/* 2D Orthomosaic */}
+                  {/* 2D Orthomosaic & DTM (temporarily disabled) */}
+                  {/*
                   <button 
                     onClick={() => { setIsOrthoDrawerOpen(true); setIsLayersMenuOpen(false); }}
                     className={`engine-dropdown-item ${orthoEnabled ? 'active' : ''}`}
@@ -1211,6 +1283,7 @@ export default function EnginePage() {
                     </div>
                     <span className={`engine-switch-dot ${orthoEnabled ? 'on' : ''}`} />
                   </button>
+                  */}
 
                   {/* 3D Satellite Basemap */}
                   <button 
@@ -1288,8 +1361,8 @@ export default function EnginePage() {
             onMeasurementClick={handleMeasurementClick}
             onSelectMeasurement={selectMeasurement}
             tagMode={activeTool === 'tag'}
-            onTagClick={handleTagClick}
-            onTagSelect={handleTagSelect}
+            onTagClick={onTagClickHandler}
+            onTagSelect={selectTag}
             pointersMode={activeTool === 'pointers'}
             onPointerClick={handlePointerClick}
             onPointerSelect={handlePointerSelect}
@@ -1314,6 +1387,9 @@ export default function EnginePage() {
             crossSectionMode={activeTool === 'crossSection'}
             onCrossSectionClick={handleCrossSectionClick}
             onSelectSection={selectCrossSection}
+            tagMode={activeTool === 'tag'}
+            onTagClick={onTagClickHandler}
+            onSelectTag={selectTag}
           />
         )}
 
@@ -1441,18 +1517,71 @@ export default function EnginePage() {
           />
         )}
 
+        {/* ─── Tag Mode Active Guidance Chip ─── */}
+        {activeTool === 'tag' && !selectedTag && (
+          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-slate-900/95 border border-cyan-500/40 text-xs text-white shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-200">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
+            </span>
+            <span className="font-medium text-slate-200">
+              Click 3D surface to place a tag • Click existing pins to inspect & view PDF manuals
+            </span>
+            <button
+              onClick={() => setActiveTool('none')}
+              className="ml-2 text-slate-400 hover:text-white px-2 py-0.5 rounded-md hover:bg-white/10 transition text-xs font-semibold"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* ─── Smart Tag Panel (Both Modes) ─── */}
-        <TagPanel 
-          isOpen={isTagPanelOpen}
-          activeTag={activeTag}
-          tagFormState={tagFormState}
-          onSave={handleSaveTag}
-          onDelete={handleDeleteTag}
-          onUploadDocument={handleUploadDocument}
-          onDeleteDocument={handleDeleteDocument}
-          onClose={closeTagPanel}
-          onChangeField={updateTagFormField}
-        />
+        {selectedTag && (
+          <TagPanel 
+            tag={selectedTag}
+            onUpdate={updateTag}
+            onUploadDocument={addTagDocument}
+            onDeleteDocument={deleteTagDocument}
+            onDelete={handleDeleteTag}
+            onClose={deselectTag}
+          />
+        )}
+
+        {/* ─── Title Prompt Modal (Tags) ─── */}
+        {titlePrompt && (
+          <div className="tag-title-prompt-overlay" onClick={cancelTagPlacement}>
+            <div className="tag-title-prompt" onClick={(e) => e.stopPropagation()}>
+              <h3>Name this Tag</h3>
+              <p>Enter a label for this equipment or inspection location.</p>
+              <input
+                type="text"
+                autoFocus
+                value={promptTitle}
+                onChange={(e) => setPromptTitle(e.target.value)}
+                placeholder="e.g. Wellhead B3, Transformer Box, Valve 04..."
+                disabled={isSubmittingTag}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && promptTitle.trim() && !isSubmittingTag) {
+                    e.preventDefault();
+                    confirmTagPlacement();
+                  }
+                  if (e.key === 'Escape') cancelTagPlacement();
+                }}
+              />
+              <div className="tag-title-prompt-actions">
+                <button className="tag-prompt-cancel" onClick={cancelTagPlacement} disabled={isSubmittingTag}>Cancel</button>
+                <button
+                  className="tag-prompt-confirm"
+                  onClick={confirmTagPlacement}
+                  disabled={!promptTitle.trim() || isSubmittingTag}
+                >
+                  {isSubmittingTag ? 'Placing Tag...' : 'Place Tag'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ─── Area Pointers Safety Panel (Virtual Tour) ─── */}
         <AreaPointersPanel 
@@ -1476,7 +1605,8 @@ export default function EnginePage() {
           onToggleSplitSwipe={() => setIsSplitSwipeActive(!isSplitSwipeActive)}
         />
 
-        {/* ─── Point Cloud LIDAR Drawer (Drone GIS) ─── */}
+        {/* ─── Point Cloud LIDAR Drawer (temporarily disabled) ─── */}
+        {/*
         <PointCloudDrawer 
           isOpen={isPointCloudDrawerOpen && isDroneSurvey}
           onClose={() => setIsPointCloudDrawerOpen(false)}
@@ -1493,8 +1623,10 @@ export default function EnginePage() {
           }}
           totalPointsCount={totalPointsCount}
         />
+        */}
 
-        {/* ─── 2D Orthomosaic Layer Drawer (Drone GIS) ─── */}
+        {/* ─── 2D Orthomosaic Layer Drawer (temporarily disabled) ─── */}
+        {/*
         <OrthoLayerDrawer 
           isOpen={isOrthoDrawerOpen && isDroneSurvey}
           onClose={() => setIsOrthoDrawerOpen(false)}
@@ -1547,6 +1679,7 @@ export default function EnginePage() {
             viewerRef.current?.orthoLayer?.setElevationOffset?.(val);
           }}
         />
+        */}
 
         {/* ─── 3D Satellite Basemap Drawer (Drone GIS) ─── */}
         <SatelliteBasemapDrawer 
@@ -1734,7 +1867,7 @@ export default function EnginePage() {
               <span>{slopeUnit === 'deg' ? '0° (Flat)' : '0%'}</span>
               <span>{slopeUnit === 'deg' ? '20° (Ramp)' : '36%'}</span>
               <span>{slopeUnit === 'deg' ? '35° (Berm)' : '70%'}</span>
-              <span style={{ color: '#f87171' }}>{slopeUnit === 'deg' ? '>50°' : '>120%'}</span>
+              <span style={{ color: '#ef4444', fontWeight: 600 }}>{slopeUnit === 'deg' ? '≥50° (Steep)' : '≥120%'}</span>
             </div>
 
             {/* Critical Hazard Alert Slider */}
