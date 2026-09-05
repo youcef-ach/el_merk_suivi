@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams, useLocation } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { Lock } from 'lucide-react';
 import './auth.css';
 import { API_URL } from '../config/api';
 
@@ -32,6 +33,20 @@ export default function AuthPage() {
   const [apiError, setApiError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+
+  // Resolve target redirect URL
+  const rawRedirect = searchParams.get('redirect') || location.state?.from?.pathname;
+  const redirectTarget = rawRedirect ? decodeURIComponent(rawRedirect) : '/dashboard';
+
+  // If already authenticated with a valid token, immediately navigate to target
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (token) {
+      navigate(redirectTarget, { replace: true });
+    }
+  }, [navigate, redirectTarget]);
 
   const loginForm = useForm({
     resolver: zodResolver(loginSchema),
@@ -42,8 +57,6 @@ export default function AuthPage() {
     resolver: zodResolver(registerSchema),
     defaultValues: { enterpriseName: '', email: '', password: '', confirmPassword: '' },
   });
-
-  const activeForm = isLogin ? loginForm : registerForm;
 
   const onLogin = async (data) => {
     setApiError('');
@@ -59,7 +72,7 @@ export default function AuthPage() {
 
       localStorage.setItem('access_token', result.access_token);
       localStorage.setItem('user', JSON.stringify(result.user));
-      navigate('/dashboard');
+      navigate(redirectTarget, { replace: true });
     } catch (err) {
       setApiError(err.message);
     } finally {
@@ -85,7 +98,7 @@ export default function AuthPage() {
 
       localStorage.setItem('access_token', result.access_token);
       localStorage.setItem('user', JSON.stringify(result.user));
-      navigate('/dashboard');
+      navigate(redirectTarget, { replace: true });
     } catch (err) {
       setApiError(err.message);
     } finally {
@@ -107,6 +120,16 @@ export default function AuthPage() {
       <div className="orb orb-2"></div>
 
       <div className="auth-card">
+        {rawRedirect && (
+          <div className="auth-redirect-notice">
+            <Lock className="auth-redirect-notice-icon" />
+            <div className="auth-redirect-notice-text">
+              <span className="auth-redirect-notice-title">Authentication Required</span>
+              <span className="auth-redirect-notice-subtitle">Sign in to access your digital twin inspection</span>
+            </div>
+          </div>
+        )}
+
         <div className="auth-header">
           <h1>{isLogin ? 'Welcome Back' : 'Register Enterprise'}</h1>
           <p>{isLogin

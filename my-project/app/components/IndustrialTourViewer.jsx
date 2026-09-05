@@ -228,10 +228,16 @@ const IndustrialTourViewer = forwardRef(({
 
     const loadInspectionAssets = async () => {
       try {
-        const token = localStorage.getItem('access_token');
+        const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
         const res = await fetch(`${API_URL}/inspections/${tourId}`, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
+
+        if (res.status === 401 || res.status === 403) {
+          const redirectParam = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.href = `/auth?redirect=${redirectParam}`;
+          return;
+        }
 
         if (!res.ok) {
           throw new Error(`Inspection fetch error: ${res.status}`);

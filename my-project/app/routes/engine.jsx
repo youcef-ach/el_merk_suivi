@@ -152,29 +152,54 @@ export default function EnginePage() {
   const [activeFloor, setActiveFloor] = useState('all');
   const [tourMode, setTourMode] = useState('DOLLHOUSE'); // 'DOLLHOUSE' | 'FLOORPLAN' | 'INSIDE'
 
+  // ─── Inspection Loading & Access Control State ───
+  const [isLoadingInspection, setIsLoadingInspection] = useState(true);
+  const [inspectionError, setInspectionError] = useState(null);
+
   // Fetch Inspection Details
   useEffect(() => {
     const fetchInspection = async () => {
+      setIsLoadingInspection(true);
+      setInspectionError(null);
       try {
-        const token = localStorage.getItem('access_token');
+        const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
         const res = await fetch(`${API_URL}/inspections/${id}`, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
-        if (res.ok) {
-          const data = await res.json();
-          setInspectionData(data);
-          const bounds = data?.orthoBounds;
-          const gOffset = bounds?.groundAsl ?? bounds?.groundOffset ?? 0;
-          const elevRange = bounds?.elevationRange ?? { min: 0, max: 8 };
-          setMinAsl(parseFloat((gOffset + elevRange.min).toFixed(2)));
-          setMaxAsl(parseFloat((gOffset + elevRange.max).toFixed(2)));
+
+        // 401 Unauthorized or 403 Forbidden: Require login and preserve redirect destination
+        if (res.status === 401 || res.status === 403) {
+          const redirectParam = encodeURIComponent(window.location.pathname + window.location.search);
+          navigate(`/auth?redirect=${redirectParam}`, { replace: true });
+          return;
         }
+
+        if (res.status === 404) {
+          setInspectionError("Inspection not found or has been deleted.");
+          setIsLoadingInspection(false);
+          return;
+        }
+
+        if (!res.ok) {
+          throw new Error(`Failed to load inspection: ${res.status}`);
+        }
+
+        const data = await res.json();
+        setInspectionData(data);
+        const bounds = data?.orthoBounds;
+        const gOffset = bounds?.groundAsl ?? bounds?.groundOffset ?? 0;
+        const elevRange = bounds?.elevationRange ?? { min: 0, max: 8 };
+        setMinAsl(parseFloat((gOffset + elevRange.min).toFixed(2)));
+        setMaxAsl(parseFloat((gOffset + elevRange.max).toFixed(2)));
+        setIsLoadingInspection(false);
       } catch (err) {
         console.error("Failed to fetch inspection details:", err);
+        setInspectionError(err.message || "Failed to load inspection assets");
+        setIsLoadingInspection(false);
       }
     };
     fetchInspection();
-  }, [id]);
+  }, [id, navigate]);
 
   // Close GIS Layers Dropdown on Click Outside
   useEffect(() => {
@@ -1129,7 +1154,26 @@ export default function EnginePage() {
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
       >
-        {isVirtualTour ? (
+        {isLoadingInspection ? (
+          <div className="engine-auth-loading-overlay">
+            <div className="engine-auth-loading-spinner" />
+            <div className="engine-auth-loading-text">
+              <span className="engine-auth-loading-title">Loading Digital Twin Engine</span>
+              <span className="engine-auth-loading-sub">Verifying enterprise credentials and synchronizing telemetry...</span>
+            </div>
+          </div>
+        ) : inspectionError ? (
+          <div className="engine-auth-loading-overlay">
+            <div className="engine-auth-error-card">
+              <ShieldAlert style={{ width: 36, height: 36, color: '#f87171' }} />
+              <h2 style={{ fontSize: 18, color: '#f8fafc', margin: '12px 0 6px 0' }}>Access Restricted</h2>
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', margin: '0 0 16px 0', lineHeight: 1.5 }}>{inspectionError}</p>
+              <Link to="/projects" className="engine-auth-back-btn">
+                <ArrowLeft style={{ width: 14, height: 14 }} /> Return to Projects
+              </Link>
+            </div>
+          </div>
+        ) : isVirtualTour ? (
           <IndustrialTourViewer 
             ref={viewerRef}
             tourId={id}
