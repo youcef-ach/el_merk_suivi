@@ -1001,21 +1001,13 @@ export declare class InspectionsService {
         tilesetUrl: string;
         datum: any;
     }>;
-    extractLowestVertexFromB3DM(b3dmBuf: Buffer, orientation?: string): {
-        minY: number;
-        minVert: {
-            x: number;
-            y: number;
-            z: number;
-        };
-    } | null;
     computeTilesetDatum(json: any, orientation?: string, rootJsonDir?: string): Promise<{
         groundOffset: number;
         groundAsl: number;
         meshSnapOffset: number;
         minYRaw: number;
         maxYRaw: number;
-        lowestPoint: {
+        surfaceCenterPoint: {
             x: number;
             y: number;
             z: number;

@@ -1,18 +1,23 @@
 import React, { useState } from 'react';
 import { 
   Ruler, 
-  ArrowRight, 
-  ArrowUp, 
+  Trash2, 
+  ChevronLeft, 
+  ChevronRight, 
   TrendingUp, 
-  Box, 
   Save, 
   X, 
   Check, 
-  Maximize 
+  Maximize2 
 } from 'lucide-react';
 
 export default function MeasurementHUD({ 
   measurementData, 
+  measurementIndex,
+  totalMeasurements,
+  onPrev,
+  onNext,
+  onDelete,
   onClose, 
   onSave, 
   inspectionId 
@@ -33,7 +38,7 @@ export default function MeasurementHUD({
         type: type || 'DISTANCE_3D',
         points: measurementData.points || [],
         values: { dist3D, dist2D, distZ, slope, area, volumeCut, volumeFill },
-        label: label || `${type} Measurement`,
+        label: label || `${type} Measurement #${measurementIndex || 1}`,
       });
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2000);
@@ -43,111 +48,145 @@ export default function MeasurementHUD({
   };
 
   return (
-    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 w-auto min-w-[340px] max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900/95 backdrop-blur-xl shadow-2xl p-4 text-slate-100 select-none animate-in fade-in slide-in-from-top-4 duration-200">
+    <div className="fixed top-20 right-4 z-40 w-[390px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/10 bg-slate-950/90 backdrop-blur-2xl shadow-2xl shadow-black/70 p-5 text-slate-100 select-none animate-in fade-in slide-in-from-right-4 duration-200">
       
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 mb-3 border-b border-slate-800 pb-2">
-        <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-400">
-            <Ruler className="h-4 w-4" />
+      <div className="flex items-center justify-between gap-3 pb-3.5 mb-3.5 border-b border-white/10">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/10 text-cyan-400 border border-cyan-500/30 shadow-inner">
+            <Ruler className="h-4.5 w-4.5" />
           </div>
-          <span className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-            Precision Survey Measurement
-          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold tracking-tight text-white">Distance Measurement</h3>
+              {totalMeasurements > 1 && (
+                <span className="px-2 py-0.5 text-xs font-bold font-mono rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                  {measurementIndex || 1} of {totalMeasurements}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 font-normal mt-0.5">Spatial Vector Geometry</p>
+          </div>
         </div>
-        <button 
-          onClick={onClose}
-          className="text-slate-400 hover:text-slate-200 p-1 rounded-md hover:bg-slate-800 transition"
-        >
-          <X className="h-4 w-4" />
-        </button>
+
+        {/* Stepper Navigation & Action Buttons */}
+        <div className="flex items-center gap-1.5">
+          {totalMeasurements > 1 && (
+            <div className="flex items-center bg-white/5 rounded-xl p-0.5 border border-white/10">
+              <button 
+                onClick={onPrev}
+                title="Previous measurement"
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button 
+                onClick={onNext}
+                title="Next measurement"
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {onDelete && (
+            <button 
+              onClick={onDelete}
+              title="Delete this measurement"
+              className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/15 border border-transparent hover:border-rose-500/30 transition flex items-center justify-center"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+
+          <button 
+            onClick={onClose}
+            title="Close"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition flex items-center justify-center"
+          >
+            <X className="h-4.5 w-4.5" />
+          </button>
+        </div>
       </div>
 
-      {/* Primary Value Display */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 text-center">
-          <div className="text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1">
-            <span>3D Distance</span>
-          </div>
-          <div className="text-lg font-bold text-cyan-400 font-mono mt-0.5">
-            {dist3D ? `${dist3D} m` : '--'}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 text-center">
-          <div className="text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1">
-            <span>2D Horiz</span>
-          </div>
-          <div className="text-lg font-bold text-emerald-400 font-mono mt-0.5">
-            {dist2D ? `${dist2D} m` : '--'}
+      {/* Primary Value Display (3 Cards) */}
+      <div className="grid grid-cols-3 gap-2.5 mb-3.5">
+        <div className="rounded-xl border border-cyan-500/30 bg-gradient-to-b from-cyan-500/15 via-cyan-500/5 to-slate-950 p-3 text-center shadow-inner">
+          <div className="text-[10px] uppercase tracking-wider text-cyan-300 font-semibold">3D Slope Dist</div>
+          <div className="text-lg font-black text-cyan-400 font-mono mt-1">
+            {dist3D !== undefined ? `${dist3D}` : '--'}
+            <span className="text-xs font-normal text-slate-400 ml-0.5 font-sans">m</span>
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 text-center">
-          <div className="text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1">
-            <span>&Delta;Z Height</span>
+        <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-b from-emerald-500/15 via-emerald-500/5 to-slate-950 p-3 text-center shadow-inner">
+          <div className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">2D Horiz</div>
+          <div className="text-lg font-black text-emerald-400 font-mono mt-1">
+            {dist2D !== undefined ? `${dist2D}` : '--'}
+            <span className="text-xs font-normal text-slate-400 ml-0.5 font-sans">m</span>
           </div>
-          <div className="text-lg font-bold text-amber-400 font-mono mt-0.5">
-            {distZ ? `${distZ} m` : '--'}
+        </div>
+
+        <div className="rounded-xl border border-amber-500/30 bg-gradient-to-b from-amber-500/15 via-amber-500/5 to-slate-950 p-3 text-center shadow-inner">
+          <div className="text-[10px] uppercase tracking-wider text-amber-300 font-semibold">&Delta;Z Elevation</div>
+          <div className="text-lg font-black text-amber-400 font-mono mt-1">
+            {distZ !== undefined ? `${distZ}` : '--'}
+            <span className="text-xs font-normal text-slate-400 ml-0.5 font-sans">m</span>
           </div>
         </div>
       </div>
 
-      {/* Secondary Metrics (Slope, Area, Volume if applicable) */}
-      {(slope !== undefined || area !== undefined || volumeCut !== undefined) && (
-        <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+      {/* Secondary Metrics (Slope, Area) */}
+      {(slope !== undefined || area !== undefined) && (
+        <div className="grid grid-cols-2 gap-2.5 mb-3.5 text-xs">
           {slope !== undefined && (
-            <div className="flex justify-between items-center bg-slate-950/40 px-3 py-1.5 rounded-lg border border-slate-800/60 font-mono">
-              <span className="text-slate-400 text-[11px] flex items-center gap-1 font-sans">
-                <TrendingUp className="h-3 w-3 text-purple-400" />
+            <div className="flex justify-between items-center bg-slate-950/80 px-3.5 py-2.5 rounded-xl border border-white/10 font-mono">
+              <span className="text-slate-400 text-xs flex items-center gap-1.5 font-sans">
+                <TrendingUp className="h-4 w-4 text-purple-400" />
                 Slope Grade:
               </span>
               <span className="text-purple-300 font-bold">{slope}%</span>
             </div>
           )}
           {area !== undefined && (
-            <div className="flex justify-between items-center bg-slate-950/40 px-3 py-1.5 rounded-lg border border-slate-800/60 font-mono">
-              <span className="text-slate-400 text-[11px] flex items-center gap-1 font-sans">
-                <Maximize className="h-3 w-3 text-cyan-400" />
-                Surface Area:
+            <div className="flex justify-between items-center bg-slate-950/80 px-3.5 py-2.5 rounded-xl border border-white/10 font-mono">
+              <span className="text-slate-400 text-xs flex items-center gap-1.5 font-sans">
+                <Maximize2 className="h-4 w-4 text-cyan-400" />
+                Plan Area:
               </span>
-              <span className="text-cyan-300 font-bold">{area} m&sup2;</span>
-            </div>
-          )}
-          {volumeCut !== undefined && (
-            <div className="flex justify-between items-center bg-slate-950/40 px-3 py-1.5 rounded-lg border border-slate-800/60 font-mono col-span-2">
-              <span className="text-slate-400 text-[11px] flex items-center gap-1 font-sans">
-                <Box className="h-3 w-3 text-amber-400" />
-                Earthwork Volume:
-              </span>
-              <span className="text-amber-300 font-bold">Cut: {volumeCut} m&sup3; | Fill: {volumeFill || 0} m&sup3;</span>
+              <span className="text-cyan-300 font-bold">{area} m²</span>
             </div>
           )}
         </div>
       )}
 
-      {/* Save Action */}
-      <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
-        <input 
-          type="text" 
-          placeholder="Optional label (e.g. Trench Span 4)"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-cyan-500"
-        />
-        <button 
-          onClick={handleSave} 
-          disabled={isSaving}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-            savedSuccess 
-              ? 'bg-emerald-600 text-white' 
-              : 'bg-cyan-600 hover:bg-cyan-500 text-white'
-          }`}
-        >
-          {savedSuccess ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
-          <span>{savedSuccess ? 'Saved' : isSaving ? 'Saving...' : 'Save'}</span>
-        </button>
-      </div>
+      {/* Optional Annotation & Save */}
+      {inspectionId && onSave && (
+        <div className="pt-3 border-t border-white/10 space-y-2.5">
+          <div className="flex gap-2">
+            <input 
+              type="text" 
+              placeholder="Tag this measurement..." 
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className="flex-1 rounded-xl bg-slate-900/90 border border-white/10 px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500/60 outline-none transition shadow-inner"
+            />
+            <button 
+              onClick={handleSave}
+              disabled={isSaving || savedSuccess}
+              className={`px-4 py-2 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                savedSuccess 
+                  ? 'bg-emerald-500 text-slate-950' 
+                  : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/20'
+              }`}
+            >
+              {savedSuccess ? <Check className="h-4 w-4 stroke-[2.5]" /> : <Save className="h-4 w-4" />}
+              <span>{savedSuccess ? 'Saved' : 'Save'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -4,9 +4,12 @@ import * as THREE from 'three';
 import IndustrialTourViewer from '../components/IndustrialTourViewer';
 import DroneSurveyViewer from '../components/DroneSurveyViewer';
 import MeasurementHUD from '../components/MeasurementHUD';
+import MeasurementsListPanel from '../components/MeasurementsListPanel';
 import CrossSectionProfiler from '../components/CrossSectionProfiler';
+import CrossSectionsListPanel from '../components/CrossSectionsListPanel';
 import TagPanel from '../components/TagPanel';
 import VolumeHUD from '../components/VolumeHUD';
+import VolumeListPanel from '../components/VolumeListPanel';
 import SurveyReportModal from '../components/SurveyReportModal';
 import OrthoLayerDrawer from '../components/OrthoLayerDrawer';
 import SatelliteBasemapDrawer from '../components/SatelliteBasemapDrawer';
@@ -14,6 +17,7 @@ import TimelineComparisonBar from '../components/TimelineComparisonBar';
 import PointCloudDrawer from '../components/PointCloudDrawer';
 import AreaPointersPanel from '../components/AreaPointersPanel';
 import { useMeasurement } from '../hooks/useMeasurement';
+import { useCrossSection } from '../hooks/useCrossSection';
 import { useTags } from '../hooks/useTags';
 import { useVolumeCalculation } from '../hooks/useVolumeCalculation';
 import { useAreaPointers } from '../hooks/useAreaPointers';
@@ -137,10 +141,6 @@ export default function EnginePage() {
   const [pointColorMode, setPointColorMode] = useState('rgb');
   const [totalPointsCount, setTotalPointsCount] = useState(0);
 
-  // ─── Cross Section State (Drone GIS) ───
-  const [crossSectionPoints, setCrossSectionPoints] = useState([]);
-  const [crossSectionProfile, setCrossSectionProfile] = useState(null);
-
   // ─── Layers & Shaders Dropdown Menu State ───
   const [isLayersMenuOpen, setIsLayersMenuOpen] = useState(false);
   const layersMenuRef = useRef(null);
@@ -227,12 +227,36 @@ export default function EnginePage() {
   // ─── Hooks for Measurements, Tags, Volumes, and Pointers ───
   const {
     measurements,
+    selectedMeasurementId,
+    selectedMeasurement,
+    selectMeasurement,
     hasPendingPoint,
     handleMeasurementClick,
+    removeMeasurement,
     clearAllMeasurements,
+    cancelPending,
   } = useMeasurement(viewerRef);
 
-  const latestMeasurement = measurements.length > 0 ? measurements[measurements.length - 1] : null;
+  // Stepper handlers for cycling between active measurements in HUD
+  const handlePrevMeasurement = useCallback(() => {
+    if (measurements.length <= 1) return;
+    const currIdx = measurements.findIndex(m => m.id === selectedMeasurement?.id);
+    if (currIdx > 0) {
+      selectMeasurement(measurements[currIdx - 1].id);
+    } else {
+      selectMeasurement(measurements[measurements.length - 1].id);
+    }
+  }, [measurements, selectedMeasurement, selectMeasurement]);
+
+  const handleNextMeasurement = useCallback(() => {
+    if (measurements.length <= 1) return;
+    const currIdx = measurements.findIndex(m => m.id === selectedMeasurement?.id);
+    if (currIdx >= 0 && currIdx < measurements.length - 1) {
+      selectMeasurement(measurements[currIdx + 1].id);
+    } else {
+      selectMeasurement(measurements[0].id);
+    }
+  }, [measurements, selectedMeasurement, selectMeasurement]);
 
   const {
     tags,
@@ -249,41 +273,121 @@ export default function EnginePage() {
     updateTagFormField
   } = useTags(viewerRef, id);
 
+  // ─── Multi-Stockpile Volumetric Cut / Fill Hook ───
   const {
+    stockpiles,
+    selectedStockpileId,
+    selectedStockpile,
+    volumeResult,
+    accumulatedTotals,
+    accumulatedStockpileIds,
+    toggleAccumulateStockpile,
     polygonPoints,
     isDrawing: isVolumeDrawing,
-    volumeResult,
     isCalculating: isVolumeCalculating,
     baseMethod: volumeBaseMethod,
     customBaseAsl: volumeCustomBaseAsl,
     density: volumeDensity,
     handleVolumeClick,
     completePolygon: handleCompleteVolume,
+    startNewStockpile,
+    selectStockpile,
+    deleteStockpile,
+    clearAllStockpiles,
     clearVolume,
     handleBaseMethodChange,
     handleCustomBaseAslChange,
-    handleDensityChange: handleVolumeDensityChange
+    handleDensityChange: handleVolumeDensityChange,
+    updateStockpileVertexPosition,
+    commitStockpileVertexChange
   } = useVolumeCalculation(viewerRef);
 
-  // ─── Cross-Section Interactive Sampling Handler ───
-  const handleCrossSectionClick = (hitPoint) => {
-    if (activeTool !== 'crossSection') return;
-    if (crossSectionPoints.length === 0) {
-      setCrossSectionPoints([hitPoint]);
-      setCrossSectionProfile(null);
-    } else if (crossSectionPoints.length === 1) {
-      const p1 = crossSectionPoints[0];
-      const p2 = hitPoint;
-      setCrossSectionPoints([p1, p2]);
-      if (viewerRef.current?.sampleCrossSection) {
-        const result = viewerRef.current.sampleCrossSection(p1, p2);
-        setCrossSectionProfile(result);
-      }
+  // Stepper handlers for cycling between active stockpiles in HUD
+  const handlePrevStockpile = useCallback(() => {
+    if (stockpiles.length <= 1) return;
+    const currIdx = stockpiles.findIndex(s => s.id === selectedStockpile?.id);
+    if (currIdx > 0) {
+      selectStockpile(stockpiles[currIdx - 1].id);
     } else {
-      setCrossSectionPoints([hitPoint]);
-      setCrossSectionProfile(null);
+      selectStockpile(stockpiles[stockpiles.length - 1].id);
     }
-  };
+  }, [stockpiles, selectedStockpile, selectStockpile]);
+
+  const handleNextStockpile = useCallback(() => {
+    if (stockpiles.length <= 1) return;
+    const currIdx = stockpiles.findIndex(s => s.id === selectedStockpile?.id);
+    if (currIdx >= 0 && currIdx < stockpiles.length - 1) {
+      selectStockpile(stockpiles[currIdx + 1].id);
+    } else {
+      selectStockpile(stockpiles[0].id);
+    }
+  }, [stockpiles, selectedStockpile, selectStockpile]);
+
+  // ─── Multi-Slice Topographic Cross-Section Hook ───
+  const {
+    crossSections,
+    selectedSectionId,
+    selectedSection,
+    pendingPoints: crossSectionPendingPoints,
+    isDrawing: isCrossSectionDrawing,
+    handleCrossSectionClick,
+    startNewSlice: startNewCrossSectionSlice,
+    selectSection: selectCrossSection,
+    deleteSection: deleteCrossSection,
+    clearAllSections: clearAllCrossSections,
+    cancelPending: cancelPendingCrossSection,
+    setHoveredSample: setCrossSectionHoveredSample,
+  } = useCrossSection(viewerRef);
+
+  // Stepper handlers for cycling between active cross-sections in HUD
+  const handlePrevSection = useCallback(() => {
+    if (crossSections.length <= 1) return;
+    const currIdx = crossSections.findIndex(s => s.id === selectedSection?.id);
+    if (currIdx > 0) {
+      selectCrossSection(crossSections[currIdx - 1].id);
+    } else {
+      selectCrossSection(crossSections[crossSections.length - 1].id);
+    }
+  }, [crossSections, selectedSection, selectCrossSection]);
+
+  const handleNextSection = useCallback(() => {
+    if (crossSections.length <= 1) return;
+    const currIdx = crossSections.findIndex(s => s.id === selectedSection?.id);
+    if (currIdx >= 0 && currIdx < crossSections.length - 1) {
+      selectCrossSection(crossSections[currIdx + 1].id);
+    } else {
+      selectCrossSection(crossSections[0].id);
+    }
+  }, [crossSections, selectedSection, selectCrossSection]);
+
+  // Keyboard shortcut listener: ESC cancels pending actions, Delete removes selected items
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA'].includes(e.target?.tagName) || e.target?.isContentEditable) return;
+      if (e.key === 'Escape') {
+        if (hasPendingPoint) {
+          cancelPending();
+        }
+        if (crossSectionPendingPoints.length > 0) {
+          cancelPendingCrossSection();
+        }
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (activeTool === 'measure' && selectedMeasurement) {
+          removeMeasurement(selectedMeasurement.id);
+        } else if (activeTool === 'crossSection' && selectedSection) {
+          deleteCrossSection(selectedSection.id);
+        } else if (activeTool === 'volume' && selectedStockpile) {
+          deleteStockpile(selectedStockpile.id);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    hasPendingPoint, cancelPending, activeTool, selectedMeasurement, removeMeasurement,
+    crossSectionPendingPoints, cancelPendingCrossSection, selectedSection, deleteCrossSection,
+    selectedStockpile, deleteStockpile
+  ]);
 
   const {
     pointers,
@@ -314,14 +418,7 @@ export default function EnginePage() {
 
   // Toggle Tools
   const toggleTool = (toolName) => {
-    setActiveTool(prev => {
-      const next = prev === toolName ? 'none' : toolName;
-      if (next !== 'crossSection') {
-        setCrossSectionPoints([]);
-        setCrossSectionProfile(null);
-      }
-      return next;
-    });
+    setActiveTool(prev => (prev === toolName ? 'none' : toolName));
   };
 
   // Fullscreen Handler
@@ -365,7 +462,9 @@ export default function EnginePage() {
 
   // Helper to get true ground datum offset (0.00m reference)
   const getDatumOffset = useCallback(() => {
-    return viewerRef.current?.datumInfo?.groundOffset 
+    return viewerRef.current?.datumInfo?.groundAsl 
+      ?? viewerRef.current?.datumInfo?.groundOffset 
+      ?? inspectionData?.orthoBounds?.groundAsl 
       ?? inspectionData?.orthoBounds?.groundOffset 
       ?? 0;
   }, [inspectionData]);
@@ -492,7 +591,9 @@ export default function EnginePage() {
     if (intersects.length > 0) {
       const hit = intersects[0];
       const p = hit.point;
-      const relElev = p.y;
+      const datumInfo = viewerRef.current?.datumInfo;
+      const refY = datumInfo?.surfaceCenterPoint?.y ?? viewerRef.current?.tilesetEngine?.getSurfaceCenterPoint?.()?.y ?? 0;
+      const relElev = p.y - refY;
       const datumOffset = getDatumOffset();
       const aslElev = relElev + datumOffset;
 
@@ -1019,6 +1120,9 @@ export default function EnginePage() {
             >
               <TrendingUp style={{ width: 14, height: 14 }} />
               <span>Cross-Section</span>
+              {crossSections?.length > 0 && (
+                <span className="engine-active-count-badge">{crossSections.length}</span>
+              )}
             </button>
 
             {/* 3. Volumetric Cut/Fill Calculator */}
@@ -1029,6 +1133,9 @@ export default function EnginePage() {
             >
               <Boxes style={{ width: 14, height: 14 }} />
               <span>Cut / Fill</span>
+              {stockpiles?.length > 0 && (
+                <span className="engine-active-count-badge">{stockpiles.length}</span>
+              )}
             </button>
 
             <div className="engine-divider" />
@@ -1179,6 +1286,7 @@ export default function EnginePage() {
             tourId={id}
             measurementMode={activeTool === 'measure'}
             onMeasurementClick={handleMeasurementClick}
+            onSelectMeasurement={selectMeasurement}
             tagMode={activeTool === 'tag'}
             onTagClick={handleTagClick}
             onTagSelect={handleTagSelect}
@@ -1197,63 +1305,141 @@ export default function EnginePage() {
             onGeoCoordinates={handleGeoCoordinates}
             measurementMode={activeTool === 'measure'}
             onMeasurementClick={handleMeasurementClick}
+            onSelectMeasurement={selectMeasurement}
             volumeMode={activeTool === 'volume'}
             onVolumeClick={handleVolumeClick}
+            onSelectStockpile={selectStockpile}
+            onUpdateStockpileVertex={updateStockpileVertexPosition}
+            onCommitStockpileVertex={commitStockpileVertexChange}
             crossSectionMode={activeTool === 'crossSection'}
             onCrossSectionClick={handleCrossSectionClick}
+            onSelectSection={selectCrossSection}
           />
         )}
 
         {/* ─── Measurement HUD (Both Modes) ─── */}
-        {activeTool === 'measure' && latestMeasurement && (
+        {activeTool === 'measure' && selectedMeasurement && (
           <MeasurementHUD 
-            measurementData={latestMeasurement}
+            measurementData={selectedMeasurement}
+            measurementIndex={measurements.findIndex(m => m.id === selectedMeasurement.id) + 1}
+            totalMeasurements={measurements.length}
+            onPrev={handlePrevMeasurement}
+            onNext={handleNextMeasurement}
+            onDelete={() => removeMeasurement(selectedMeasurement.id)}
             onClose={() => setActiveTool('none')}
             inspectionId={id}
           />
         )}
 
+        {/* ─── Measurements List Panel (Both Modes) ─── */}
+        {activeTool === 'measure' && (
+          <MeasurementsListPanel 
+            measurements={measurements}
+            selectedMeasurementId={selectedMeasurement?.id}
+            onSelectMeasurement={(id) => {
+              selectMeasurement(id);
+            }}
+            onDeleteMeasurement={removeMeasurement}
+            onClearAll={clearAllMeasurements}
+            hasPendingPoint={hasPendingPoint}
+            onCancelPending={cancelPending}
+            isOpen={true}
+            onClose={() => setActiveTool('none')}
+          />
+        )}
+
+        {/* ─── Cross-Sections List Panel (Drone GIS) ─── */}
+        {isDroneSurvey && activeTool === 'crossSection' && (
+          <CrossSectionsListPanel 
+            crossSections={crossSections}
+            selectedSectionId={selectedSection?.id}
+            onSelectSection={(secId) => {
+              selectCrossSection(secId);
+            }}
+            onDeleteSection={deleteCrossSection}
+            onClearAll={clearAllCrossSections}
+            onNewSlice={startNewCrossSectionSlice}
+            pendingPoints={crossSectionPendingPoints}
+            onCancelPending={cancelPendingCrossSection}
+            isOpen={true}
+            onClose={() => setActiveTool('none')}
+          />
+        )}
+
         {/* ─── Cross-Section Elevation Profiler (Drone GIS) ─── */}
-        <CrossSectionProfiler 
-          profileData={crossSectionProfile}
-          onClose={() => {
-            setActiveTool('none');
-            setCrossSectionPoints([]);
-            setCrossSectionProfile(null);
-          }}
-          onSave={async (sectionData) => {
-            try {
-              const token = localStorage.getItem('access_token');
-              await fetch(`${API_URL}/inspections/${id}/cross-sections`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-                body: JSON.stringify(sectionData)
-              });
-            } catch (err) {
-              console.error('Failed to save cross section:', err);
-            }
-          }}
-          inspectionId={id}
-        />
+        {isDroneSurvey && activeTool === 'crossSection' && selectedSection && (
+          <CrossSectionProfiler 
+            profileData={selectedSection?.profile ? { ...selectedSection.profile, name: selectedSection.name } : null}
+            sectionIndex={crossSections.findIndex(s => s.id === selectedSection.id) + 1}
+            totalSections={crossSections.length}
+            onPrev={handlePrevSection}
+            onNext={handleNextSection}
+            onNewSlice={startNewCrossSectionSlice}
+            onDelete={() => deleteCrossSection(selectedSection.id)}
+            onHoverPoint={setCrossSectionHoveredSample}
+            onClose={() => setActiveTool('none')}
+            onSave={async (sectionData) => {
+              try {
+                const token = localStorage.getItem('access_token');
+                await fetch(`${API_URL}/inspections/${id}/cross-sections`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                  body: JSON.stringify(sectionData)
+                });
+              } catch (err) {
+                console.error('Failed to save cross section:', err);
+              }
+            }}
+            inspectionId={id}
+          />
+        )}
 
         {/* ─── Volumetric Cut/Fill Calculator HUD (Drone GIS) ─── */}
-        <VolumeHUD 
-          polygonPoints={polygonPoints}
-          isDrawing={isVolumeDrawing}
-          volumeResult={volumeResult}
-          isCalculating={isVolumeCalculating}
-          baseMethod={volumeBaseMethod}
-          customBaseAsl={volumeCustomBaseAsl}
-          density={volumeDensity}
-          onComplete={handleCompleteVolume}
-          onClear={clearVolume}
-          onBaseMethodChange={handleBaseMethodChange}
-          onCustomBaseAslChange={handleCustomBaseAslChange}
-          onDensityChange={handleVolumeDensityChange}
-          isVisible={activeTool === 'volume' && isDroneSurvey}
-          onClose={() => setActiveTool('none')}
-          inspectionId={id}
-        />
+        {isDroneSurvey && activeTool === 'volume' && (
+          <VolumeHUD 
+            polygonPoints={polygonPoints}
+            isDrawing={isVolumeDrawing}
+            volumeResult={volumeResult}
+            stockpileIndex={selectedStockpile ? stockpiles.findIndex(s => s.id === selectedStockpile.id) + 1 : 0}
+            totalStockpiles={stockpiles.length}
+            onPrev={handlePrevStockpile}
+            onNext={handleNextStockpile}
+            onDelete={() => selectedStockpile && deleteStockpile(selectedStockpile.id)}
+            onNewStockpile={startNewStockpile}
+            isCalculating={isVolumeCalculating}
+            baseMethod={volumeBaseMethod}
+            customBaseAsl={volumeCustomBaseAsl}
+            density={volumeDensity}
+            onComplete={handleCompleteVolume}
+            onClear={clearVolume}
+            onBaseMethodChange={handleBaseMethodChange}
+            onCustomBaseAslChange={handleCustomBaseAslChange}
+            onDensityChange={handleVolumeDensityChange}
+            isVisible={true}
+            onClose={() => setActiveTool('none')}
+            inspectionId={id}
+          />
+        )}
+
+        {/* ─── Stockpile & Volumes List Panel (Drone GIS) ─── */}
+        {isDroneSurvey && activeTool === 'volume' && (
+          <VolumeListPanel 
+            stockpiles={stockpiles}
+            selectedStockpileId={selectedStockpile?.id}
+            onSelectStockpile={(stId) => {
+              selectStockpile(stId);
+            }}
+            onDeleteStockpile={deleteStockpile}
+            onClearAll={clearAllStockpiles}
+            onNewStockpile={startNewStockpile}
+            isDrawing={isVolumeDrawing}
+            accumulatedTotals={accumulatedTotals}
+            accumulatedStockpileIds={accumulatedStockpileIds}
+            onToggleAccumulate={toggleAccumulateStockpile}
+            isOpen={true}
+            onClose={() => setActiveTool('none')}
+          />
+        )}
 
         {/* ─── Smart Tag Panel (Both Modes) ─── */}
         <TagPanel 
@@ -1426,9 +1612,12 @@ export default function EnginePage() {
         <SurveyReportModal 
           isOpen={isReportModalOpen}
           onClose={() => setIsReportModalOpen(false)}
-          inspection={inspectionData}
-          measurementsCount={measurements.length}
+          inspectionData={inspectionData}
+          viewerRef={viewerRef}
           volumeResult={volumeResult}
+          profileData={selectedSection?.profile}
+          tags={tags}
+          measurements={measurements}
         />
 
         {/* ─── Floating Hypsometric Elevation Legend Card (Bottom Left) ─── */}
@@ -1602,29 +1791,29 @@ export default function EnginePage() {
         {activeTool !== 'none' && (
           <div style={{
             position: 'fixed',
-            top: '78px',
+            top: '76px',
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 80,
-            padding: '6px 16px',
-            borderRadius: '20px',
-            background: 'rgba(15, 23, 42, 0.88)',
-            border: '1px solid rgba(56, 189, 248, 0.3)',
+            padding: '8px 20px',
+            borderRadius: '24px',
+            background: 'rgba(15, 23, 42, 0.92)',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
             backdropFilter: 'blur(16px)',
             color: '#38bdf8',
-            fontSize: '12px',
+            fontSize: '13px',
             fontWeight: 600,
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+            gap: '10px',
+            boxShadow: '0 8px 28px rgba(0,0,0,0.6)'
           }}>
             <span className="engine-pulse-dot" style={{ backgroundColor: '#38bdf8', boxShadow: '0 0 8px #38bdf8' }} />
             {activeTool === 'measure' && (
               <span>{hasPendingPoint ? "Click second point on 3D terrain to complete measurement" : "Click anywhere on 3D terrain to place first point"}</span>
             )}
             {activeTool === 'crossSection' && (
-              <span>{crossSectionPoints.length === 1 ? "Click second point across terrain to generate elevation profile graph" : "Click first point on terrain to begin cross-section slice"}</span>
+              <span>{crossSectionPendingPoints?.length === 1 ? "Click second point across terrain to generate elevation profile graph" : "Click first point on terrain to begin cross-section slice"}</span>
             )}
             {activeTool === 'volume' && (
               <span>{polygonPoints.length >= 3 ? "Click polygon vertices around area, then click Calculate Volume" : "Click 3D terrain to add polygon perimeter vertices (min 3 points)"}</span>

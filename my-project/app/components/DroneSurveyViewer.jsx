@@ -11,10 +11,15 @@ const DroneSurveyViewer = forwardRef(({
   tourId,
   measurementMode,
   onMeasurementClick,
+  onSelectMeasurement,
   volumeMode,
   onVolumeClick,
+  onSelectStockpile,
+  onUpdateStockpileVertex,
+  onCommitStockpileVertex,
   crossSectionMode,
   onCrossSectionClick,
+  onSelectSection,
   onGeoCoordinates,
 }, ref) => {
 
@@ -38,18 +43,28 @@ const DroneSurveyViewer = forwardRef(({
   // Measurement, Volume & CrossSection click refs
   const measurementModeRef = useRef(false);
   const onMeasurementClickRef = useRef(null);
+  const onSelectMeasurementRef = useRef(null);
   measurementModeRef.current = measurementMode;
   onMeasurementClickRef.current = onMeasurementClick;
+  onSelectMeasurementRef.current = onSelectMeasurement;
 
   const volumeModeRef = useRef(false);
   const onVolumeClickRef = useRef(null);
+  const onSelectStockpileRef = useRef(null);
+  const onUpdateStockpileVertexRef = useRef(null);
+  const onCommitStockpileVertexRef = useRef(null);
   volumeModeRef.current = volumeMode;
   onVolumeClickRef.current = onVolumeClick;
+  onSelectStockpileRef.current = onSelectStockpile;
+  onUpdateStockpileVertexRef.current = onUpdateStockpileVertex;
+  onCommitStockpileVertexRef.current = onCommitStockpileVertex;
 
   const crossSectionModeRef = useRef(false);
   const onCrossSectionClickRef = useRef(null);
+  const onSelectSectionRef = useRef(null);
   crossSectionModeRef.current = crossSectionMode;
   onCrossSectionClickRef.current = onCrossSectionClick;
+  onSelectSectionRef.current = onSelectSection;
 
   const onGeoCoordinatesRef = useRef(null);
   onGeoCoordinatesRef.current = onGeoCoordinates;
@@ -105,12 +120,13 @@ const DroneSurveyViewer = forwardRef(({
 
         // Load Cesium 3D Tiles
         if (tilesetUrl) {
-          const hasPrecalculatedDatum = typeof tour.orthoBounds?.groundOffset === 'number';
+          const hasPrecalculatedDatum = typeof tour.orthoBounds?.groundOffset === 'number' || typeof tour.orthoBounds?.groundAsl === 'number';
           setIsAligningDatum(!hasPrecalculatedDatum);
           if (hasPrecalculatedDatum) {
             setDatumInfo({
-              lowestPoint: tour.orthoBounds.lowestPoint,
-              groundOffset: tour.orthoBounds.groundOffset,
+              surfaceCenterPoint: tour.orthoBounds.surfaceCenterPoint || tour.orthoBounds.centerSurfacePoint || tour.orthoBounds.lowestPoint,
+              groundOffset: tour.orthoBounds.groundOffset ?? tour.orthoBounds.groundAsl,
+              groundAsl: tour.orthoBounds.groundAsl ?? tour.orthoBounds.groundOffset,
               elevationRange: tour.orthoBounds.elevationRange
             });
           }
@@ -123,7 +139,7 @@ const DroneSurveyViewer = forwardRef(({
             initialGroundAsl: tour.orthoBounds?.groundAsl,
             initialMeshSnapOffset: tour.orthoBounds?.meshSnapOffset,
             initialMinYRaw: tour.orthoBounds?.minYRaw,
-            initialLowestPoint: tour.orthoBounds?.lowestPoint,
+            initialSurfaceCenterPoint: tour.orthoBounds?.surfaceCenterPoint || tour.orthoBounds?.centerSurfacePoint || tour.orthoBounds?.lowestPoint,
             initialElevationRange: tour.orthoBounds?.elevationRange,
           });
           tilesetEngineRef.current = engine;
@@ -137,7 +153,7 @@ const DroneSurveyViewer = forwardRef(({
             }
           });
 
-          // Listener for ground datum alignment & lowest point discovery
+          // Listener for ground datum alignment & surface center point discovery
           engine.onDatumAligned((datum) => {
             setIsAligningDatum(false);
             setDatumInfo(datum);
@@ -208,15 +224,230 @@ const DroneSurveyViewer = forwardRef(({
     const camera = cameraRef.current;
     if (!renderer || !camera || !isDataLoaded) return;
 
+    // ─── Dynamic Cursor Styling ───
+    if (measurementMode || volumeMode || crossSectionMode) {
+      renderer.domElement.style.cursor = 'crosshair';
+    } else {
+      renderer.domElement.style.cursor = 'default';
+    }
+
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    const onClick = (e) => {
+    // Track pointerdown state to differentiate deliberate clicks from camera orbit/pan drag
+    let pointerDownPos = { x: 0, y: 0 };
+    let pointerDownTime = 0;
+    let isDragging = false;
+    let draggedVertex = null;
+
+    const onPointerDown = (e) => {
+      // Only track primary left mouse button
+      if (e.button !== 0) return;
+      pointerDownPos = { x: e.clientX, y: e.clientY };
+      pointerDownTime = performance.now();
+      isDragging = false;
+
+      // Check if user clicked on a stockpile vertex handle to drag it
+      if (volumeModeRef.current && sceneRef.current) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        const vGroup = sceneRef.current.getObjectByName('volumeMasterGroup');
+        if (vGroup) {
+          const vHits = raycaster.intersectObjects(vGroup.children, true);
+          for (const hit of vHits) {
+            let cur = hit.object;
+            while (cur && cur !== vGroup) {
+              if (cur.userData?.type === 'stockpile_vertex_handle') {
+                draggedVertex = {
+                  stockpileId: cur.userData.stockpileId,
+                  vertexIndex: cur.userData.vertexIndex
+                };
+                if (controlsRef.current) {
+                  controlsRef.current.enabled = false; // Lock OrbitControls during vertex drag!
+                }
+                renderer.domElement.style.cursor = 'grabbing';
+                return;
+              }
+              cur = cur.parent;
+            }
+          }
+        }
+      }
+    };
+
+    const onPointerMove = (e) => {
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(mouse, camera);
 
+      // Handle active vertex dragging
+      if (draggedVertex) {
+        isDragging = true;
+        const targets = [];
+        if (tilesetEngineRef.current?.getGroup()) {
+          targets.push(tilesetEngineRef.current.getGroup());
+        }
+        if (targets.length > 0) {
+          const hits = raycaster.intersectObjects(targets, true);
+          if (hits.length > 0) {
+            onUpdateStockpileVertexRef.current?.(
+              draggedVertex.stockpileId,
+              draggedVertex.vertexIndex,
+              hits[0].point
+            );
+          }
+        }
+        return;
+      }
+
+      // If button is held and pointer moved more than 5px, it is an orbit/pan drag
+      if (e.buttons !== 0) {
+        const dx = e.clientX - pointerDownPos.x;
+        const dy = e.clientY - pointerDownPos.y;
+        if (Math.hypot(dx, dy) > 5) {
+          isDragging = true;
+        }
+      } else if (volumeModeRef.current && sceneRef.current) {
+        // Hover feedback over vertex handles: change cursor to 'grab'
+        const vGroup = sceneRef.current.getObjectByName('volumeMasterGroup');
+        let hoverHandle = false;
+        if (vGroup) {
+          const vHits = raycaster.intersectObjects(vGroup.children, true);
+          for (const hit of vHits) {
+            let cur = hit.object;
+            while (cur && cur !== vGroup) {
+              if (cur.userData?.type === 'stockpile_vertex_handle') {
+                hoverHandle = true;
+                break;
+              }
+              cur = cur.parent;
+            }
+            if (hoverHandle) break;
+          }
+        }
+        renderer.domElement.style.cursor = hoverHandle ? 'grab' : 'crosshair';
+      }
+    };
+
+    const onPointerUp = () => {
+      if (draggedVertex) {
+        onCommitStockpileVertexRef.current?.(draggedVertex.stockpileId);
+        draggedVertex = null;
+        if (controlsRef.current) {
+          controlsRef.current.enabled = true;
+        }
+        renderer.domElement.style.cursor = volumeModeRef.current ? 'crosshair' : 'default';
+      }
+    };
+
+    const onClick = (e) => {
+      if (draggedVertex) return;
+      // 1. Strict click vs hover / drag / orbit differentiation
+      if (e.button !== 0) return;
+      if (isDragging) {
+        isDragging = false;
+        return;
+      }
+      const dx = e.clientX - pointerDownPos.x;
+      const dy = e.clientY - pointerDownPos.y;
+      const elapsed = performance.now() - pointerDownTime;
+      if (Math.hypot(dx, dy) > 5 || elapsed > 350) {
+        return; // Orbit, pan, or long hold -> ignore
+      }
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+
+      // 2. Check if click intersected an existing 3D measurement, cross-section, or stockpile!
+      const scene = sceneRef.current;
+      if (scene) {
+        // Measurement selection
+        const markersGroup = scene.getObjectByName('measurementMarkers');
+        if (markersGroup && markersGroup.children.length > 0) {
+          const prevLineThresh = raycaster.params?.Line?.threshold;
+          if (raycaster.params) {
+            if (!raycaster.params.Line) raycaster.params.Line = {};
+            raycaster.params.Line.threshold = 0.8;
+          }
+          const mHits = raycaster.intersectObjects(markersGroup.children, true);
+          if (raycaster.params?.Line) {
+            raycaster.params.Line.threshold = prevLineThresh ?? 1;
+          }
+
+          if (mHits.length > 0) {
+            for (const hit of mHits) {
+              let cur = hit.object;
+              while (cur && cur !== markersGroup) {
+                if (cur.userData?.measurementId) {
+                  onSelectMeasurementRef.current?.(cur.userData.measurementId);
+                  return; // Selected measurement in 3D!
+                }
+                cur = cur.parent;
+              }
+            }
+          }
+        }
+
+        // Cross-Section slice selection
+        const csGroup = scene.getObjectByName('crossSectionVisualsGroup');
+        if (csGroup && csGroup.children.length > 0) {
+          const prevLineThresh = raycaster.params?.Line?.threshold;
+          if (raycaster.params) {
+            if (!raycaster.params.Line) raycaster.params.Line = {};
+            raycaster.params.Line.threshold = 1.0;
+          }
+          const csHits = raycaster.intersectObjects(csGroup.children, true);
+          if (raycaster.params?.Line) {
+            raycaster.params.Line.threshold = prevLineThresh ?? 1;
+          }
+          if (csHits.length > 0) {
+            for (const hit of csHits) {
+              let cur = hit.object;
+              while (cur && cur !== csGroup) {
+                if (cur.userData?.sectionId) {
+                  onSelectSectionRef.current?.(cur.userData.sectionId);
+                  return; // Selected cross-section in 3D!
+                }
+                cur = cur.parent;
+              }
+            }
+          }
+        }
+
+        // Stockpile / Volume selection
+        const vGroup = scene.getObjectByName('volumeMasterGroup');
+        if (vGroup && vGroup.children.length > 0) {
+          const prevLineThresh = raycaster.params?.Line?.threshold;
+          if (raycaster.params) {
+            if (!raycaster.params.Line) raycaster.params.Line = {};
+            raycaster.params.Line.threshold = 1.0;
+          }
+          const vHits = raycaster.intersectObjects(vGroup.children, true);
+          if (raycaster.params?.Line) {
+            raycaster.params.Line.threshold = prevLineThresh ?? 1;
+          }
+          if (vHits.length > 0) {
+            for (const hit of vHits) {
+              let cur = hit.object;
+              while (cur && cur !== vGroup) {
+                if (cur.userData?.stockpileId) {
+                  onSelectStockpileRef.current?.(cur.userData.stockpileId);
+                  return; // Selected stockpile in 3D!
+                }
+                cur = cur.parent;
+              }
+            }
+          }
+        }
+      }
+
+      // 3. Terrain Raycasting for Tool Actions
       const targets = [];
       if (tilesetEngineRef.current?.getGroup()) {
         targets.push(tilesetEngineRef.current.getGroup());
@@ -286,13 +517,20 @@ const DroneSurveyViewer = forwardRef(({
       });
     };
 
+    renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
+    renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('click', onClick);
     renderer.domElement.addEventListener('dblclick', onDblClick);
     return () => {
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      renderer.domElement.removeEventListener('pointermove', onPointerMove);
+      renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('click', onClick);
       renderer.domElement.removeEventListener('dblclick', onDblClick);
+      renderer.domElement.style.cursor = 'default';
     };
-  }, [isDataLoaded, rendererRef, cameraRef, controlsRef]);
+  }, [isDataLoaded, rendererRef, cameraRef, controlsRef, measurementMode, sceneRef]);
 
   // ─── 5. Drone GIS Camera Views ───
   const setTopView = () => {
@@ -367,14 +605,19 @@ const DroneSurveyViewer = forwardRef(({
         }
       }
 
-      if (surfaceY < minElev) minElev = surfaceY;
-      if (surfaceY > maxElev) maxElev = surfaceY;
+      const refY = datumInfo?.surfaceCenterPoint?.y ?? 0;
+      const groundAsl = datumInfo?.groundAsl ?? 0;
+      const relElev = Number((surfaceY - refY).toFixed(2));
+
+      if (relElev < minElev) minElev = relElev;
+      if (relElev > maxElev) maxElev = relElev;
 
       points.push({
         x: interp.x,
         y: surfaceY,
         z: interp.z,
-        elevation: surfaceY,
+        elevation: relElev,
+        asl: groundAsl ? Number((groundAsl + relElev).toFixed(2)) : undefined,
         distance: (t * totalDist).toFixed(2),
       });
     }
@@ -382,7 +625,7 @@ const DroneSurveyViewer = forwardRef(({
     if (minElev === Infinity) minElev = 0;
     if (maxElev === -Infinity) maxElev = 0;
 
-    const deltaElev = maxElev - minElev;
+    const deltaElev = Math.max(0.01, maxElev - minElev);
     const slope = totalDist > 0 ? (deltaElev / totalDist) * 100 : 0;
 
     return {
@@ -444,7 +687,7 @@ const DroneSurveyViewer = forwardRef(({
                 <span className="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
               </h3>
               <p className="text-cyan-200/70 text-xs mt-1">
-                Calculating lowest elevation point (0.00m reference) & aligning 3D tiles...
+                Aligning 3D tiles & establishing center surface datum (0.00m reference)...
               </p>
             </div>
             <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden border border-slate-700/50">
@@ -460,11 +703,16 @@ const DroneSurveyViewer = forwardRef(({
           <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#00f0ff] animate-pulse" />
           <div>
             <div className="font-semibold text-cyan-300 flex items-center gap-1.5">
-              <span>⌖ Datum Reference</span>
-              <span className="px-1.5 py-0.2 text-[10px] bg-cyan-500/20 text-cyan-300 rounded border border-cyan-400/40 font-mono">0.00m</span>
+              <span>⌖ Center Datum</span>
+              <span className="px-1.5 py-0.2 text-[10px] bg-cyan-500/20 text-cyan-300 rounded border border-cyan-400/40 font-mono">0.00m Rel</span>
+              {typeof datumInfo.groundAsl === 'number' && (
+                <span className="px-1.5 py-0.2 text-[10px] bg-blue-500/20 text-blue-300 rounded border border-blue-400/40 font-mono">
+                  {datumInfo.groundAsl.toFixed(1)}m ASL
+                </span>
+              )}
             </div>
             <div className="text-[10px] text-slate-400">
-              Lowest Point: X: {datumInfo.lowestPoint?.x?.toFixed(1) ?? '0.0'}m, Z: {datumInfo.lowestPoint?.z?.toFixed(1) ?? '0.0'}m
+              Center Surface: X: {(datumInfo.surfaceCenterPoint?.x ?? datumInfo.centerSurfacePoint?.x ?? 0).toFixed(1)}m, Z: {(datumInfo.surfaceCenterPoint?.z ?? datumInfo.centerSurfacePoint?.z ?? 0).toFixed(1)}m
             </div>
           </div>
           <button
@@ -478,7 +726,7 @@ const DroneSurveyViewer = forwardRef(({
                 ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300 hover:bg-cyan-500/30'
                 : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
             }`}
-            title="Toggle 0.00m Datum Benchmark Marker visibility"
+            title="Toggle Center Surface Datum Benchmark Marker visibility"
           >
             {isMarkerVisible ? '📍 Marker ON' : '📍 Marker OFF'}
           </button>

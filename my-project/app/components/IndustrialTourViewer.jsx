@@ -28,6 +28,7 @@ const IndustrialTourViewer = forwardRef(({
   stagingMode = false,
   measurementMode,
   onMeasurementClick,
+  onSelectMeasurement,
   tagMode,
   onTagClick,
   onTagSelect,
@@ -172,8 +173,10 @@ const IndustrialTourViewer = forwardRef(({
   // Mode reference trackers for event callbacks
   const measurementModeRef = useRef(false);
   const onMeasurementClickRef = useRef(null);
+  const onSelectMeasurementRef = useRef(null);
   measurementModeRef.current = measurementMode;
   onMeasurementClickRef.current = onMeasurementClick;
+  onSelectMeasurementRef.current = onSelectMeasurement;
 
   const tagModeRef = useRef(false);
   const onTagClickRef = useRef(null);
@@ -1316,6 +1319,35 @@ const IndustrialTourViewer = forwardRef(({
       if (pointersModeRef.current && onPointerClickRef.current) {
         onPointerClickRef.current(e);
         return;
+      }
+
+      // 3.5. 3D Measurement Selection Check
+      const scene = sceneRef.current;
+      if (scene) {
+        const markersGroup = scene.getObjectByName('measurementMarkers');
+        if (markersGroup && markersGroup.children.length > 0) {
+          const prevThresh = raycaster.params?.Line?.threshold;
+          if (raycaster.params) {
+            if (!raycaster.params.Line) raycaster.params.Line = {};
+            raycaster.params.Line.threshold = 0.8;
+          }
+          const mHits = raycaster.intersectObjects(markersGroup.children, true);
+          if (raycaster.params?.Line) {
+            raycaster.params.Line.threshold = prevThresh ?? 1;
+          }
+          if (mHits.length > 0) {
+            for (const hit of mHits) {
+              let cur = hit.object;
+              while (cur && cur !== markersGroup) {
+                if (cur.userData?.measurementId) {
+                  onSelectMeasurementRef.current?.(cur.userData.measurementId);
+                  return;
+                }
+                cur = cur.parent;
+              }
+            }
+          }
+        }
       }
 
       // 4. Tag Marker Selection (when not placing tags)

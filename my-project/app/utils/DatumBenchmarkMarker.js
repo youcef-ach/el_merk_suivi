@@ -117,12 +117,12 @@ function createBillboardLabelTexture(customLabel) {
   // Subtitle
   ctx.font = '500 22px "Segoe UI", Roboto, sans-serif';
   ctx.fillStyle = '#e2e8f0';
-  ctx.fillText(customLabel || 'Lowest Elevation Reference • Z = 0.00m', width / 2, 112);
+  ctx.fillText(customLabel || 'Center Surface Reference • 0.00m Rel', width / 2, 112);
 
   // Badge Tag
   ctx.font = '600 16px monospace';
   ctx.fillStyle = '#38bdf8';
-  ctx.fillText('SURVEY DATUM ORIGIN', width / 2, 144);
+  ctx.fillText('SURVEY DATUM ORIGIN (0, 0)', width / 2, 144);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -131,7 +131,7 @@ function createBillboardLabelTexture(customLabel) {
 
 /**
  * 3D Surveyor Geodetic Datum Benchmark Marker
- * Highlights the lowest point (0.00m altitude reference) in 3D photogrammetry surveys.
+ * Highlights the center upper surface point (0.00m altitude reference) in 3D photogrammetry surveys.
  */
 export class DatumBenchmarkMarker {
   constructor(scene, position = { x: 0, y: 0, z: 0 }, options = {}) {

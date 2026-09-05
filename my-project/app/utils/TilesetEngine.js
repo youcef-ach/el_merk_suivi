@@ -98,6 +98,7 @@ export class TilesetEngine {
     this.onLoadCallbacks = [];
     this.onGeoCoordinatesCallbacks = [];
     this.geographicCoordinates = null;
+    this.surfaceCenterPoint = null;
 
     // Hypsometric Elevation Colormap Shader Uniforms (Calibrated from RealityScan DSM: 95.67m -> 103.92m ASL)
     this.heatmapUniforms = {
@@ -115,6 +116,15 @@ export class TilesetEngine {
       uSlopeOpacity: { value: 0.85 },
       uSlopeMaxAngle: { value: 60.0 },
       uSlopeCriticalAngle: { value: 35.0 }
+    };
+
+    // Stockpile Area Localized Mesh Transparency Uniforms
+    const defaultPoly = new Array(16).fill(0).map(() => new THREE.Vector2(0, 0));
+    this.volumeCutoutUniforms = {
+      uVolumeCutoutEnabled: { value: false },
+      uVolumePolyCount: { value: 0 },
+      uVolumePolygon: { value: defaultPoly },
+      uVolumeOpacity: { value: 0.35 }
     };
 
     // Dense Point Cloud (LIDAR) Mode State & Uniforms
@@ -138,7 +148,7 @@ export class TilesetEngine {
 
     // Ground Datum & Benchmark Marker State
     this.datumAligned = false;
-    this.lowestPoint = null;
+    this.surfaceCenterPoint = null;
     this.elevationRange = null;
     this.onDatumAlignedCallbacks = [];
     this.datumBenchmarkMarker = null;
@@ -200,15 +210,16 @@ export class TilesetEngine {
     if (typeof options.initialGroundOffset === 'number' && isFinite(options.initialGroundOffset)) {
       this.groundSnapOffset = options.initialGroundOffset;
       this.datumAligned = true;
-      if (options.initialLowestPoint) {
-        this.lowestPoint = { ...options.initialLowestPoint };
+      const initialPt = options.initialSurfaceCenterPoint || options.initialCenterSurfacePoint || options.initialLowestPoint;
+      if (initialPt) {
+        this.surfaceCenterPoint = { ...initialPt };
       }
       if (options.initialElevationRange) {
         this.elevationRange = { ...options.initialElevationRange };
-        this.heatmapUniforms.uMinElevation.value = 0.0;
-        this.heatmapUniforms.uMaxElevation.value = Math.max(1.0, options.initialElevationRange.max);
+        this.heatmapUniforms.uMinElevation.value = options.initialElevationRange.min ?? -5.0;
+        this.heatmapUniforms.uMaxElevation.value = options.initialElevationRange.max ?? 5.0;
       }
-      console.log('[TilesetEngine] Pre-loaded datum applied: groundAsl =', this.groundAsl, 'meshSnap =', this.meshSnapOffsetY);
+      console.log('[TilesetEngine] Pre-loaded datum applied: groundAsl =', this.groundAsl, 'meshSnap =', this.meshSnapOffsetY, 'surfaceCenterPoint =', this.surfaceCenterPoint);
     }
 
     const onTilesetLoaded = (e) => {
@@ -231,25 +242,27 @@ export class TilesetEngine {
         const datum = this.computeTilesetDatumFromBox(json, this.currentOrientationMode);
         if (datum) {
           this.groundSnapOffset = datum.groundOffset;
-          this.lowestPoint = datum.lowestPoint;
+          this.surfaceCenterPoint = datum.surfaceCenterPoint;
           this.elevationRange = datum.elevationRange;
           this.datumAligned = true;
           this.applyTransform();
           this.tilesRenderer.group.visible = true;
-          this.createDatumBenchmarkMarker(this.lowestPoint);
-          this.heatmapUniforms.uMinElevation.value = 0.0;
-          this.heatmapUniforms.uMaxElevation.value = Math.max(1.0, datum.elevationRange.max);
+          if (this.surfaceCenterPoint) {
+            this.createDatumBenchmarkMarker(this.surfaceCenterPoint);
+          }
+          this.heatmapUniforms.uMinElevation.value = datum.elevationRange?.min ?? -5.0;
+          this.heatmapUniforms.uMaxElevation.value = datum.elevationRange?.max ?? 5.0;
           this.onDatumAlignedCallbacks.forEach(cb => cb(datum));
         } else {
-          this.alignLowestPointToZero();
+          this.alignSurfaceDatum();
         }
       } else {
         this.tilesRenderer.group.visible = true;
-        if (this.lowestPoint && !this.datumBenchmarkMarker) {
-          this.createDatumBenchmarkMarker(this.lowestPoint);
+        if (this.surfaceCenterPoint && !this.datumBenchmarkMarker) {
+          this.createDatumBenchmarkMarker(this.surfaceCenterPoint);
         }
         this.onDatumAlignedCallbacks.forEach(cb => cb({
-          lowestPoint: this.lowestPoint,
+          surfaceCenterPoint: this.surfaceCenterPoint,
           groundOffset: this.groundAsl || this.groundSnapOffset,
           groundAsl: this.groundAsl || this.groundSnapOffset,
           meshSnapOffset: this.meshSnapOffsetY || this.groundSnapOffset,
@@ -279,14 +292,16 @@ export class TilesetEngine {
               if (datum) {
                 console.log('[TilesetEngine] Instantly pre-calculated datum from tileset.json bounding box:', datum);
                 this.groundSnapOffset = datum.groundOffset;
-                this.lowestPoint = datum.lowestPoint;
+                this.surfaceCenterPoint = datum.surfaceCenterPoint;
                 this.elevationRange = datum.elevationRange;
                 this.datumAligned = true;
                 this.applyTransform();
                 this.tilesRenderer.group.visible = true;
-                this.createDatumBenchmarkMarker(this.lowestPoint);
-                this.heatmapUniforms.uMinElevation.value = 0.0;
-                this.heatmapUniforms.uMaxElevation.value = Math.max(1.0, datum.elevationRange.max);
+                if (this.surfaceCenterPoint) {
+                  this.createDatumBenchmarkMarker(this.surfaceCenterPoint);
+                }
+                this.heatmapUniforms.uMinElevation.value = datum.elevationRange?.min ?? -5.0;
+                this.heatmapUniforms.uMaxElevation.value = datum.elevationRange?.max ?? 5.0;
                 this.onDatumAlignedCallbacks.forEach(cb => cb(datum));
               }
             }
@@ -341,7 +356,7 @@ export class TilesetEngine {
             }
 
             // Set custom cache key to force unique shader compilation
-            child.material.customProgramCacheKey = () => 'engine_gis_shaders_v6';
+            child.material.customProgramCacheKey = () => 'engine_gis_shaders_v7';
 
             // Inject High-Definition Hypsometric Elevation & Slope Colormap Shader
             child.material.onBeforeCompile = (shader) => {
@@ -358,6 +373,12 @@ export class TilesetEngine {
               shader.uniforms.uSlopeOpacity = this.slopeUniforms.uSlopeOpacity;
               shader.uniforms.uSlopeMaxAngle = this.slopeUniforms.uSlopeMaxAngle;
               shader.uniforms.uSlopeCriticalAngle = this.slopeUniforms.uSlopeCriticalAngle;
+
+              // Volume Cutout Uniforms
+              shader.uniforms.uVolumeCutoutEnabled = this.volumeCutoutUniforms.uVolumeCutoutEnabled;
+              shader.uniforms.uVolumePolyCount = this.volumeCutoutUniforms.uVolumePolyCount;
+              shader.uniforms.uVolumePolygon = this.volumeCutoutUniforms.uVolumePolygon;
+              shader.uniforms.uVolumeOpacity = this.volumeCutoutUniforms.uVolumeOpacity;
 
               shader.vertexShader = shader.vertexShader.replace(
                 '#include <common>',
@@ -390,6 +411,11 @@ export class TilesetEngine {
                  uniform float uSlopeOpacity;
                  uniform float uSlopeMaxAngle;
                  uniform float uSlopeCriticalAngle;
+
+                 uniform bool uVolumeCutoutEnabled;
+                 uniform int uVolumePolyCount;
+                 uniform vec2 uVolumePolygon[16];
+                 uniform float uVolumeOpacity;
 
                  vec3 getElevationColor(float t) {
                    t = clamp(t, 0.0, 1.0);
@@ -445,7 +471,6 @@ export class TilesetEngine {
 
                  // 2. Slope & Gradient Stability Analysis
                  if (uSlopeEnabled) {
-                   // Calculate true geometric face normal via world-position derivatives
                    vec3 dX = dFdx(vSceneWorldPos);
                    vec3 dY = dFdy(vSceneWorldPos);
                    vec3 geoNormal = normalize(cross(dX, dY));
@@ -462,6 +487,24 @@ export class TilesetEngine {
                    float luminance = gl_FragColor.r * 0.299 + gl_FragColor.g * 0.587 + gl_FragColor.b * 0.114;
                    vec3 shadedSlope = slopeRgb * (0.6 + 0.4 * luminance);
                    gl_FragColor.rgb = mix(gl_FragColor.rgb, shadedSlope, uSlopeOpacity);
+                 }
+
+                 // 3. Localized Cut/Fill Volume Mesh Transparency
+                 if (uVolumeCutoutEnabled && uVolumePolyCount >= 3) {
+                   bool inPoly = false;
+                   vec2 p = vSceneWorldPos.xz;
+                   for (int i = 0; i < 16; i++) {
+                     if (i >= uVolumePolyCount) break;
+                     int j = (i == 0) ? (uVolumePolyCount - 1) : (i - 1);
+                     vec2 pi = uVolumePolygon[i];
+                     vec2 pj = uVolumePolygon[j];
+                     if (((pi.y > p.y) != (pj.y > p.y)) && (p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y + 0.0000001) + pi.x)) {
+                       inPoly = !inPoly;
+                     }
+                   }
+                   if (inPoly) {
+                     gl_FragColor.a = min(gl_FragColor.a, uVolumeOpacity);
+                   }
                  }`
               );
             };
@@ -503,14 +546,12 @@ export class TilesetEngine {
         }
       });
 
-      // Align ground once initial tiles load (debounced, never on every streaming tile)
-      if (!this.datumAligned) {
+      // Establish upper surface center datum once initial tiles load
+      if (!this.datumAligned || !this.surfaceCenterPoint || this.surfaceCenterPoint._isEstimate) {
         if (!this._initialDatumTimer) {
           this._initialDatumTimer = setTimeout(() => {
             this._initialDatumTimer = null;
-            if (!this.datumAligned) {
-              this.alignLowestPointToZero();
-            }
+            this.alignSurfaceDatum();
           }, 350);
         }
       }
@@ -604,6 +645,48 @@ export class TilesetEngine {
     }
     if (options.opacity !== undefined) {
       this.setSlopeOpacity(options.opacity);
+    }
+  }
+
+  setVolumePolygonCutout(polygonPoints, opacity = 0.35) {
+    if (!polygonPoints || polygonPoints.length < 3) {
+      this.clearVolumePolygonCutout();
+      return;
+    }
+    const count = Math.min(16, polygonPoints.length);
+    const arr = new Array(16).fill(0).map((_, i) => {
+      if (i < count) {
+        return new THREE.Vector2(polygonPoints[i].x, polygonPoints[i].z);
+      }
+      return new THREE.Vector2(0, 0);
+    });
+
+    this.volumeCutoutUniforms.uVolumePolygon.value = arr;
+    this.volumeCutoutUniforms.uVolumePolyCount.value = count;
+    this.volumeCutoutUniforms.uVolumeOpacity.value = opacity;
+    this.volumeCutoutUniforms.uVolumeCutoutEnabled.value = true;
+
+    if (this.tilesRenderer && this.tilesRenderer.group) {
+      this.tilesRenderer.group.traverse((child) => {
+        if (child.isMesh && child.material) {
+          child.material.transparent = true;
+          child.material.depthWrite = true;
+          child.material.needsUpdate = true;
+        }
+      });
+    }
+  }
+
+  clearVolumePolygonCutout() {
+    this.volumeCutoutUniforms.uVolumeCutoutEnabled.value = false;
+    this.volumeCutoutUniforms.uVolumePolyCount.value = 0;
+    if (this.tilesRenderer && this.tilesRenderer.group) {
+      this.tilesRenderer.group.traverse((child) => {
+        if (child.isMesh && child.material) {
+          child.material.transparent = false;
+          child.material.needsUpdate = true;
+        }
+      });
     }
   }
 
@@ -937,146 +1020,168 @@ export class TilesetEngine {
     if (!isFinite(minY)) return null;
 
     const meshSnapOffset = -minY;
+    const heightSpan = maxY - minY;
     return {
       groundOffset: this.groundAsl || Number(meshSnapOffset.toFixed(3)),
       groundAsl: this.groundAsl || Number(meshSnapOffset.toFixed(3)),
       meshSnapOffset: Number(meshSnapOffset.toFixed(3)),
       minYRaw: Number(minY.toFixed(3)),
       maxYRaw: Number(maxY.toFixed(3)),
-      lowestPoint: null, // Do NOT use bounding box corners as benchmark points in empty air
+      surfaceCenterPoint: {
+        x: 0.0,
+        y: Number(((maxY + minY) * 0.5 + meshSnapOffset).toFixed(3)),
+        z: 0.0,
+        _isEstimate: true
+      },
       elevationRange: {
-        min: 0.0,
-        max: Number((maxY - minY).toFixed(3))
+        min: Number((-heightSpan * 0.5).toFixed(3)),
+        max: Number((heightSpan * 0.5).toFixed(3))
       }
     };
   }
 
   /**
-   * Scans all loaded 3D tile meshes to find the TRUE lowest vertex on the actual mesh surface
+   * Scans loaded 3D tile meshes to find the TRUE upper surface point at horizontal (0, 0)
+   * (strictly on the upper surface of the 3D mesh, not inside or at the bottom)
    */
-  findTrueLowestVertex() {
+  findSurfaceCenterDatum() {
     if (!this.tilesRenderer || !this.tilesRenderer.group) return null;
 
-    let globalMinY = Infinity;
-    let globalMaxY = -Infinity;
-    let lowestVertexWorld = null;
-    const v = new THREE.Vector3();
+    const box = new THREE.Box3().setFromObject(this.tilesRenderer.group);
+    if (box.isEmpty() || !isFinite(box.min.x)) return null;
 
-    this.tilesRenderer.group.traverse((child) => {
-      if (child.isMesh && child.geometry) {
-        child.updateMatrixWorld(true);
-        const posAttr = child.geometry.getAttribute('position');
-        if (posAttr && posAttr.count > 0) {
-          const step = posAttr.count > 50000 ? Math.floor(posAttr.count / 25000) : 1;
-          for (let i = 0; i < posAttr.count; i += step) {
-            v.fromBufferAttribute(posAttr, i);
-            v.applyMatrix4(child.matrixWorld);
+    const rayOriginY = box.max.y + 100.0;
+    const raycaster = new THREE.Raycaster();
+    const downVec = new THREE.Vector3(0, -1, 0);
 
-            if (v.y < globalMinY) {
-              globalMinY = v.y;
-              lowestVertexWorld = v.clone();
+    // Cast rays straight down starting at (0, 0) and small concentric offsets if (0,0) misses
+    const searchOffsets = [
+      [0, 0],
+      [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5],
+      [1.0, 0], [-1.0, 0], [0, 1.0], [0, -1.0],
+      [2.0, 0], [-2.0, 0], [0, 2.0], [0, -2.0],
+      [3.0, 0], [-3.0, 0], [0, 3.0], [0, -3.0],
+      [5.0, 0], [-5.0, 0], [0, 5.0], [0, -5.0],
+    ];
+
+    let bestHit = null;
+
+    for (const [ox, oz] of searchOffsets) {
+      const rayOrigin = new THREE.Vector3(ox, rayOriginY, oz);
+      raycaster.set(rayOrigin, downVec);
+
+      const intersects = [];
+      raycaster.intersectObject(this.tilesRenderer.group, true, intersects);
+
+      if (intersects.length > 0) {
+        for (const hit of intersects) {
+          let isUpward = true;
+          if (hit.face && hit.face.normal) {
+            const worldNormal = hit.face.normal.clone();
+            if (hit.object) worldNormal.transformDirection(hit.object.matrixWorld);
+            if (worldNormal.y < -0.2) {
+              isUpward = false;
             }
-            if (v.y > globalMaxY) {
-              globalMaxY = v.y;
+          }
+          if (isUpward) {
+            bestHit = hit.point.clone();
+            break;
+          }
+        }
+        if (bestHit) break;
+      }
+    }
+
+    if (!bestHit) {
+      // Fallback: search nearest vertex to (0, 0)
+      let highestY = -Infinity;
+      let fallbackPt = null;
+      const v = new THREE.Vector3();
+
+      this.tilesRenderer.group.traverse((child) => {
+        if (child.isMesh && child.geometry) {
+          child.updateMatrixWorld(true);
+          const posAttr = child.geometry.getAttribute('position');
+          if (posAttr && posAttr.count > 0) {
+            const step = posAttr.count > 30000 ? Math.floor(posAttr.count / 15000) : 1;
+            for (let i = 0; i < posAttr.count; i += step) {
+              v.fromBufferAttribute(posAttr, i);
+              v.applyMatrix4(child.matrixWorld);
+              const dist2D = Math.hypot(v.x, v.z);
+              if (dist2D < 15.0) {
+                if (v.y > highestY) {
+                  highestY = v.y;
+                  fallbackPt = v.clone();
+                }
+              }
             }
           }
         }
-      }
-    });
+      });
+      if (fallbackPt) bestHit = fallbackPt;
+    }
 
-    if (!lowestVertexWorld || !isFinite(globalMinY)) return null;
+    if (!bestHit) return null;
 
     return {
-      minY: globalMinY,
-      maxY: globalMaxY,
-      lowestVertex: lowestVertexWorld
+      x: Number(bestHit.x.toFixed(3)),
+      y: Number(bestHit.y.toFixed(3)),
+      z: Number(bestHit.z.toFixed(3))
     };
   }
 
   /**
-   * Creates or updates the 3D Datum Benchmark Marker at the lowest point
+   * Creates or updates the 3D Datum Benchmark Marker at the upper surface center point
    */
   createDatumBenchmarkMarker(point) {
     if (!point || typeof point.x !== 'number') return;
+    const posX = Number(point.x) || 0;
+    const posY = (typeof point.y === 'number' ? point.y : 0.0) + 0.05;
+    const posZ = Number(point.z) || 0;
+
     if (this.datumBenchmarkMarker) {
-      this.datumBenchmarkMarker.setPosition(point.x, 0.015, point.z);
+      this.datumBenchmarkMarker.setPosition(posX, posY, posZ);
       return;
     }
-    this.datumBenchmarkMarker = new DatumBenchmarkMarker(this.scene, { x: point.x, y: 0.015, z: point.z }, {
-      subLabel: 'Altitude Reference Datum • 0.00m'
+    const aslLabel = this.groundAsl ? ` (${this.groundAsl.toFixed(1)}m ASL)` : '';
+    this.datumBenchmarkMarker = new DatumBenchmarkMarker(this.scene, { x: posX, y: posY, z: posZ }, {
+      subLabel: `Center Surface Datum • 0.00m Rel${aslLabel}`
     });
     this.datumBenchmarkMarker.setVisible(this.datumMarkerVisible);
   }
 
   /**
-   * Aligns the lowest point of all loaded 3D Tiles geometry precisely to height Y = 0 (ground plane)
-   * and places the Datum Benchmark Marker directly on the real mesh vertex
+   * Aligns the datum reference to the TRUE upper surface point at (0, 0)
+   * and places the Datum Benchmark Marker directly on the surface
    */
-  alignLowestPointToZero(force = false) {
+  alignSurfaceDatum(force = false) {
     if (!this.tilesRenderer || !this.tilesRenderer.group) return;
+    if (this.datumAligned && !force && this.surfaceCenterPoint && !this.surfaceCenterPoint._isEstimate) return;
 
-    // Guard: Once datum is aligned, NEVER re-traverse entire scene on streaming tiles
-    if (this.datumAligned && !force) return;
+    const surfacePt = this.findSurfaceCenterDatum();
+    if (!surfacePt) return;
 
-    const res = this.findTrueLowestVertex();
-    if (!res) return;
+    this.surfaceCenterPoint = surfacePt;
+    this.datumAligned = true;
+    this.tilesRenderer.group.visible = true;
 
-    const { minY, maxY, lowestVertex } = res;
-
-    if (!this.datumAligned) {
-      const deltaY = -minY;
-      this.groundSnapOffset += deltaY;
-      this.tilesRenderer.group.position.y += deltaY;
-      this.tilesRenderer.group.updateMatrixWorld(true);
-      this.datumAligned = true;
-      this.tilesRenderer.group.visible = true;
-
-      // Lowest vertex is now at ground level Y = 0
-      lowestVertex.y += deltaY;
-      console.log(`[TilesetEngine] Auto-snapped mesh ground level: shifted by ${deltaY >= 0 ? '+' : ''}${deltaY.toFixed(3)}m`);
-    } else {
-      // Micro-adjustment if a subsequent tile reveals a lower point
-      if (minY < -0.05) {
-        const deltaY = -minY;
-        this.groundSnapOffset += deltaY;
-        this.tilesRenderer.group.position.y += deltaY;
-        this.tilesRenderer.group.updateMatrixWorld(true);
-        lowestVertex.y = 0.0;
-        console.log(`[TilesetEngine] Fine-adjusted ground datum: shifted by ${deltaY >= 0 ? '+' : ''}${deltaY.toFixed(3)}m`);
-      }
-    }
-
-    // Record exact mesh vertex coordinates
-    this.lowestPoint = {
-      x: Number(lowestVertex.x.toFixed(3)),
-      y: 0.0,
-      z: Number(lowestVertex.z.toFixed(3))
-    };
-
-    this.elevationRange = {
-      min: 0.0,
-      max: Number(Math.max(1.0, maxY - minY).toFixed(3))
-    };
-
-    // Position or update the benchmark marker at the TRUE mesh surface vertex
+    // Position or update the benchmark marker directly on the upper surface
     if (this.datumBenchmarkMarker) {
-      this.datumBenchmarkMarker.setPosition(this.lowestPoint.x, 0.015, this.lowestPoint.z);
+      this.datumBenchmarkMarker.setPosition(this.surfaceCenterPoint.x, this.surfaceCenterPoint.y + 0.05, this.surfaceCenterPoint.z);
     } else {
-      this.createDatumBenchmarkMarker(this.lowestPoint);
+      this.createDatumBenchmarkMarker(this.surfaceCenterPoint);
     }
 
-    this.heatmapUniforms.uMinElevation.value = 0.0;
-    this.heatmapUniforms.uMaxElevation.value = this.elevationRange.max;
-
-    this.onDatumAlignedCallbacks.forEach(cb => cb({
-      lowestPoint: this.lowestPoint,
+    const datumPayload = {
+      surfaceCenterPoint: this.surfaceCenterPoint,
       groundOffset: this.groundAsl || this.groundSnapOffset,
       groundAsl: this.groundAsl || this.groundSnapOffset,
       meshSnapOffset: this.meshSnapOffsetY || this.groundSnapOffset,
       elevationRange: this.elevationRange
-    }));
+    };
 
-    console.log(`[TilesetEngine] True mesh lowest vertex benchmark placed at: X=${this.lowestPoint.x}m, Z=${this.lowestPoint.z}m (0.00m ground level)`);
+    this.onDatumAlignedCallbacks.forEach(cb => cb(datumPayload));
+    console.log(`[TilesetEngine] Upper surface center datum established at: X=${this.surfaceCenterPoint.x}m, Y=${this.surfaceCenterPoint.y}m, Z=${this.surfaceCenterPoint.z}m (0.00m reference, ${this.groundAsl}m ASL)`);
   }
 
   setWireframe(wireframe) {
@@ -1173,10 +1278,12 @@ export class TilesetEngine {
   }
 
   onDatumAligned(callback) {
-    if (this.datumAligned && this.lowestPoint) {
+    if (this.datumAligned && this.surfaceCenterPoint) {
       callback({
-        lowestPoint: this.lowestPoint,
-        groundOffset: this.groundSnapOffset,
+        surfaceCenterPoint: this.surfaceCenterPoint,
+        groundOffset: this.groundAsl || this.groundSnapOffset,
+        groundAsl: this.groundAsl || this.groundSnapOffset,
+        meshSnapOffset: this.meshSnapOffsetY || this.groundSnapOffset,
         elevationRange: this.elevationRange
       });
     } else {
@@ -1191,8 +1298,12 @@ export class TilesetEngine {
     }
   }
 
+  getSurfaceCenterPoint() {
+    return this.surfaceCenterPoint;
+  }
+
   getLowestPoint() {
-    return this.lowestPoint;
+    return this.surfaceCenterPoint;
   }
 
   onLoad(callback) {
@@ -1243,6 +1354,6 @@ export class TilesetEngine {
     this.onGeoCoordinatesCallbacks = [];
     this.onDatumAlignedCallbacks = [];
     this.geographicCoordinates = null;
-    this.lowestPoint = null;
+    this.surfaceCenterPoint = null;
   }
 }

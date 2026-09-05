@@ -823,7 +823,8 @@ let InspectionsService = class InspectionsService {
                     groundOffset: datum.groundOffset,
                     groundAsl: datum.groundAsl,
                     meshSnapOffset: datum.meshSnapOffset,
-                    lowestPoint: datum.lowestPoint,
+                    surfaceCenterPoint: datum.surfaceCenterPoint,
+                    lowestPoint: datum.surfaceCenterPoint,
                     elevationRange: datum.elevationRange,
                     minYRaw: datum.minYRaw,
                     maxYRaw: datum.maxYRaw,
@@ -857,59 +858,6 @@ let InspectionsService = class InspectionsService {
         }
         finally {
             fs.rmSync(tempDir, { recursive: true, force: true });
-        }
-    }
-    extractLowestVertexFromB3DM(b3dmBuf, orientation = 'rotX_neg90') {
-        try {
-            const featureTableJSONByteLength = b3dmBuf.readUInt32LE(12);
-            const featureTableBinaryByteLength = b3dmBuf.readUInt32LE(16);
-            const batchTableJSONByteLength = b3dmBuf.readUInt32LE(20);
-            const batchTableBinaryByteLength = b3dmBuf.readUInt32LE(24);
-            const glbOffset = 28 + featureTableJSONByteLength + featureTableBinaryByteLength + batchTableJSONByteLength + batchTableBinaryByteLength;
-            const glbBuf = b3dmBuf.subarray(glbOffset);
-            const chunk0Len = glbBuf.readUInt32LE(12);
-            const jsonStr = glbBuf.toString('utf-8', 20, 20 + chunk0Len);
-            const gltf = JSON.parse(jsonStr);
-            const chunk1Offset = 20 + chunk0Len;
-            const chunk1Len = glbBuf.readUInt32LE(chunk1Offset);
-            const binBuf = glbBuf.subarray(chunk1Offset + 8, chunk1Offset + 8 + chunk1Len);
-            const posAccessor = gltf.accessors?.find((a) => a.type === 'VEC3') || gltf.accessors?.[0];
-            if (!posAccessor)
-                return null;
-            const bufferView = gltf.bufferViews[posAccessor.bufferView];
-            const byteOffset = (bufferView.byteOffset || 0) + (posAccessor.byteOffset || 0);
-            const count = posAccessor.count;
-            const f32 = new Float32Array(binBuf.buffer, binBuf.byteOffset + byteOffset, count * 3);
-            const upRot = new THREE.Matrix4().makeRotationX(Math.PI / 2);
-            let rotMat = new THREE.Matrix4().identity();
-            if (orientation === 'rotX_neg90')
-                rotMat.makeRotationX(-Math.PI / 2);
-            else if (orientation === 'rotX_90')
-                rotMat.makeRotationX(Math.PI / 2);
-            const totalMat = new THREE.Matrix4().multiplyMatrices(rotMat, upRot);
-            let minY = Infinity;
-            let minVert = null;
-            for (let i = 0; i < count; i++) {
-                const v = new THREE.Vector3(f32[i * 3], f32[i * 3 + 1], f32[i * 3 + 2]);
-                v.applyMatrix4(totalMat);
-                if (v.y < minY) {
-                    minY = v.y;
-                    minVert = v.clone();
-                }
-            }
-            if (!minVert || !isFinite(minY))
-                return null;
-            return {
-                minY,
-                minVert: {
-                    x: Number(minVert.x.toFixed(3)),
-                    y: 0.0,
-                    z: Number(minVert.z.toFixed(3))
-                }
-            };
-        }
-        catch (e) {
-            return null;
         }
     }
     async computeTilesetDatum(json, orientation = 'rotX_neg90', rootJsonDir) {
@@ -1004,58 +952,23 @@ let InspectionsService = class InspectionsService {
         }
         if (!isFinite(minY))
             return null;
-        let trueLowestPoint = null;
-        if (rootJsonDir) {
-            try {
-                const contentUri = root.content?.uri || root.content?.url;
-                let b3dmPath = null;
-                if (contentUri) {
-                    const candidate = path.join(rootJsonDir, contentUri);
-                    if (fs.existsSync(candidate))
-                        b3dmPath = candidate;
-                }
-                if (!b3dmPath) {
-                    const findB3dm = (dir) => {
-                        const list = fs.readdirSync(dir, { withFileTypes: true });
-                        for (const item of list) {
-                            const full = path.join(dir, item.name);
-                            if (item.isFile() && item.name.endsWith('.b3dm'))
-                                return full;
-                            if (item.isDirectory()) {
-                                const sub = findB3dm(full);
-                                if (sub)
-                                    return sub;
-                            }
-                        }
-                        return null;
-                    };
-                    b3dmPath = findB3dm(rootJsonDir);
-                }
-                if (b3dmPath && fs.existsSync(b3dmPath)) {
-                    const b3dmBuf = fs.readFileSync(b3dmPath);
-                    const vertexRes = this.extractLowestVertexFromB3DM(b3dmBuf, orientation);
-                    if (vertexRes && vertexRes.minVert) {
-                        trueLowestPoint = vertexRes.minVert;
-                        console.log(`[processTileset] Found true mesh lowest surface vertex: (${trueLowestPoint.x}, 0.0, ${trueLowestPoint.z})`);
-                    }
-                }
-            }
-            catch (err) {
-                console.warn(`[processTileset] B3DM vertex scan notice:`, err.message);
-            }
-        }
         const meshSnapOffset = -minY;
         const finalGroundAsl = groundAsl ?? Number(meshSnapOffset.toFixed(3));
+        const heightSpan = maxY - minY;
         return {
             groundOffset: finalGroundAsl,
             groundAsl: finalGroundAsl,
             meshSnapOffset: Number(meshSnapOffset.toFixed(3)),
             minYRaw: Number(minY.toFixed(3)),
             maxYRaw: Number(maxY.toFixed(3)),
-            lowestPoint: trueLowestPoint,
+            surfaceCenterPoint: {
+                x: 0.0,
+                y: Number(((maxY + minY) * 0.5 + meshSnapOffset).toFixed(3)),
+                z: 0.0,
+            },
             elevationRange: {
-                min: 0.0,
-                max: Number((maxY - minY).toFixed(3)),
+                min: Number((-heightSpan * 0.5).toFixed(3)),
+                max: Number((heightSpan * 0.5).toFixed(3)),
             },
             gps,
             elevationSource: groundAsl ? 'COPERNICUS_DEM_30M' : 'LOCAL_BBOX',
