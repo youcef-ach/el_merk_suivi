@@ -109,10 +109,22 @@ const IndustrialTourViewer = forwardRef(({
   }, [sceneRef]);
 
   // Viewer State: 'DOLLHOUSE' | 'TRANSITION' | 'INSIDE'
-  const [viewerState, setViewerState] = useState('DOLLHOUSE');
+  const [viewerState, _setViewerState] = useState('DOLLHOUSE');
+  const viewerStateRef = useRef('DOLLHOUSE');
+  const setViewerState = useCallback((val) => {
+    viewerStateRef.current = typeof val === 'function' ? val(viewerStateRef.current) : val;
+    _setViewerState(val);
+  }, []);
+
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
-  const [isInscan, setIsInscan] = useState(false);
+
+  const [isInscan, _setIsInscan] = useState(false);
+  const isInscanRef = useRef(false);
+  const setIsInscan = useCallback((val) => {
+    isInscanRef.current = typeof val === 'function' ? val(isInscanRef.current) : val;
+    _setIsInscan(val);
+  }, []);
   const [isMeshView, setIsMeshView] = useState(false);
   const [showTierModal, setShowTierModal] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
@@ -862,6 +874,9 @@ const IndustrialTourViewer = forwardRef(({
     const targetScan = scansDataRef.current[targetScanId];
     if (!targetScan || !cameraRef.current) return;
 
+    // Evaluate entry mode BEFORE transitioning viewerState
+    const isEnteringFromDollhouse = (viewerStateRef.current === 'DOLLHOUSE' || activeScanIdRef.current === null || !isInscanRef.current);
+
     // Clean up any in-progress dollhouse reveal overlay
     if (revealOverlayRef.current && sceneRef.current) {
       sceneRef.current.remove(revealOverlayRef.current);
@@ -870,7 +885,7 @@ const IndustrialTourViewer = forwardRef(({
 
     setViewerState('TRANSITION');
     document.body.style.cursor = 'wait';
-    console.log(`[TOUR_DIAG] Transition start -> target: ${targetScanId}`);
+    console.log(`[TOUR_DIAG] Transition start -> target: ${targetScanId}, fromDollhouse: ${isEnteringFromDollhouse}`);
 
     // Trigger mobile haptic micro-pulse
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -890,7 +905,6 @@ const IndustrialTourViewer = forwardRef(({
 
       // Flight launches immediately with pre-loaded equirectangular texture (zero 150ms stall)
 
-      const isEnteringFromDollhouse = (viewerState === 'DOLLHOUSE' || activeScanIdRef.current === null || !isInscan);
       let currentEquirect = null;
       let currentScan = null;
       let currentScanIdNum = null;
