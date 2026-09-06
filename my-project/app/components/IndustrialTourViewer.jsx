@@ -148,6 +148,7 @@ const IndustrialTourViewer = forwardRef(({
   const bubbleProjMatRef = useRef(null);
   const projectiveMatRef = useRef(null);
   const depthOccluderMatRef = useRef(null);
+  const revealOverlayRef = useRef(null);
   const scansDataRef = useRef({});
   const activeScanIdRef = useRef(null);
   const previousScanIdRef = useRef(null);
@@ -657,7 +658,7 @@ const IndustrialTourViewer = forwardRef(({
               console.log(`[FloorSnap] Calibrated ${detectedDeltas.length}/${scansArray.length} stations. Tour median tripod height: ${medianTripodHeight.toFixed(3)}m`);
 
               // Matterport-grade vector pucks lying flat on the floor in Z-up
-              const ringGeo = new THREE.PlaneGeometry(0.78, 0.78);
+              const ringGeo = new THREE.PlaneGeometry(0.55, 0.55);
               const hoverBuffer = new Float32Array(scansArray.length);
               const alphaBuffer = new Float32Array(scansArray.length);
               alphaBuffer.fill(1.0);
@@ -864,6 +865,12 @@ const IndustrialTourViewer = forwardRef(({
     const targetScan = scansDataRef.current[targetScanId];
     if (!targetScan || !cameraRef.current) return;
 
+    // Clean up any in-progress dollhouse reveal overlay
+    if (revealOverlayRef.current && sceneRef.current) {
+      sceneRef.current.remove(revealOverlayRef.current);
+      revealOverlayRef.current = null;
+    }
+
     setViewerState('TRANSITION');
     document.body.style.cursor = 'wait';
 
@@ -930,14 +937,14 @@ const IndustrialTourViewer = forwardRef(({
         }
       }
 
-      const isFirstClick = activeScanIdRef.current === null;
+      const isEnteringFromDollhouse = (viewerState === 'DOLLHOUSE' || activeScanIdRef.current === null || !isInscan);
       let currentEquirect = null;
       let currentScan = null;
       let currentScanIdNum = null;
       let currentScanPos = cameraRef.current.position.clone();
       let currentInvRot = new THREE.Matrix3().identity();
 
-      if (!isFirstClick && activeScanIdRef.current) {
+      if (!isEnteringFromDollhouse && activeScanIdRef.current) {
         currentScanIdNum = activeScanIdRef.current.replace('scan_', '');
         currentScan = scansDataRef.current[activeScanIdRef.current];
         currentEquirect = await textureManager.loadEquirect(currentScanIdNum, flightTier);
@@ -960,7 +967,7 @@ const IndustrialTourViewer = forwardRef(({
       const relRot3x3 = new THREE.Matrix3().identity();
       let currentCubeMap = nextCubeMap;
 
-      if (!isFirstClick && currentEquirect && currentScan) {
+      if (!isEnteringFromDollhouse && currentEquirect && currentScan) {
         const currRot3x3 = new THREE.Matrix3().setFromMatrix4(
           new THREE.Matrix4().makeRotationFromQuaternion(currentScan.quaternion)
         );
@@ -986,28 +993,41 @@ const IndustrialTourViewer = forwardRef(({
         projMat.uniforms.uTransitionProgress.value = 1.0;
       }
 
-      projMat.uniforms.uOpacity.value = isFirstClick ? 0.0 : 1.0;
+      projMat.uniforms.uOpacity.value = 1.0;
 
-      // Assign Projective Shader to Foreground Model Mesh
-      if (modelRef.current) {
-        modelRef.current.visible = true;
-        modelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            child.material = projMat;
-          }
-        });
-      }
-
-      // Configure Background Dome with Shared Projective Shader (100% ray lock with 3D mesh)
-      if (bubbleRef.current && bubbleProjMatRef.current) {
-        bubbleRef.current.material = bubbleProjMatRef.current;
-        bubbleRef.current.position.set(0, 0, 0);
-        bubbleRef.current.quaternion.identity();
-        bubbleRef.current.visible = true;
+      // When entering from dollhouse: KEEP model mesh in its genuine textured materials
+      // so user sees the 3D building and rooms while flying in!
+      if (!isEnteringFromDollhouse) {
+        if (modelRef.current) {
+          modelRef.current.visible = true;
+          modelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              child.material = projMat;
+            }
+          });
+        }
+        if (bubbleRef.current && bubbleProjMatRef.current) {
+          bubbleRef.current.material = bubbleProjMatRef.current;
+          bubbleRef.current.position.set(0, 0, 0);
+          bubbleRef.current.quaternion.identity();
+          bubbleRef.current.visible = true;
+        }
+      } else {
+        if (modelRef.current) {
+          modelRef.current.visible = true;
+          modelRef.current.traverse((child) => {
+            if (child.isMesh && child.userData.originalMaterial) {
+              child.material = child.userData.originalMaterial;
+            }
+          });
+        }
+        if (bubbleRef.current) {
+          bubbleRef.current.visible = false;
+        }
       }
 
       const forward = new THREE.Vector3();
-      if (isFirstClick) {
+      if (isEnteringFromDollhouse) {
         forward.set(0, 1, 0).applyQuaternion(targetScan.quaternion);
       } else {
         cameraRef.current.getWorldDirection(forward);
@@ -1049,22 +1069,20 @@ const IndustrialTourViewer = forwardRef(({
         });
       }
 
-      // Execute Camera Flight Tween
+      // Execute Camera Flight Tween: flies inside the physical dollhouse mesh
+      const flightDuration = isEnteringFromDollhouse ? 1.25 : 1.1;
+
       gsap.to(cameraRef.current.position, {
         x: targetScan.positionVec.x,
         y: targetScan.positionVec.y,
         z: targetScan.positionVec.z,
-        duration: 1.1,
+        duration: flightDuration,
         ease: 'power3.inOut',
         onUpdate: function () {
-          if (!isFirstClick && totalDistance > 0) {
+          if (!isEnteringFromDollhouse && totalDistance > 0) {
             const dist = cameraRef.current.position.distanceTo(startPos);
             const prog = Math.min(dist / totalDistance, 1.0);
             projMat.uniforms.uTransitionProgress.value = prog;
-          }
-          if (isFirstClick) {
-            const prog = this.progress();
-            projMat.uniforms.uOpacity.value = prog;
           }
         }
       });
@@ -1073,7 +1091,7 @@ const IndustrialTourViewer = forwardRef(({
         x: targetLookAt.x,
         y: targetLookAt.y,
         z: targetLookAt.z,
-        duration: 1.1,
+        duration: flightDuration,
         ease: 'power3.inOut',
         onComplete: () => {
           const previousScanId = activeScanIdRef.current;
@@ -1144,26 +1162,85 @@ const IndustrialTourViewer = forwardRef(({
             ? (isValidCubeTexture(ready1024) ? ready1024 : null)
             : (isValidCubeTexture(nextCubeMap) ? nextCubeMap : null);
 
-          if (validInitialCube) {
-            activateStaticCubemap(validInitialCube);
-          } else {
-            // High-res cubemap is still downloading in background:
-            // DO NOT switch to dummy black texture!
-            // Keep bubbleProjMatRef and projMat actively rendering nextEquirect.
-            // Both materials already provide full color, 60fps rendering, and depth occlusion.
-            if (bubbleRef.current && bubbleProjMatRef.current) {
-              bubbleRef.current.material = bubbleProjMatRef.current;
-              bubbleRef.current.position.set(0, 0, 0);
-              bubbleRef.current.quaternion.identity();
-              bubbleRef.current.visible = true;
-            }
-            if (modelRef.current && projMat) {
-              modelRef.current.visible = true;
-              modelRef.current.traverse((child) => {
-                if (child.isMesh) {
-                  child.material = projMat;
+          // ─── First Enter from Dollhouse: Smooth Dissolve Projection on Arrival ───
+          if (isEnteringFromDollhouse && modelRef.current && sceneRef.current) {
+            const overlayGroup = new THREE.Group();
+            overlayGroup.name = 'DollhouseRevealOverlay';
+
+            projMat.transparent = true;
+            projMat.depthWrite = false;
+            projMat.depthTest = true;
+            projMat.uniforms.uOpacity.value = 0.0;
+            projMat.uniforms.uTransitionProgress.value = 1.0;
+            projMat.uniforms.uCurrentEquirect.value = nextEquirect;
+            projMat.uniforms.uNextEquirect.value = nextEquirect;
+            projMat.uniforms.uCurrentScanPos.value.copy(targetScan.positionVec);
+            projMat.uniforms.uCurrentInvRot.value.copy(targetScan.invRot3x3);
+            if (projMat.uniforms.uCurrentRot) projMat.uniforms.uCurrentRot.value.copy(nextRot3x3);
+
+            modelRef.current.traverse((child) => {
+              if (child.isMesh && child.geometry) {
+                const overlayMesh = new THREE.Mesh(child.geometry, projMat);
+                overlayMesh.matrix.copy(child.matrix);
+                overlayMesh.matrixWorld.copy(child.matrixWorld);
+                overlayMesh.matrixAutoUpdate = false;
+                overlayGroup.add(overlayMesh);
+              }
+            });
+            sceneRef.current.add(overlayGroup);
+            revealOverlayRef.current = overlayGroup;
+
+            // Beautiful 0.5s dissolve: seamlessly projects the 360 photo over the room mesh
+            gsap.to(projMat.uniforms.uOpacity, {
+              value: 1.0,
+              duration: 0.5,
+              ease: 'power2.out',
+              onComplete: () => {
+                if (sceneRef.current && overlayGroup) {
+                  sceneRef.current.remove(overlayGroup);
                 }
-              });
+                if (revealOverlayRef.current === overlayGroup) {
+                  revealOverlayRef.current = null;
+                }
+                projMat.transparent = false;
+                projMat.depthWrite = true;
+
+                if (validInitialCube) {
+                  activateStaticCubemap(validInitialCube);
+                } else {
+                  if (modelRef.current) {
+                    modelRef.current.traverse((child) => {
+                      if (child.isMesh) child.material = projMat;
+                    });
+                  }
+                  if (bubbleRef.current && bubbleProjMatRef.current) {
+                    bubbleRef.current.material = bubbleProjMatRef.current;
+                    bubbleRef.current.position.set(0, 0, 0);
+                    bubbleRef.current.quaternion.identity();
+                    bubbleRef.current.visible = true;
+                  }
+                }
+              }
+            });
+          } else {
+            // Standard station-to-station arrival
+            if (validInitialCube) {
+              activateStaticCubemap(validInitialCube);
+            } else {
+              if (bubbleRef.current && bubbleProjMatRef.current) {
+                bubbleRef.current.material = bubbleProjMatRef.current;
+                bubbleRef.current.position.set(0, 0, 0);
+                bubbleRef.current.quaternion.identity();
+                bubbleRef.current.visible = true;
+              }
+              if (modelRef.current && projMat) {
+                modelRef.current.visible = true;
+                modelRef.current.traverse((child) => {
+                  if (child.isMesh) {
+                    child.material = projMat;
+                  }
+                });
+              }
             }
           }
 
@@ -1854,13 +1931,24 @@ const IndustrialTourViewer = forwardRef(({
       onUpdate: () => controlsRef.current.update()
     });
 
+    if (revealOverlayRef.current && sceneRef.current) {
+      sceneRef.current.remove(revealOverlayRef.current);
+      revealOverlayRef.current = null;
+    }
+
     keyboardEnabledRef.current = true;
     setViewerState('DOLLHOUSE');
     setIsInscan(false);
+    activeScanIdRef.current = null;
   };
 
   const handleFloorPlanView = () => {
     if (!modelRef.current || !cameraRef.current || !controlsRef.current) return;
+
+    if (revealOverlayRef.current && sceneRef.current) {
+      sceneRef.current.remove(revealOverlayRef.current);
+      revealOverlayRef.current = null;
+    }
 
     if (bubbleRef.current) bubbleRef.current.visible = false;
     if (modelRef.current) {
@@ -1905,6 +1993,7 @@ const IndustrialTourViewer = forwardRef(({
     keyboardEnabledRef.current = false;
     setViewerState('DOLLHOUSE');
     setIsInscan(false);
+    activeScanIdRef.current = null;
   };
 
   const handleToggleMeshView = () => {

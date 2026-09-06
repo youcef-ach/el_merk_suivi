@@ -29,8 +29,8 @@ export const createMatterportRingMaterial = () => {
         vHover = aHover;
         vAlpha = aAlpha;
 
-        // Smooth 14% scale expansion when hovered
-        float scale = 1.0 + aHover * 0.14;
+        // Smooth 10% scale expansion when hovered
+        float scale = 1.0 + aHover * 0.10;
         vec3 transformed = position * scale;
 
         vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(transformed, 1.0);
@@ -49,46 +49,36 @@ export const createMatterportRingMaterial = () => {
         vec2 p = vUv - vec2(0.5);
         float r = length(p) * 2.0; // 0.0 at center, 1.0 at outer edge
 
+        // Outer boundary culling
         if (r > 1.0) discard;
 
-        // Vector-sharp smooth edges via screen-space derivatives
+        // Screen-space derivative anti-aliasing
         float aa = fwidth(r) * 1.5;
         if (aa < 0.001) aa = 0.015;
 
-        // 1. Subtle Outer & Inner Contrast Shadow for crisp definition on light/white floors
-        float outerShadow = smoothstep(1.0, 1.0 - aa * 2.0, r) * smoothstep(0.92 - aa, 0.92, r) * 0.28;
-        float innerShadow = smoothstep(0.72, 0.72 - aa, r) * smoothstep(0.66 - aa, 0.66, r) * 0.20;
+        // Primary Vector White Ring (outer edge 0.90, inner edge 0.74)
+        // Center (r < 0.74) is completely hollow/empty (no white point, no center dot)
+        float whiteRing = smoothstep(0.90, 0.90 - aa, r) * smoothstep(0.74 - aa, 0.74, r);
 
-        // 2. Primary Razor-Sharp White Ring (outer edge 0.92, inner edge 0.72)
-        // Center is completely empty/hollow with no point or dot
-        float whiteRing = smoothstep(0.92, 0.92 - aa, r) * smoothstep(0.72 - aa, 0.72, r);
+        if (whiteRing < 0.005) discard;
 
-        // 3. Dynamic Hover Pulse: subtle soft breathing glow when hovered
-        float hoverPulse = 0.0;
+        // Opacity:
+        // Resting: subtle, elegant translucent white (0.42)
+        // Hovered: brilliant solid pure white (0.96)
+        float baseOpacity = mix(0.42, 0.96, vHover);
+
+        // Dynamic hover pulse
+        float pulse = 0.0;
         if (vHover > 0.01) {
-          float pulse = 0.5 + 0.5 * sin(uTime * 4.0);
-          float ringGlow = smoothstep(0.96, 0.92, r) * smoothstep(0.68, 0.72, r);
-          hoverPulse = ringGlow * pulse * 0.22 * vHover;
+          pulse = (0.5 + 0.5 * sin(uTime * 4.0)) * 0.12 * vHover;
         }
 
-        // Opacity blending:
-        // Resting: 0.35 for hollow ring (delicate, elegant, non-intrusive)
-        // Hovered: 1.0 for solid brilliant pure white ring
-        float baseOpacity = mix(0.35, 1.0, vHover);
+        float alpha = clamp((whiteRing * baseOpacity) + pulse, 0.0, 1.0) * vAlpha * uGlobalOpacity;
 
-        float whiteAlpha = (whiteRing * baseOpacity) + hoverPulse;
-        float shadowAlpha = (outerShadow + innerShadow) * (1.0 - vHover * 0.5);
+        if (alpha < 0.01) discard;
 
-        // Pure crisp white for the navigation puck
-        vec3 whiteColor = vec3(1.0, 1.0, 1.0);
-        vec3 shadowColor = vec3(0.04, 0.05, 0.07);
-
-        vec3 col = mix(shadowColor, whiteColor, clamp(whiteAlpha / max(whiteAlpha + shadowAlpha, 0.001), 0.0, 1.0));
-        float totalAlpha = clamp(whiteAlpha + shadowAlpha, 0.0, 1.0) * vAlpha * uGlobalOpacity;
-
-        if (totalAlpha < 0.01) discard;
-
-        gl_FragColor = vec4(col, totalAlpha);
+        // Pure crisp white with ZERO black borders or shadows
+        gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
       }
     `,
     transparent: true,

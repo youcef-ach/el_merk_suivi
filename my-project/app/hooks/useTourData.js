@@ -255,7 +255,7 @@ export const useTourData = (sceneRef, dummyTex, tourId, sceneReady, rendererRef,
 
           // ─── 5. Place Matterport-Style Scan Navigation Pucks on Floor / Ground ───
           if (Array.isArray(scanData) && scanData.length > 0) {
-            const ringGeo = new THREE.PlaneGeometry(0.78, 0.78);
+            const ringGeo = new THREE.PlaneGeometry(0.55, 0.55);
             const hoverBuffer = new Float32Array(scanData.length);
             const alphaBuffer = new Float32Array(scanData.length).fill(1.0);
             ringGeo.setAttribute('aHover', new THREE.InstancedBufferAttribute(hoverBuffer, 1));
