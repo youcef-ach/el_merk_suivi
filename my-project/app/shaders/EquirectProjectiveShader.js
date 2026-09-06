@@ -5,10 +5,6 @@ import * as THREE from 'three';
  * Uses a single texture2D lookup per scan instead of a heavy 6-texture cubemap lookup.
  */
 export const EquirectProjectiveShader = {
-  extensions: {
-    derivatives: true,
-    shaderTextureLOD: true
-  },
   uniforms: {
     uCurrentEquirect: { value: null },
     uNextEquirect: { value: null },
@@ -37,9 +33,6 @@ export const EquirectProjectiveShader = {
   `,
 
   fragmentShader: `
-    #extension GL_OES_standard_derivatives : enable
-    #extension GL_EXT_shader_texture_lod : enable
-
     uniform sampler2D uCurrentEquirect;
     uniform sampler2D uNextEquirect;
     uniform vec3 uCurrentScanPos;
@@ -63,32 +56,18 @@ export const EquirectProjectiveShader = {
       return vec2(u, v);
     }
 
-    vec4 sampleEquirect(sampler2D tex, vec2 uv) {
-      vec2 dx = dFdx(uv);
-      vec2 dy = dFdy(uv);
-      // Clamp derivative discontinuity across the meridian wrap-around (u: 1.0 -> 0.0)
-      if (abs(dx.x) > 0.5) dx.x = 0.0;
-      if (abs(dy.x) > 0.5) dy.x = 0.0;
-
-      #if defined(GL_EXT_shader_texture_lod)
-        return texture2DGradEXT(tex, uv, dx, dy);
-      #else
-        return texture2D(tex, uv);
-      #endif
-    }
-
     void main() {
       // Direction from Current Scan in scanner-local frame
       vec3 dirA = normalize(vWorldPosition - uCurrentScanPos);
       vec3 localDirA = normalize(uCurrentInvRot * dirA);
       vec2 uvA = dirToEquirectUV(localDirA);
-      vec4 colorA = sampleEquirect(uCurrentEquirect, uvA);
+      vec4 colorA = texture2D(uCurrentEquirect, uvA);
 
       // Direction from Next Scan in scanner-local frame
       vec3 dirB = normalize(vWorldPosition - uNextScanPos);
       vec3 localDirB = normalize(uNextInvRot * dirB);
       vec2 uvB = dirToEquirectUV(localDirB);
-      vec4 colorB = sampleEquirect(uNextEquirect, uvB);
+      vec4 colorB = texture2D(uNextEquirect, uvB);
 
       // Blend based on transition progress
       vec4 finalColor = mix(colorA, colorB, uTransitionProgress);
