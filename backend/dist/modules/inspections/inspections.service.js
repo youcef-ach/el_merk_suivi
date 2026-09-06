@@ -1091,10 +1091,25 @@ let InspectionsService = class InspectionsService {
             let sourceGlbPath;
             if (downloadedName.toLowerCase().endsWith('.zip')) {
                 console.log(`[processGlb] Extracting ZIP model archive: ${downloadedPath}`);
-                const AdmZip = require('adm-zip');
-                const zip = new AdmZip(downloadedPath);
                 const extractDir = path.join(tempDir, 'unzipped');
-                zip.extractAllTo(extractDir, true);
+                fs.mkdirSync(extractDir, { recursive: true });
+                try {
+                    const { execFile } = require('child_process');
+                    const execFilePromise = (0, util_1.promisify)(execFile);
+                    await execFilePromise('/usr/bin/unzip', ['-q', '-o', downloadedPath, '-d', extractDir], { maxBuffer: 100 * 1024 * 1024 });
+                }
+                catch (uzErr) {
+                    try {
+                        const { execFile } = require('child_process');
+                        const execFilePromise = (0, util_1.promisify)(execFile);
+                        await execFilePromise('/usr/bin/python3', ['-m', 'zipfile', '-e', downloadedPath, extractDir], { maxBuffer: 100 * 1024 * 1024 });
+                    }
+                    catch (pyErr) {
+                        const AdmZip = require('adm-zip');
+                        const zip = new AdmZip(downloadedPath);
+                        zip.extractAllTo(extractDir, true);
+                    }
+                }
                 let foundObj = null;
                 let foundGlb = null;
                 const findModel = (dir) => {
@@ -1274,16 +1289,120 @@ let InspectionsService = class InspectionsService {
         const bucket = 'virtual-inspections';
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'panos-'));
         const zipPath = path.join(tempDir, 'panoramas.zip');
+        const sharp = require('sharp');
+        const execPromise = (0, util_1.promisify)(child_process_1.exec);
         try {
             await this.storageService.downloadFile(bucket, `inspections/${id}/panoramas.zip`, zipPath);
-            const AdmZip = require('adm-zip');
-            const sharp = require('sharp');
-            const execPromise = (0, util_1.promisify)(child_process_1.exec);
-            const zip = new AdmZip(zipPath);
             const extractDir = path.join(tempDir, 'extracted');
-            zip.extractAllTo(extractDir, true);
+            fs.mkdirSync(extractDir, { recursive: true });
             if (onProgress)
                 await onProgress(10, 'Unpacking scan archives and discovering stations...');
+            console.log(`[processPanoramas] Unpacking archive via streaming unpacker: ${zipPath}`);
+            try {
+                const { execFile } = require('child_process');
+                const execFilePromise = (0, util_1.promisify)(execFile);
+                await execFilePromise('/usr/bin/unzip', ['-q', '-o', zipPath, '-d', extractDir], { maxBuffer: 100 * 1024 * 1024 });
+            }
+            catch (unzipErr) {
+                console.warn(`[processPanoramas] System unzip failed, trying python3 zipfile fallback:`, unzipErr.message);
+                try {
+                    const { execFile } = require('child_process');
+                    const execFilePromise = (0, util_1.promisify)(execFile);
+                    await execFilePromise('/usr/bin/python3', ['-m', 'zipfile', '-e', zipPath, extractDir], { maxBuffer: 100 * 1024 * 1024 });
+                }
+                catch (pyErr) {
+                    console.warn(`[processPanoramas] Python zipfile failed, attempting AdmZip fallback:`, pyErr.message);
+                    const AdmZip = require('adm-zip');
+                    const zip = new AdmZip(zipPath);
+                    zip.extractAllTo(extractDir, true);
+                }
+            }
+            try {
+                if (fs.existsSync(zipPath)) {
+                    fs.unlinkSync(zipPath);
+                    console.log(`[processPanoramas] Freeing temporary zip archive to conserve disk space.`);
+                }
+            }
+            catch (_) { }
+            const allExtractedFiles = [];
+            const findFilesRecursive = (curr) => {
+                const entries = fs.readdirSync(curr, { withFileTypes: true });
+                for (const entry of entries) {
+                    const full = path.join(curr, entry.name);
+                    if (entry.isDirectory()) {
+                        findFilesRecursive(full);
+                    }
+                    else {
+                        allExtractedFiles.push({ name: entry.name, fullPath: full });
+                    }
+                }
+            };
+            findFilesRecursive(extractDir);
+            let uploadedCount = 0;
+            const uploadFilesBatched = async (files, batchSize = 20) => {
+                for (let i = 0; i < files.length; i += batchSize) {
+                    const batch = files.slice(i, i + batchSize);
+                    await Promise.all(batch.map(async (item) => {
+                        let contentType = 'image/jpeg';
+                        const lower = item.fullPath.toLowerCase();
+                        if (lower.endsWith('.png'))
+                            contentType = 'image/png';
+                        else if (lower.endsWith('.json'))
+                            contentType = 'application/json';
+                        else if (lower.endsWith('.ktx2'))
+                            contentType = 'image/ktx2';
+                        const s3Dest = `inspections/${id}/${item.s3Rel.replace(/\\/g, '/')}`;
+                        await this.storageService.uploadFile(bucket, s3Dest, item.fullPath, contentType);
+                        uploadedCount++;
+                    }));
+                    if (onProgress && i % 40 === 0) {
+                        const pct = Math.min(95, 30 + Math.round((i / files.length) * 65));
+                        await onProgress(pct, `Uploading tour assets: ${uploadedCount} / ${files.length}...`);
+                    }
+                }
+            };
+            const hasPreprocessedKtx2 = allExtractedFiles.some(f => f.name.toLowerCase().endsWith('.ktx2'));
+            const hasPreprocessedCubemaps = allExtractedFiles.some(f => f.fullPath.includes('cubemaps') || f.name.toLowerCase().includes('_px.'));
+            const preprocessedMetadata = allExtractedFiles.find(f => f.name.toLowerCase() === 'scan_metadata.json');
+            if (hasPreprocessedKtx2 || (hasPreprocessedCubemaps && preprocessedMetadata)) {
+                console.log(`[processPanoramas] Detected PRE-PROCESSED tour package (${allExtractedFiles.length} files)! Fast direct ingestion active.`);
+                if (onProgress)
+                    await onProgress(25, `Pre-processed tour package detected. Ingesting ${allExtractedFiles.length} assets...`);
+                let baseDir = extractDir;
+                if (preprocessedMetadata) {
+                    baseDir = path.dirname(preprocessedMetadata.fullPath);
+                }
+                else {
+                    const aKtx2 = allExtractedFiles.find(f => f.name.toLowerCase().endsWith('.ktx2'));
+                    if (aKtx2) {
+                        baseDir = path.resolve(path.dirname(aKtx2.fullPath), '..');
+                    }
+                }
+                const filesToUpload = [];
+                for (const f of allExtractedFiles) {
+                    const rel = path.relative(baseDir, f.fullPath).replace(/\\/g, '/');
+                    if (!rel.startsWith('..')) {
+                        filesToUpload.push({ fullPath: f.fullPath, s3Rel: rel });
+                    }
+                }
+                if (onProgress)
+                    await onProgress(35, `Syncing ${filesToUpload.length} optimized textures with cloud storage...`);
+                await uploadFilesBatched(filesToUpload, 20);
+                const scansJsonS3 = `inspections/${id}/scans.json`;
+                await this.prisma.inspection.update({
+                    where: { id },
+                    data: {
+                        scansJsonUrl: scansJsonS3,
+                        processingStatus: 'COMPLETED',
+                        processingStage: 'Tour Ready (Pre-processed)',
+                        processingProgress: 100,
+                    },
+                });
+                if (onProgress)
+                    await onProgress(100, 'Tour Ready');
+                console.log(`[processPanoramas] Direct ingestion completed! Uploaded ${uploadedCount} pre-processed assets.`);
+                return { status: 'SUCCESS', filesCount: uploadedCount, scansProcessed: 'preprocessed' };
+            }
             const outputDir = path.join(tempDir, 'output');
             const cubemapsDir = path.join(outputDir, 'cubemaps');
             const equirectDir = path.join(outputDir, 'equirect');
@@ -1293,7 +1412,6 @@ let InspectionsService = class InspectionsService {
             fs.mkdirSync(equirectDir, { recursive: true });
             fs.mkdirSync(equirectLowDir, { recursive: true });
             fs.mkdirSync(ktx2Dir, { recursive: true });
-            let uploadedCount = 0;
             const uploadRecursive = async (currDir, relPath = '') => {
                 const entries = fs.readdirSync(currDir, { withFileTypes: true });
                 for (const entry of entries) {
@@ -1317,56 +1435,6 @@ let InspectionsService = class InspectionsService {
                     }
                 }
             };
-            const allExtractedFiles = [];
-            const findFilesRecursive = (curr) => {
-                const entries = fs.readdirSync(curr, { withFileTypes: true });
-                for (const entry of entries) {
-                    const full = path.join(curr, entry.name);
-                    if (entry.isDirectory()) {
-                        findFilesRecursive(full);
-                    }
-                    else {
-                        allExtractedFiles.push({ name: entry.name, fullPath: full });
-                    }
-                }
-            };
-            findFilesRecursive(extractDir);
-            const hasPreprocessedKtx2 = allExtractedFiles.some(f => f.name.toLowerCase().endsWith('.ktx2'));
-            const hasPreprocessedCubemaps = allExtractedFiles.some(f => f.fullPath.includes('cubemaps') || f.name.toLowerCase().includes('_px.'));
-            const preprocessedMetadata = allExtractedFiles.find(f => f.name.toLowerCase() === 'scan_metadata.json');
-            if (hasPreprocessedKtx2 || (hasPreprocessedCubemaps && preprocessedMetadata)) {
-                console.log(`[processPanoramas] Detected PRE-PROCESSED tour package (${allExtractedFiles.length} files)! Fast direct ingestion active.`);
-                if (onProgress)
-                    await onProgress(25, `Pre-processed tour package detected. Unpacking ${allExtractedFiles.length} assets...`);
-                for (const f of allExtractedFiles) {
-                    const rel = path.relative(extractDir, f.fullPath).replace(/\\/g, '/');
-                    const dest = path.join(outputDir, rel);
-                    fs.mkdirSync(path.dirname(dest), { recursive: true });
-                    fs.copyFileSync(f.fullPath, dest);
-                }
-                if (onProgress)
-                    await onProgress(70, 'Syncing optimized multi-resolution textures with storage...');
-                await uploadRecursive(outputDir);
-                const scansJsonS3 = `inspections/${id}/scans.json`;
-                if (!inspection.scansJsonUrl) {
-                    await this.prisma.inspection.update({
-                        where: { id },
-                        data: { scansJsonUrl: scansJsonS3 },
-                    });
-                }
-                if (onProgress)
-                    await onProgress(100, 'Tour Ready');
-                await this.prisma.inspection.update({
-                    where: { id },
-                    data: {
-                        processingStatus: 'COMPLETED',
-                        processingStage: 'Tour Ready (Pre-processed)',
-                        processingProgress: 100,
-                    }
-                });
-                console.log(`[processPanoramas] Direct ingestion completed! Uploaded ${uploadedCount} pre-processed assets.`);
-                return { status: 'SUCCESS', filesCount: uploadedCount, scansProcessed: 'preprocessed' };
-            }
             let scansJsonPath = null;
             let rawScansData = null;
             for (const f of allExtractedFiles) {

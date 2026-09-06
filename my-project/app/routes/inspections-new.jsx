@@ -395,6 +395,24 @@ function NewInspectionContent() {
       }
 
       // ── 4. 3D Model (OBJ / GLB / ZIP) Sequential with byte progress ──
+      // Resilient background trigger helper with exponential backoff
+      const postWithRetry = async (url, options = {}, desc = 'Processing request', retries = 4) => {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            const res = await fetch(url, options);
+            if (!res.ok) {
+              const text = await res.text().catch(() => '');
+              console.warn(`[NewInspection] ${desc} returned HTTP ${res.status}: ${text}`);
+            }
+            return res;
+          } catch (err) {
+            if (attempt === retries) throw err;
+            console.warn(`[NewInspection] ${desc} network attempt ${attempt} failed, retrying in ${2 * attempt}s...`, err.message);
+            await new Promise(r => setTimeout(r, 2000 * attempt));
+          }
+        }
+      };
+
       if (glbFile) {
         const isZip = glbFile.name.endsWith('.zip');
         const isObj = glbFile.name.endsWith('.obj');
@@ -409,11 +427,11 @@ function NewInspectionContent() {
         });
 
         setUploadStatusText('Queuing 3D model decimation and KTX2 compression in background...');
-        await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
+        await postWithRetry(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-glb`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({ fileName: targetName, compressionMode })
-        });
+        }, 'Queuing 3D model processing');
       }
 
       // ── 5. 360° Panoramas & Cubemaps (panoramas.zip) Sequential with byte progress ──
@@ -426,10 +444,10 @@ function NewInspectionContent() {
         });
 
         setUploadStatusText('Queuing multi-LOD cubemaps & KTX2 generation in background...');
-        await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-panoramas`, {
+        await postWithRetry(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-panoramas`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` }
-        });
+        }, 'Queuing panorama processing');
       }
 
       // ── 6. 3D Tileset (if present) ──
@@ -442,10 +460,10 @@ function NewInspectionContent() {
             setUploadStatusText(`Uploading 3D Tileset: ${fmtMb(loaded)} MB / ${fmtMb(total)} MB (${pct}%)...`);
           });
           setUploadStatusText('Extracting 3D Tileset LODs on server...');
-          await fetch(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-tileset`, {
+          await postWithRetry(`${API_URL}/projects/${projectId}/inspections/${inspectionId}/process-tileset`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
-          });
+          }, 'Queuing tileset processing');
         } else {
           await uploadFileToMinio(inspectionId, tilesetFile, `tileset_${tilesetFile.name}`);
           await fetch(`${API_URL}/inspections/${inspectionId}/survey/meta`, {

@@ -147,9 +147,12 @@ const IndustrialTourViewer = forwardRef(({
   const bubbleStaticMatRef = useRef(null);
   const bubbleProjMatRef = useRef(null);
   const projectiveMatRef = useRef(null);
+  const depthOccluderMatRef = useRef(null);
   const scansDataRef = useRef({});
   const activeScanIdRef = useRef(null);
+  const previousScanIdRef = useRef(null);
   const scanSpheresRef = useRef(null);
+  const keysHeldRef = useRef({ left: false, right: false });
 
   // Staging Hook
   const staging = useStaging(
@@ -208,6 +211,7 @@ const IndustrialTourViewer = forwardRef(({
 
     // Setup Projective Mesh Material (Equirectangular)
     const projMat = new THREE.ShaderMaterial({
+      name: 'EquirectProjectiveMaterial',
       uniforms: THREE.UniformsUtils.clone(EquirectProjectiveShader.uniforms),
       vertexShader: EquirectProjectiveShader.vertexShader,
       fragmentShader: EquirectProjectiveShader.fragmentShader,
@@ -220,6 +224,7 @@ const IndustrialTourViewer = forwardRef(({
 
     // Unified Projective Background Sphere Material (shares uniforms with mesh for 100% ray lock)
     const bubbleProjMat = new THREE.ShaderMaterial({
+      name: 'BubbleProjectiveMaterial',
       uniforms: projMat.uniforms,
       vertexShader: EquirectProjectiveShader.vertexShader,
       fragmentShader: EquirectProjectiveShader.fragmentShader,
@@ -230,15 +235,29 @@ const IndustrialTourViewer = forwardRef(({
     });
     bubbleProjMatRef.current = bubbleProjMat;
 
+    // Invisible Depth-Only Occluder Material for Physical 3D Occlusion
+    // (colorWrite=false, depthWrite=true, depthTest=true)
+    // Renders physical 3D walls/floors into the GPU depth buffer without altering pixels,
+    // ensuring hotspot rings, tags, and tools naturally respect 3D depth and are occluded by walls.
+    const depthOccluderMat = new THREE.MeshBasicMaterial({
+      name: 'DepthOccluderMaterial',
+      colorWrite: false,
+      depthWrite: true,
+      depthTest: true,
+      side: THREE.DoubleSide
+    });
+    depthOccluderMatRef.current = depthOccluderMat;
+
     // Infinite Sky Dome Background Sphere (BackSide, 500m radius)
     const bubbleGeo = new THREE.SphereGeometry(500, 64, 64);
     const bubbleStaticMat = new THREE.ShaderMaterial({
+      name: 'BubbleStaticMaterial',
       uniforms: THREE.UniformsUtils.clone(StaticCubemapShader.uniforms),
       vertexShader: StaticCubemapShader.vertexShader,
       fragmentShader: StaticCubemapShader.fragmentShader,
       side: THREE.BackSide,
-      transparent: true,
-      depthTest: true,
+      transparent: false,
+      depthTest: false,
       depthWrite: false
     });
     bubbleStaticMatRef.current = bubbleStaticMat;
@@ -513,6 +532,7 @@ const IndustrialTourViewer = forwardRef(({
               }
             });
 
+            model.renderOrder = 0;
             scene.add(model);
             modelRef.current = model;
             setIsModelLoaded(true);
@@ -566,13 +586,16 @@ const IndustrialTourViewer = forwardRef(({
               });
 
               // Matterport-grade vector pucks lying flat on the floor in Z-up
-              const ringGeo = new THREE.PlaneGeometry(0.72, 0.72);
+              const ringGeo = new THREE.PlaneGeometry(0.78, 0.78);
               const hoverBuffer = new Float32Array(scansArray.length);
+              const alphaBuffer = new Float32Array(scansArray.length);
+              alphaBuffer.fill(1.0);
               ringGeo.setAttribute('aHover', new THREE.InstancedBufferAttribute(hoverBuffer, 1));
+              ringGeo.setAttribute('aAlpha', new THREE.InstancedBufferAttribute(alphaBuffer, 1));
 
               const ringMat = createMatterportRingMaterial();
               const instMesh = new THREE.InstancedMesh(ringGeo, ringMat, scansArray.length);
-              instMesh.renderOrder = 999;
+              instMesh.renderOrder = 1;
 
               const dummy = new THREE.Object3D();
               const markerMetadata = [];
@@ -969,6 +992,7 @@ const IndustrialTourViewer = forwardRef(({
         ease: 'power3.inOut',
         onComplete: () => {
           const previousScanId = activeScanIdRef.current;
+          previousScanIdRef.current = previousScanId;
           activeScanIdRef.current = targetScanId;
 
           // Garbage collect heavy textures of previous scan
@@ -1023,14 +1047,15 @@ const IndustrialTourViewer = forwardRef(({
             }
           }
 
-          // Restore model mesh original material and hide inside scan
+          // Set model mesh to Depth-Only Occluder mode inside scan
+          // Keeps physical 3D geometry active in depth buffer so walls/columns naturally occlude rings & objects behind them
           if (modelRef.current) {
+            modelRef.current.visible = true;
             modelRef.current.traverse((child) => {
-              if (child.isMesh && child.userData.originalMaterial) {
-                child.material = child.userData.originalMaterial;
+              if (child.isMesh && depthOccluderMatRef.current) {
+                child.material = depthOccluderMatRef.current;
               }
             });
-            modelRef.current.visible = false;
           }
 
           // Configure controls for interior look around
@@ -1080,7 +1105,7 @@ const IndustrialTourViewer = forwardRef(({
     }
   }, [cameraRef, controlsRef, dummyTex, keyboardEnabledRef, preloadNearestScans, tierConfig, setDynamicDpr]);
 
-  // ─── 5. Hotspot Distance Culling & Visibility Update Loop ───
+  // ─── 5. Hotspot Distance Culling, Pitch-Aware Fading & Keyboard Camera Rotation Loop ───
   useEffect(() => {
     if (!isDataLoaded || !scanSpheresRef.current || !cameraRef.current) return;
     const instancedMesh = scanSpheresRef.current;
@@ -1088,40 +1113,153 @@ const IndustrialTourViewer = forwardRef(({
 
     let rafId;
     const dummy = new THREE.Object3D();
+    const camDir = new THREE.Vector3();
+    const losRaycaster = new THREE.Raycaster();
+    const rayDir = new THREE.Vector3();
+    let lastTime = performance.now();
 
     const updateVisibility = () => {
       rafId = requestAnimationFrame(updateVisibility);
-      if (instancedMesh.material?.uniforms?.uTime) {
-        instancedMesh.material.uniforms.uTime.value = performance.now() * 0.001;
+
+      const now = performance.now();
+      const dt = Math.min((now - lastTime) * 0.001, 0.1);
+      lastTime = now;
+
+      // 1. Smooth Continuous Keyboard Camera Turn (ArrowLeft / ArrowRight or A / D)
+      if (controlsRef.current && (viewerState === 'INSIDE' || viewerState === 'DOLLHOUSE')) {
+        if (keysHeldRef.current.left) {
+          controlsRef.current.rotateLeft(1.95 * dt); // ~112°/sec
+          controlsRef.current.update();
+        } else if (keysHeldRef.current.right) {
+          controlsRef.current.rotateLeft(-1.95 * dt);
+          controlsRef.current.update();
+        }
       }
-      const cameraPos = cameraRef.current.position;
-      let needsUpdate = false;
-      const showAll = viewerState === 'DOLLHOUSE' || isMeshView;
-      const threshold = 18.0;
+
+      // Update shader time for subtle dynamic pulse
+      if (instancedMesh.material?.uniforms?.uTime) {
+        instancedMesh.material.uniforms.uTime.value = now * 0.001;
+      }
+
+      // During panorama transition, hide rings completely for clean visual flight
+      if (viewerState === 'TRANSITION') {
+        if (instancedMesh.material?.uniforms?.uGlobalOpacity) {
+          instancedMesh.material.uniforms.uGlobalOpacity.value = 0.0;
+        }
+        return;
+      } else {
+        if (instancedMesh.material?.uniforms?.uGlobalOpacity) {
+          instancedMesh.material.uniforms.uGlobalOpacity.value = 1.0;
+        }
+      }
+
+      const camera = cameraRef.current;
+      const cameraPos = camera.position;
+      camera.getWorldDirection(camDir);
+
+      // Pitch fade: When user looks up towards the ceiling, fade out floor rings completely
+      // camDir.z is vertical pitch in Z-up. When looking up (> 0.22, ~13°), starts fading.
+      // At camDir.z >= 0.50 (~30° upwards), pitchFade is 0.0 (completely hidden)
+      const pitchFade = viewerState === 'INSIDE'
+        ? THREE.MathUtils.clamp(1.0 - (camDir.z - 0.22) / 0.28, 0.0, 1.0)
+        : 1.0;
+
+      const currentScan = scansDataRef.current[activeScanIdRef.current];
+      const currentFloorZ = currentScan ? currentScan.positionVec.z : cameraPos.z;
+
+      let matrixNeedsUpdate = false;
+      let alphaNeedsUpdate = false;
+      const aAlpha = instancedMesh.geometry?.attributes?.aAlpha;
 
       if (instancedMesh.userData.metadata) {
         instancedMesh.userData.metadata.forEach((data) => {
           const isCurrentActive = data.id === activeScanIdRef.current && viewerState === 'INSIDE';
           let shouldBeVisible = !isCurrentActive;
+          let targetAlpha = 1.0;
 
-          if (!showAll && shouldBeVisible) {
-            const dist = cameraPos.distanceTo(data.realPosition);
-            shouldBeVisible = dist < threshold;
+          if (viewerState === 'INSIDE') {
+            // Floor filtering: strictly hide rings on other floor levels
+            const deltaZ = Math.abs(data.realPosition.z - currentFloorZ);
+            if (deltaZ > 1.4) {
+              shouldBeVisible = false;
+              targetAlpha = 0.0;
+            }
+
+            if (shouldBeVisible) {
+              const dist = cameraPos.distanceTo(data.realPosition);
+              // Hide if too close (under feet) or too far (> 13.5m)
+              if (dist < 0.65 || dist > 13.5) {
+                shouldBeVisible = false;
+                targetAlpha = 0.0;
+              } else {
+                // Accurate 3D physical occlusion through building mesh
+                if (modelRef.current && dist > 0.6) {
+                  // Ray 1: From camera eye-height to the physical ring puck on the floor (+0.08m up to avoid floor self-hit)
+                  const ringTarget = (data.ringPosition || data.realPosition).clone();
+                  ringTarget.z += 0.08;
+                  rayDir.subVectors(ringTarget, cameraPos).normalize();
+                  const distToRing = cameraPos.distanceTo(ringTarget);
+                  losRaycaster.set(cameraPos, rayDir);
+                  losRaycaster.far = Math.max(0.1, distToRing - 0.15);
+                  const occlusionsRing = losRaycaster.intersectObject(modelRef.current, true);
+
+                  if (occlusionsRing.length > 0) {
+                    shouldBeVisible = false;
+                    targetAlpha = 0.0;
+                  } else {
+                    // Ray 2: Eye-level to eye-level station raycast
+                    rayDir.subVectors(data.realPosition, cameraPos).normalize();
+                    const distToStation = cameraPos.distanceTo(data.realPosition);
+                    losRaycaster.set(cameraPos, rayDir);
+                    losRaycaster.far = Math.max(0.1, distToStation - 0.20);
+                    const occlusionsStation = losRaycaster.intersectObject(modelRef.current, true);
+                    if (occlusionsStation.length > 0) {
+                      shouldBeVisible = false;
+                      targetAlpha = 0.0;
+                    }
+                  }
+                }
+
+                if (shouldBeVisible) {
+                  // Smooth distance fade between 7.5m and 13.5m
+                  const distFade = THREE.MathUtils.clamp(1.0 - (dist - 7.5) / 6.0, 0.0, 1.0);
+                  targetAlpha = distFade * pitchFade;
+                  if (targetAlpha <= 0.02) {
+                    shouldBeVisible = false;
+                  }
+                }
+              }
+            }
+          } else if (viewerState === 'DOLLHOUSE' || isMeshView) {
+            // Dollhouse view: show all rings as compact indicators
+            targetAlpha = 0.85;
+            shouldBeVisible = true;
+          }
+
+          if (aAlpha) {
+            const currentA = aAlpha.getX(data.instanceId);
+            if (Math.abs(currentA - targetAlpha) > 0.015) {
+              aAlpha.setX(data.instanceId, targetAlpha);
+              alphaNeedsUpdate = true;
+            }
           }
 
           if (data.isVisible !== shouldBeVisible) {
             data.isVisible = shouldBeVisible;
             dummy.position.copy(data.ringPosition || data.realPosition);
             dummy.rotation.set(0, 0, 0);
-            dummy.scale.setScalar(shouldBeVisible ? 1 : 0);
+            dummy.scale.setScalar(shouldBeVisible ? (viewerState === 'INSIDE' ? 1.0 : 0.42) : 0);
             dummy.updateMatrix();
             instancedMesh.setMatrixAt(data.instanceId, dummy.matrix);
-            needsUpdate = true;
+            matrixNeedsUpdate = true;
           }
         });
       }
 
-      if (needsUpdate) {
+      if (alphaNeedsUpdate && aAlpha) {
+        aAlpha.needsUpdate = true;
+      }
+      if (matrixNeedsUpdate) {
         instancedMesh.instanceMatrix.needsUpdate = true;
       }
     };
@@ -1130,62 +1268,134 @@ const IndustrialTourViewer = forwardRef(({
     return () => cancelAnimationFrame(rafId);
   }, [isDataLoaded, cameraRef, viewerState, isMeshView]);
 
-  // ─── 6. Keyboard Directional Walk Navigation (53° Forward Cone) ───
+  // ─── 6. Keyboard Navigation: Arrow Left/Right Turns Camera, Up/Down Navigates Hotspots ───
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (viewerState !== 'INSIDE' || !activeScanIdRef.current || !cameraRef.current) return;
-      const keys = ['ArrowUp', 'ArrowDown', 'KeyW', 'KeyS'];
-      if (!keys.includes(e.code)) return;
-
-      const forward = new THREE.Vector3();
-      cameraRef.current.getWorldDirection(forward);
-      forward.z = 0; // Horizontal ground plane in Z-up
-      forward.normalize();
-
-      const moveDir = new THREE.Vector3();
-      if (e.code === 'ArrowUp' || e.code === 'KeyW') {
-        moveDir.copy(forward);
-      } else {
-        moveDir.copy(forward).negate();
+      // Ignore when user is typing in form inputs, textareas, or modals
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable) {
+        return;
       }
+
+      const navKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'KeyA', 'KeyD', 'KeyW', 'KeyS'];
+      if (!navKeys.includes(e.code)) return;
+
+      // Prevent browser default window scrolling
+      if (e.code.startsWith('Arrow')) {
+        e.preventDefault();
+      }
+
+      // Left / Right: Smooth Camera Yaw Rotation
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        keysHeldRef.current.left = true;
+        // Immediate snappy nudge on initial press
+        if (controlsRef.current) {
+          controlsRef.current.rotateLeft(0.065);
+          controlsRef.current.update();
+        }
+        return;
+      }
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        keysHeldRef.current.right = true;
+        if (controlsRef.current) {
+          controlsRef.current.rotateLeft(-0.065);
+          controlsRef.current.update();
+        }
+        return;
+      }
+
+      // Up / Down: Move to Next/Previous Hotspot (Floor-Aware)
+      if (viewerState !== 'INSIDE' || !activeScanIdRef.current || !cameraRef.current) return;
+      if (e.code !== 'ArrowUp' && e.code !== 'ArrowDown' && e.code !== 'KeyW' && e.code !== 'KeyS') return;
 
       const currentScan = scansDataRef.current[activeScanIdRef.current];
       if (!currentScan) return;
       const currentPos = currentScan.positionVec;
+      const currentFloorZ = currentPos.z;
 
-      let bestMatch = null;
-      let bestScore = -Infinity;
+      // Forward direction in horizontal plane (XY in Z-up)
+      const forward = new THREE.Vector3();
+      cameraRef.current.getWorldDirection(forward);
+      const forward2D = new THREE.Vector2(forward.x, forward.y).normalize();
 
-      Object.keys(scansDataRef.current).forEach(id => {
+      const isForward = e.code === 'ArrowUp' || e.code === 'KeyW';
+      const moveDir2D = isForward ? forward2D : forward2D.clone().negate();
+
+      let bestSameFloorMatch = null;
+      let bestSameFloorScore = -Infinity;
+
+      let bestStairsMatch = null;
+      let bestStairsScore = -Infinity;
+
+      Object.keys(scansDataRef.current).forEach((id) => {
         if (id === activeScanIdRef.current) return;
         const scan = scansDataRef.current[id];
-        const dirToScan = new THREE.Vector3().subVectors(scan.positionVec, currentPos);
-        dirToScan.z = 0; // Ground plane in Z-up
-        const dist = dirToScan.length();
+        const pos = scan.positionVec;
 
-        // Target scans within 15 meters
-        if (dist < 0.1 || dist > 15.0) return;
+        const deltaZ = Math.abs(pos.z - currentFloorZ);
+        const deltaXY = new THREE.Vector2(pos.x - currentPos.x, pos.y - currentPos.y);
+        const dist = deltaXY.length();
 
-        dirToScan.normalize();
-        const dot = moveDir.dot(dirToScan);
+        // Target hotspots within walking range
+        if (dist < 0.75 || dist > 13.0) return;
 
-        // ~53 degree tolerance forward cone
-        if (dot > 0.6) {
-          const score = dot - (dist * 0.12);
-          if (score > bestScore) {
-            bestScore = score;
-            bestMatch = id;
+        const dir2D = deltaXY.clone().normalize();
+        const dot = moveDir2D.dot(dir2D);
+
+        // Half-cone tolerance (~66° angle from moving direction)
+        if (dot < 0.40) return;
+
+        // Backward navigation: bonus if returning to previous station
+        const isPrevScan = !isForward && previousScanIdRef.current === id;
+        const prevBonus = isPrevScan ? 1.5 : 0.0;
+
+        // 1. Same Floor Candidate (deltaZ <= 1.4m)
+        if (deltaZ <= 1.4) {
+          const score = (dot * 3.2) - (dist * 0.15) - (deltaZ * 0.6) + prevBonus;
+          if (score > bestSameFloorScore) {
+            bestSameFloorScore = score;
+            bestSameFloorMatch = id;
+          }
+        }
+        // 2. Stairway / Floor Transition Candidate (1.4m < deltaZ <= 3.2m within 4.5m distance)
+        else if (deltaZ <= 3.2 && dist <= 4.5 && dot > 0.65) {
+          const score = (dot * 2.2) - (dist * 0.2);
+          if (score > bestStairsScore) {
+            bestStairsScore = score;
+            bestStairsMatch = id;
           }
         }
       });
 
-      if (bestMatch) {
-        triggerTransition(bestMatch);
+      // Prefer same-floor hotspot; take stairs only if navigating along stairwell
+      const targetMatch = bestSameFloorMatch || bestStairsMatch;
+      if (targetMatch) {
+        triggerTransition(targetMatch);
       }
     };
 
+    const onKeyUp = (e) => {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        keysHeldRef.current.left = false;
+      }
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        keysHeldRef.current.right = false;
+      }
+    };
+
+    const onBlur = () => {
+      keysHeldRef.current.left = false;
+      keysHeldRef.current.right = false;
+    };
+
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
   }, [viewerState, triggerTransition, cameraRef]);
 
   // ─── 7. Click Handlers & Raycasting (Hotspots, Tags, Tools) ───
@@ -1228,13 +1438,25 @@ const IndustrialTourViewer = forwardRef(({
 
         const instMesh = scanSpheresRef.current;
         const aHover = instMesh.geometry?.attributes?.aHover;
+        const aAlpha = instMesh.geometry?.attributes?.aAlpha;
         const ringHits = raycaster.intersectObject(instMesh);
 
         if (ringHits.length > 0) {
           const hitInstanceId = ringHits[0].instanceId;
+          const hitDistance = ringHits[0].distance;
           const targetMeta = instMesh.userData?.metadata?.[hitInstanceId];
+          const ringAlpha = aAlpha ? aAlpha.getX(hitInstanceId) : 1.0;
 
-          if (targetMeta && targetMeta.id !== activeScanIdRef.current) {
+          // Physical wall occlusion check: if building mesh is closer than the ring, the ring is behind a wall
+          let isOccluded = false;
+          if (modelRef.current) {
+            const wallHits = raycaster.intersectObject(modelRef.current, true);
+            if (wallHits.length > 0 && wallHits[0].distance < hitDistance - 0.05) {
+              isOccluded = true;
+            }
+          }
+
+          if (!isOccluded && targetMeta && targetMeta.id !== activeScanIdRef.current && targetMeta.isVisible && ringAlpha > 0.05) {
             renderer.domElement.style.cursor = 'pointer';
 
             if (hoveredInstanceId !== hitInstanceId) {
@@ -1369,8 +1591,21 @@ const IndustrialTourViewer = forwardRef(({
         const intersects = raycaster.intersectObject(scanSpheresRef.current);
         if (intersects.length > 0) {
           const instanceId = intersects[0].instanceId;
+          const hitDistance = intersects[0].distance;
           const targetMeta = scanSpheresRef.current.userData.metadata?.[instanceId];
-          if (targetMeta && targetMeta.id !== activeScanIdRef.current) {
+          const aAlpha = scanSpheresRef.current.geometry?.attributes?.aAlpha;
+          const ringAlpha = aAlpha ? aAlpha.getX(instanceId) : 1.0;
+
+          // Physical wall occlusion check on click
+          let isOccluded = false;
+          if (modelRef.current) {
+            const wallHits = raycaster.intersectObject(modelRef.current, true);
+            if (wallHits.length > 0 && wallHits[0].distance < hitDistance - 0.05) {
+              isOccluded = true;
+            }
+          }
+
+          if (!isOccluded && targetMeta && targetMeta.id !== activeScanIdRef.current && targetMeta.isVisible && ringAlpha > 0.05) {
             targetScanId = targetMeta.id;
           }
         }
@@ -1538,10 +1773,22 @@ const IndustrialTourViewer = forwardRef(({
 
     if (nextMesh) {
       modelRef.current.visible = true;
+      modelRef.current.traverse((child) => {
+        if (child.isMesh && child.userData.originalMaterial) {
+          child.material = child.userData.originalMaterial;
+        }
+      });
       if (bubbleRef.current) bubbleRef.current.visible = false;
     } else {
-      modelRef.current.visible = false;
-      if (bubbleRef.current && viewerState === 'INSIDE') bubbleRef.current.visible = true;
+      if (viewerState === 'INSIDE') {
+        modelRef.current.visible = true;
+        modelRef.current.traverse((child) => {
+          if (child.isMesh && depthOccluderMatRef.current) {
+            child.material = depthOccluderMatRef.current;
+          }
+        });
+        if (bubbleRef.current) bubbleRef.current.visible = true;
+      }
     }
   };
 
