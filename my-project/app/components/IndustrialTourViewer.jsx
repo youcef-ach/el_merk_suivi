@@ -54,8 +54,7 @@ const IndustrialTourViewer = forwardRef(({
     controlsRef,
     keyboardEnabledRef,
     sceneReady,
-    tierConfig,
-    setDynamicDpr
+    tierConfig
   } = useThreeScene([dummyTex], true);
 
   // Click Feedback Ripple Mesh Ref
@@ -215,7 +214,7 @@ const IndustrialTourViewer = forwardRef(({
       vertexShader: EquirectProjectiveShader.vertexShader,
       fragmentShader: EquirectProjectiveShader.fragmentShader,
       side: THREE.DoubleSide,
-      transparent: false,
+      transparent: true,
       depthTest: true,
       depthWrite: true
     });
@@ -263,7 +262,27 @@ const IndustrialTourViewer = forwardRef(({
       textureManager.setBasePath(tourId);
     }
 
+    if (typeof window !== 'undefined') {
+      window.__tourDiagnostics = {
+        getActiveScan: () => activeScanIdRef.current,
+        getMaterialInfo: () => ({
+          transparent: projectiveMatRef.current?.transparent,
+          depthWrite: projectiveMatRef.current?.depthWrite,
+          depthTest: projectiveMatRef.current?.depthTest,
+          opacity: projectiveMatRef.current?.uniforms?.uOpacity?.value,
+          progress: projectiveMatRef.current?.uniforms?.uTransitionProgress?.value
+        }),
+        getCanvasResolution: () => {
+          const cvs = rendererRef.current?.domElement;
+          return cvs ? { width: cvs.width, height: cvs.height, dpr: window.devicePixelRatio } : null;
+        }
+      };
+    }
+
     return () => {
+      if (typeof window !== 'undefined' && window.__tourDiagnostics) {
+        delete window.__tourDiagnostics;
+      }
       if (magicBubble && scene) {
         scene.remove(magicBubble);
         magicBubble.geometry.dispose();
@@ -851,6 +870,7 @@ const IndustrialTourViewer = forwardRef(({
 
     setViewerState('TRANSITION');
     document.body.style.cursor = 'wait';
+    console.log(`[TOUR_DIAG] Transition start -> target: ${targetScanId}`);
 
     // Trigger mobile haptic micro-pulse
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -963,11 +983,6 @@ const IndustrialTourViewer = forwardRef(({
         controlsRef.current.enabled = false;
       }
 
-      // Dynamic Resolution Scaling (DRS): temporarily reduce fill rate during rapid camera translation
-      if (tierConfig?.useDrs && setDynamicDpr) {
-        setDynamicDpr(tierConfig.drsFlightFactor);
-      }
-
       // Cinematic FOV "Breathing" Warp: 75° -> 83° -> 75°
       if (cameraRef.current) {
         const baseFov = 75;
@@ -1039,9 +1054,6 @@ const IndustrialTourViewer = forwardRef(({
             const overlayGroup = new THREE.Group();
             overlayGroup.name = 'DollhouseRevealOverlay';
 
-            projMat.transparent = true;
-            projMat.depthWrite = false;
-            projMat.depthTest = true;
             projMat.uniforms.uOpacity.value = 0.0;
             projMat.uniforms.uTransitionProgress.value = 1.0;
             projMat.uniforms.uCurrentEquirect.value = nextEquirect;
@@ -1081,9 +1093,8 @@ const IndustrialTourViewer = forwardRef(({
                 if (revealOverlayRef.current === overlayGroup) {
                   revealOverlayRef.current = null;
                 }
-                projMat.transparent = false;
-                projMat.depthWrite = true;
-                projMat.needsUpdate = true;
+                // projMat stays permanently transparent: true, depthWrite: true, depthTest: true.
+                // Zero shader recompilation or disposal = 100% stable WebGL state.
 
                 if (modelRef.current) {
                   modelRef.current.visible = true;
@@ -1117,14 +1128,18 @@ const IndustrialTourViewer = forwardRef(({
             }
           }
 
-          // Asynchronously upgrade equirectangular texture to 4K if on mobile/low tier (zero material swap)
+          // If 2K flight tier was used, defer 4K upgrade well after landing (2.5s) to avoid GPU VRAM upload hitch
           if (flightTier === '2k') {
-            textureManager.loadEquirect(nextScanIdNum, '4k').then((hdTex) => {
-              if (hdTex && activeScanIdRef.current === targetScanId && projMat?.uniforms) {
-                projMat.uniforms.uCurrentEquirect.value = hdTex;
-                projMat.uniforms.uNextEquirect.value = hdTex;
+            setTimeout(() => {
+              if (activeScanIdRef.current === targetScanId) {
+                textureManager.loadEquirect(nextScanIdNum, '4k').then((hdTex) => {
+                  if (hdTex && activeScanIdRef.current === targetScanId && projMat?.uniforms) {
+                    projMat.uniforms.uCurrentEquirect.value = hdTex;
+                    projMat.uniforms.uNextEquirect.value = hdTex;
+                  }
+                }).catch(() => {});
               }
-            }).catch(() => {});
+            }, 2500);
           }
 
           // Background-preload 256 LOD for closest 3 adjacent scans for instant next hops
@@ -1161,30 +1176,30 @@ const IndustrialTourViewer = forwardRef(({
           setIsInscan(true);
           setIsMeshView(false);
 
-          // Restore full pixel ratio upon landing at destination station
-          if (tierConfig?.useDrs && setDynamicDpr) {
-            setDynamicDpr(1.0);
-          }
-
           if (scanSpheresRef.current) {
             scanSpheresRef.current.visible = true;
           }
 
-          // Preload nearest 5 scan bases in background
-          preloadNearestScans(targetScanId);
+          // Defer preloading adjacent scans by 1.0s to ensure zero landing CPU/GPU contention
+          setTimeout(() => {
+            if (activeScanIdRef.current === targetScanId) {
+              preloadNearestScans(targetScanId);
+            }
+          }, 1000);
+
+          console.log(`[TOUR_DIAG] Transition landing complete -> scan: ${targetScanId}, canvas: ${rendererRef.current?.domElement?.width}x${rendererRef.current?.domElement?.height}`);
         }
       });
 
     } catch (err) {
       console.error("Transition failed:", err);
-      if (setDynamicDpr) setDynamicDpr(1.0);
       document.body.style.cursor = 'default';
       setViewerState('DOLLHOUSE');
       if (scanSpheresRef.current) {
         scanSpheresRef.current.visible = true;
       }
     }
-  }, [cameraRef, controlsRef, dummyTex, keyboardEnabledRef, preloadNearestScans, tierConfig, setDynamicDpr]);
+  }, [cameraRef, controlsRef, dummyTex, keyboardEnabledRef, preloadNearestScans, tierConfig]);
 
   // ─── 5. Hotspot Distance Culling, Pitch-Aware Fading & Keyboard Camera Rotation Loop ───
   useEffect(() => {

@@ -160,12 +160,11 @@ class TextureManager {
 
     const configureTex = (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
-      tex.generateMipmaps = true;
-      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.generateMipmaps = false;
+      tex.minFilter = THREE.LinearFilter;
       tex.magFilter = THREE.LinearFilter;
-      if (this.renderer?.capabilities?.getMaxAnisotropy) {
-        tex.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-      }
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
       this.equirectTextureCache.set(cacheKey, tex);
       this.equirectTextureCache.set(cleanId, tex);
       return tex;
@@ -271,14 +270,11 @@ class TextureManager {
   }
 
   /**
-   * Preload 4K equirect and 1024 HD textures for nearest scan stations
+   * Preload 4K equirect textures for nearest scan stations
    */
   async preloadBase(scanIds) {
     for (const id of scanIds) {
       this.loadEquirect(id).catch(() => {});
-      if (this.hasKTX2(id)) {
-        this.loadKTX2(id, '1024').catch(() => this.loadKTX2(id, '256').catch(() => {}));
-      }
     }
   }
 
