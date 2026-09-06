@@ -272,11 +272,16 @@ class TextureManager {
   }
 
   /**
-   * Preload equirect textures for nearest scan stations
+   * Preload 4K equirect and high-res cubemap textures for nearest scan stations
    */
   async preloadBase(scanIds) {
     for (const id of scanIds) {
       this.loadEquirect(id).catch(() => {});
+      if (this.hasKTX2(id)) {
+        this.loadKTX2(id, '1024').catch(() => this.loadKTX2(id, '256').catch(() => {}));
+      } else {
+        this.loadCubeMap(id).catch(() => {});
+      }
     }
   }
 
