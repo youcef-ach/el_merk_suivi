@@ -12,6 +12,7 @@ import { useStaging } from '../hooks/useStaging';
 import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
 import { createTagSpriteMaterial, TAG_BASE_SCALE_X, TAG_BASE_SCALE_Y } from '../hooks/useTags';
 import { EquirectProjectiveShader } from '../shaders/EquirectProjectiveShader';
+import { StaticCubemapShader } from '../shaders/StaticCubemapShader';
 import { createMatterportRingMaterial } from '../shaders/MatterportRingShader';
 import { textureManager } from '../utils/TextureManager';
 import { API_URL, MINIO_URL } from '../config/api';
@@ -154,6 +155,8 @@ const IndustrialTourViewer = forwardRef(({
   // Scene references
   const modelRef = useRef(null);
   const bubbleRef = useRef(null);
+  const bubbleStaticMatRef = useRef(null);
+  const dummyCubeRef = useRef(null);
   const bubbleProjMatRef = useRef(null);
   const projectiveMatRef = useRef(null);
   const depthOccluderMatRef = useRef(null);
@@ -258,8 +261,30 @@ const IndustrialTourViewer = forwardRef(({
     });
     depthOccluderMatRef.current = depthOccluderMat;
 
+    // Setup Static Cubemap Material for Distortion-Free Station Panoramas
+    const bubbleStaticMat = new THREE.ShaderMaterial({
+      name: 'BubbleStaticMaterial',
+      uniforms: THREE.UniformsUtils.clone(StaticCubemapShader.uniforms),
+      vertexShader: StaticCubemapShader.vertexShader,
+      fragmentShader: StaticCubemapShader.fragmentShader,
+      side: THREE.BackSide,
+      transparent: false,
+      depthTest: false,
+      depthWrite: false
+    });
+    bubbleStaticMatRef.current = bubbleStaticMat;
+
+    const dummyCanvas = document.createElement('canvas');
+    dummyCanvas.width = 1; dummyCanvas.height = 1;
+    const dummyCube = new THREE.CubeTexture([
+      dummyCanvas, dummyCanvas, dummyCanvas, dummyCanvas, dummyCanvas, dummyCanvas
+    ]);
+    dummyCube.needsUpdate = true;
+    dummyCubeRef.current = dummyCube;
+    bubbleStaticMat.uniforms.uCubeMap.value = dummyCube;
+    bubbleStaticMat.uniforms.uNextCubeMap.value = dummyCube;
+
     // Infinite Sky Dome Background Sphere (BackSide, 500m radius)
-    // Directly uses bubbleProjMat (EquirectProjectiveShader) matching model mesh for 100% ray-lock
     const bubbleGeo = new THREE.SphereGeometry(500, 64, 64);
     const magicBubble = new THREE.Mesh(bubbleGeo, bubbleProjMat);
     magicBubble.renderOrder = -100;
@@ -903,6 +928,43 @@ const IndustrialTourViewer = forwardRef(({
       const flightTier = tierConfig?.flightEquirectTier || 'auto';
       const nextEquirect = await textureManager.loadEquirect(nextScanIdNum, flightTier);
 
+      // Check if target scan has KTX2 generated
+      const targetScanRaw = targetScan?.raw || targetScan || {};
+      const hasKTX2 = Boolean(
+        targetScanRaw.ktx2_1024 ||
+        targetScanRaw.ktx2_512 ||
+        targetScanRaw.ktx2_256 ||
+        textureManager.hasKTX2(nextScanIdNum)
+      );
+
+      let nextCubeMap = null;
+      let load1024Promise = null;
+      if (hasKTX2) {
+        const cached1024 = textureManager.getCachedKTX2(nextScanIdNum, '1024');
+        if (cached1024) {
+          nextCubeMap = cached1024;
+        } else {
+          load1024Promise = textureManager.loadKTX2(nextScanIdNum, '1024').catch(() => null);
+          const bestCached = textureManager.getBestCachedTexture(nextScanIdNum);
+          if (bestCached) {
+            nextCubeMap = bestCached.texture;
+          } else {
+            const fast256Promise = textureManager.loadKTX2(nextScanIdNum, '256').catch(() => null);
+            nextCubeMap = await Promise.race([
+              load1024Promise,
+              fast256Promise,
+              new Promise((r) => setTimeout(() => r(null), 150))
+            ]);
+          }
+        }
+      } else {
+        try {
+          nextCubeMap = await textureManager.loadCubeMap(nextScanIdNum);
+        } catch (e2) {
+          nextCubeMap = null;
+        }
+      }
+
       // Flight launches immediately with pre-loaded equirectangular texture (zero 150ms stall)
 
       let currentEquirect = null;
@@ -1063,6 +1125,57 @@ const IndustrialTourViewer = forwardRef(({
             if (projMat.uniforms.uCurrentRot) projMat.uniforms.uCurrentRot.value.copy(nextRot3x3);
           }
 
+          const dummyTex = dummyCubeRef.current;
+
+          const isValidCubeTexture = (tex) => {
+            return Boolean(
+              tex &&
+              tex !== dummyTex &&
+              (tex.isCubeTexture ||
+               tex.isCompressedCubeTexture ||
+               tex.isCompressedTexture)
+            );
+          };
+
+          const activateStaticCubemap = (cubeTex) => {
+            if (!isValidCubeTexture(cubeTex)) return;
+            if (activeScanIdRef.current !== targetScanId) return;
+            if (!bubbleRef.current || !bubbleStaticMatRef.current) return;
+
+            const bubbleMat = bubbleStaticMatRef.current;
+            bubbleMat.uniforms.uCubeMap.value = cubeTex;
+            bubbleMat.uniforms.uNextCubeMap.value = cubeTex;
+            bubbleMat.uniforms.uTransitionProgress.value = 1.0;
+            bubbleMat.uniforms.uOpacity.value = 1.0;
+
+            bubbleRef.current.material = bubbleMat;
+            bubbleRef.current.quaternion.copy(targetScan.quaternion);
+            bubbleRef.current.position.copy(targetScan.positionVec);
+            bubbleRef.current.visible = true;
+
+            // Wait 2 animation frames before switching model mesh to depth-only occluder.
+            // This guarantees WebGL has rendered the static cubemap frame,
+            // completely eliminating any single-frame black flash or drop.
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                if (activeScanIdRef.current === targetScanId && modelRef.current) {
+                  modelRef.current.visible = true;
+                  modelRef.current.traverse((child) => {
+                    if (child.isMesh && depthOccluderMatRef.current) {
+                      child.material = depthOccluderMatRef.current;
+                    }
+                  });
+                }
+              });
+            });
+          };
+
+          // Check if 1024 (or high-res cubemap) is already loaded in memory
+          const ready1024 = textureManager.getCachedKTX2(nextScanIdNum, '1024');
+          const validInitialCube = hasKTX2
+            ? (isValidCubeTexture(ready1024) ? ready1024 : null)
+            : (isValidCubeTexture(nextCubeMap) ? nextCubeMap : null);
+
           // ─── First Enter from Dollhouse: Smooth Dissolve Projection on Arrival ───
           if (isEnteringFromDollhouse && modelRef.current && sceneRef.current) {
             const overlayGroup = new THREE.Group();
@@ -1110,50 +1223,60 @@ const IndustrialTourViewer = forwardRef(({
                 // projMat stays permanently transparent: true, depthWrite: true, depthTest: true.
                 // Zero shader recompilation or disposal = 100% stable WebGL state.
 
-                if (modelRef.current) {
-                  modelRef.current.visible = true;
-                  modelRef.current.traverse((child) => {
-                    if (child.isMesh) child.material = projMat;
-                  });
-                }
-                if (bubbleRef.current && bubbleProjMatRef.current) {
-                  bubbleRef.current.material = bubbleProjMatRef.current;
-                  bubbleRef.current.position.set(0, 0, 0);
-                  bubbleRef.current.quaternion.identity();
-                  bubbleRef.current.visible = true;
+                if (validInitialCube) {
+                  activateStaticCubemap(validInitialCube);
+                } else {
+                  if (modelRef.current) {
+                    modelRef.current.visible = true;
+                    modelRef.current.traverse((child) => {
+                      if (child.isMesh) child.material = projMat;
+                    });
+                  }
+                  if (bubbleRef.current && bubbleProjMatRef.current) {
+                    bubbleRef.current.material = bubbleProjMatRef.current;
+                    bubbleRef.current.position.set(0, 0, 0);
+                    bubbleRef.current.quaternion.identity();
+                    bubbleRef.current.visible = true;
+                  }
                 }
               }
             });
           } else {
-            // Standard station-to-station arrival: permanent seamless rock-solid lock
-            if (bubbleRef.current && bubbleProjMatRef.current) {
-              bubbleRef.current.material = bubbleProjMatRef.current;
-              bubbleRef.current.position.set(0, 0, 0);
-              bubbleRef.current.quaternion.identity();
-              bubbleRef.current.visible = true;
-            }
-            if (modelRef.current && projMat) {
-              modelRef.current.visible = true;
-              modelRef.current.traverse((child) => {
-                if (child.isMesh) {
-                  child.material = projMat;
-                }
-              });
+            // Standard station-to-station arrival
+            if (validInitialCube) {
+              activateStaticCubemap(validInitialCube);
+            } else {
+              if (bubbleRef.current && bubbleProjMatRef.current) {
+                bubbleRef.current.material = bubbleProjMatRef.current;
+                bubbleRef.current.position.set(0, 0, 0);
+                bubbleRef.current.quaternion.identity();
+                bubbleRef.current.visible = true;
+              }
+              if (modelRef.current && projMat) {
+                modelRef.current.visible = true;
+                modelRef.current.traverse((child) => {
+                  if (child.isMesh) {
+                    child.material = projMat;
+                  }
+                });
+              }
             }
           }
 
-          // If 2K flight tier was used, defer 4K upgrade well after landing (2.5s) to avoid GPU VRAM upload hitch
-          if (flightTier === '2k') {
-            setTimeout(() => {
-              if (activeScanIdRef.current === targetScanId) {
-                textureManager.loadEquirect(nextScanIdNum, '4k').then((hdTex) => {
-                  if (hdTex && activeScanIdRef.current === targetScanId && projMat?.uniforms) {
-                    projMat.uniforms.uCurrentEquirect.value = hdTex;
-                    projMat.uniforms.uNextEquirect.value = hdTex;
-                  }
-                }).catch(() => {});
+          // Asynchronously upgrade to high-res cubemap as soon as network download finishes
+          if (hasKTX2 && !validInitialCube) {
+            const fetch1024 = load1024Promise || textureManager.loadKTX2(nextScanIdNum, '1024');
+            fetch1024.then((hdTex) => {
+              if (hdTex && activeScanIdRef.current === targetScanId) {
+                activateStaticCubemap(hdTex);
               }
-            }, 2500);
+            }).catch(() => {});
+          } else if (!hasKTX2 && !validInitialCube) {
+            textureManager.loadCubeMap(nextScanIdNum).then((cubeTex) => {
+              if (cubeTex && activeScanIdRef.current === targetScanId) {
+                activateStaticCubemap(cubeTex);
+              }
+            }).catch(() => {});
           }
 
           // Background-preload 256 LOD for closest 3 adjacent scans for instant next hops
@@ -1908,14 +2031,30 @@ const IndustrialTourViewer = forwardRef(({
     } else {
       if (viewerState === 'INSIDE') {
         modelRef.current.visible = true;
-        modelRef.current.traverse((child) => {
-          if (child.isMesh && projectiveMatRef.current) {
-            child.material = projectiveMatRef.current;
+        const hasStaticCube = bubbleStaticMatRef.current &&
+          bubbleStaticMatRef.current.uniforms?.uCubeMap?.value &&
+          bubbleStaticMatRef.current.uniforms.uCubeMap.value !== dummyCubeRef.current;
+
+        if (hasStaticCube && depthOccluderMatRef.current) {
+          modelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              child.material = depthOccluderMatRef.current;
+            }
+          });
+          if (bubbleRef.current && bubbleStaticMatRef.current) {
+            bubbleRef.current.material = bubbleStaticMatRef.current;
+            bubbleRef.current.visible = true;
           }
-        });
-        if (bubbleRef.current && bubbleProjMatRef.current) {
-          bubbleRef.current.material = bubbleProjMatRef.current;
-          bubbleRef.current.visible = true;
+        } else {
+          modelRef.current.traverse((child) => {
+            if (child.isMesh && projectiveMatRef.current) {
+              child.material = projectiveMatRef.current;
+            }
+          });
+          if (bubbleRef.current && bubbleProjMatRef.current) {
+            bubbleRef.current.material = bubbleProjMatRef.current;
+            bubbleRef.current.visible = true;
+          }
         }
       }
     }
