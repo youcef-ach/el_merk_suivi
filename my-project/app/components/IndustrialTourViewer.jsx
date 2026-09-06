@@ -1213,10 +1213,10 @@ const IndustrialTourViewer = forwardRef(({
       // 1. Smooth Continuous Keyboard Camera Turn (ArrowLeft / ArrowRight or A / D)
       if (controlsRef.current && (viewerState === 'INSIDE' || viewerState === 'DOLLHOUSE')) {
         if (keysHeldRef.current.left) {
-          controlsRef.current.rotateLeft(1.95 * dt); // ~112°/sec
+          controlsRef.current.rotateLeft(-1.95 * dt); // Inverted: left arrow rotates view left (~112°/sec)
           controlsRef.current.update();
         } else if (keysHeldRef.current.right) {
-          controlsRef.current.rotateLeft(-1.95 * dt);
+          controlsRef.current.rotateLeft(1.95 * dt); // Inverted: right arrow rotates view right
           controlsRef.current.update();
         }
       }
@@ -1379,7 +1379,7 @@ const IndustrialTourViewer = forwardRef(({
         keysHeldRef.current.left = true;
         // Immediate snappy nudge on initial press
         if (controlsRef.current) {
-          controlsRef.current.rotateLeft(0.065);
+          controlsRef.current.rotateLeft(-0.065);
           controlsRef.current.update();
         }
         return;
@@ -1387,7 +1387,7 @@ const IndustrialTourViewer = forwardRef(({
       if (e.code === 'ArrowRight' || e.code === 'KeyD') {
         keysHeldRef.current.right = true;
         if (controlsRef.current) {
-          controlsRef.current.rotateLeft(-0.065);
+          controlsRef.current.rotateLeft(0.065);
           controlsRef.current.update();
         }
         return;
