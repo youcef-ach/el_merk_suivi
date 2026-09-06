@@ -307,7 +307,22 @@ const IndustrialTourViewer = forwardRef(({
       textureManager.setBasePath(tourId);
     }
 
-
+    if (typeof window !== 'undefined') {
+      window.__tourDiagnostics = {
+        getActiveScan: () => activeScanIdRef.current,
+        getMaterialInfo: () => ({
+          transparent: projectiveMatRef.current?.transparent,
+          depthWrite: projectiveMatRef.current?.depthWrite,
+          depthTest: projectiveMatRef.current?.depthTest,
+          opacity: projectiveMatRef.current?.uniforms?.uOpacity?.value,
+          progress: projectiveMatRef.current?.uniforms?.uTransitionProgress?.value
+        }),
+        getCanvasResolution: () => {
+          const cvs = rendererRef.current?.domElement;
+          return cvs ? { width: cvs.width, height: cvs.height, dpr: window.devicePixelRatio } : null;
+        }
+      };
+    }
 
     return () => {
       if (typeof window !== 'undefined' && window.__tourDiagnostics) {
@@ -899,9 +914,6 @@ const IndustrialTourViewer = forwardRef(({
         modelVisible: modelRef.current?.visible,
         bubbleVisible: bubbleRef.current?.visible,
         bubbleMaterial: bubbleRef.current?.material?.type || bubbleRef.current?.material?.constructor?.name,
-        projMatTransparent: projectiveMatRef.current?.transparent,
-        projMatOpacity: projectiveMatRef.current?.uniforms?.uOpacity?.value,
-        projMatProgress: projectiveMatRef.current?.uniforms?.uTransitionProgress?.value,
         cachedEquirects: Array.from(textureManager.equirectCache?.keys() || []),
         cachedKTX2: Array.from(textureManager.ktx2Cache?.keys() || []),
       };

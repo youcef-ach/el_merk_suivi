@@ -1,0 +1,320 @@
+﻿commit d9406236e904d16bee75a8172a288fb2f12b8d9f
+Author: youcef-ach <yi.achouri@esi-sba.dz>
+Date:   Sun Sep 6 09:24:00 2026 +0100
+
+    fix(tour): eliminate secondary black screen drop after camera flight arrival
+
+diff --git a/my-project/app/components/IndustrialTourViewer.jsx b/my-project/app/components/IndustrialTourViewer.jsx
+index b8a57e71..4add3a60 100644
+--- a/my-project/app/components/IndustrialTourViewer.jsx
++++ b/my-project/app/components/IndustrialTourViewer.jsx
+@@ -12,7 +12,6 @@ import { useStaging } from '../hooks/useStaging';
+ import { createAreaPointerGroup } from '../utils/createAreaPointerGraphics';
+ import { createTagSpriteMaterial, TAG_BASE_SCALE_X, TAG_BASE_SCALE_Y } from '../hooks/useTags';
+ import { EquirectProjectiveShader } from '../shaders/EquirectProjectiveShader';
+-import { StaticCubemapShader } from '../shaders/StaticCubemapShader';
+ import { createMatterportRingMaterial } from '../shaders/MatterportRingShader';
+ import { textureManager } from '../utils/TextureManager';
+ import { API_URL, MINIO_URL } from '../config/api';
+@@ -144,7 +143,6 @@ const IndustrialTourViewer = forwardRef(({
+   // Scene references
+   const modelRef = useRef(null);
+   const bubbleRef = useRef(null);
+-  const bubbleStaticMatRef = useRef(null);
+   const bubbleProjMatRef = useRef(null);
+   const projectiveMatRef = useRef(null);
+   const depthOccluderMatRef = useRef(null);
+@@ -250,29 +248,9 @@ const IndustrialTourViewer = forwardRef(({
+     depthOccluderMatRef.current = depthOccluderMat;
+ 
+     // Infinite Sky Dome Background Sphere (BackSide, 500m radius)
++    // Directly uses bubbleProjMat (EquirectProjectiveShader) matching model mesh for 100% ray-lock
+     const bubbleGeo = new THREE.SphereGeometry(500, 64, 64);
+-    const bubbleStaticMat = new THREE.ShaderMaterial({
+-      name: 'BubbleStaticMaterial',
+-      uniforms: THREE.UniformsUtils.clone(StaticCubemapShader.uniforms),
+-      vertexShader: StaticCubemapShader.vertexShader,
+-      fragmentShader: StaticCubemapShader.fragmentShader,
+-      side: THREE.BackSide,
+-      transparent: false,
+-      depthTest: false,
+-      depthWrite: false
+-    });
+-    bubbleStaticMatRef.current = bubbleStaticMat;
+-
+-    const dummyCube = new THREE.CubeTexture([
+-      document.createElement('canvas'), document.createElement('canvas'),
+-      document.createElement('canvas'), document.createElement('canvas'),
+-      document.createElement('canvas'), document.createElement('canvas')
+-    ]);
+-    dummyCube.needsUpdate = true;
+-    bubbleStaticMat.uniforms.uCubeMap.value = dummyCube;
+-    bubbleStaticMat.uniforms.uNextCubeMap.value = dummyCube;
+-
+-    const magicBubble = new THREE.Mesh(bubbleGeo, bubbleStaticMat);
++    const magicBubble = new THREE.Mesh(bubbleGeo, bubbleProjMat);
+     magicBubble.renderOrder = -100;
+     magicBubble.frustumCulled = false;
+     magicBubble.visible = false;
+@@ -890,52 +868,7 @@ const IndustrialTourViewer = forwardRef(({
+       const flightTier = tierConfig?.flightEquirectTier || 'auto';
+       const nextEquirect = await textureManager.loadEquirect(nextScanIdNum, flightTier);
+ 
+-      // Check if target scan has KTX2 generated
+-      const targetScanRaw = targetScan?.raw || targetScan || {};
+-      const hasKTX2 = Boolean(
+-        targetScanRaw.ktx2_1024 ||
+-        targetScanRaw.ktx2_512 ||
+-        targetScanRaw.ktx2_256 ||
+-        textureManager.hasKTX2(nextScanIdNum)
+-      );
+-
+-      let nextCubeMap = null;
+-      let load1024Promise = null;
+-      if (hasKTX2) {
+-        // Dynamic Progressive LOD Strategy:
+-        const cached1024 = textureManager.getCachedKTX2(nextScanIdNum, '1024');
+-        if (cached1024) {
+-          // If high-quality 1024 is already cached in memory, use it directly!
+-          nextCubeMap = cached1024;
+-        } else {
+-          // Kick off background download of 1024 immediately so network streams during flight
+-          load1024Promise = textureManager.loadKTX2(nextScanIdNum, '1024').catch(() => null);
+-
+-          // Check if lower LOD is already in memory cache (512 or 256 from preloading)
+-          const bestCached = textureManager.getBestCachedTexture(nextScanIdNum);
+-          if (bestCached) {
+-            nextCubeMap = bestCached.texture;
+-          } else {
+-            // Race: Try to fetch fast 256 preview (~40 KB) without stalling flight launch
+-            const fast256Promise = textureManager.loadKTX2(nextScanIdNum, '256').catch(() => null);
+-            nextCubeMap = await Promise.race([
+-              load1024Promise,
+-              fast256Promise,
+-              new Promise((r) => setTimeout(() => r(null), 150)) // Cap pre-flight launch delay to 150ms max
+-            ]);
+-            if (!nextCubeMap) {
+-              nextCubeMap = null;
+-            }
+-          }
+-        }
+-      } else {
+-        // High-fidelity standard cubemap faces (crisp native JPGs, instant, zero 404s)
+-        try {
+-          nextCubeMap = await textureManager.loadCubeMap(nextScanIdNum);
+-        } catch (e2) {
+-          nextCubeMap = null;
+-        }
+-      }
++      // Flight launches immediately with pre-loaded equirectangular texture (zero 150ms stall)
+ 
+       const isEnteringFromDollhouse = (viewerState === 'DOLLHOUSE' || activeScanIdRef.current === null || !isInscan);
+       let currentEquirect = null;
+@@ -964,9 +897,6 @@ const IndustrialTourViewer = forwardRef(({
+       projMat.uniforms.uNextInvRot.value.copy(targetScan.invRot3x3);
+       if (projMat.uniforms.uNextRot) projMat.uniforms.uNextRot.value.copy(nextRot3x3);
+ 
+-      const relRot3x3 = new THREE.Matrix3().identity();
+-      let currentCubeMap = nextCubeMap;
+-
+       if (!isEnteringFromDollhouse && currentEquirect && currentScan) {
+         const currRot3x3 = new THREE.Matrix3().setFromMatrix4(
+           new THREE.Matrix4().makeRotationFromQuaternion(currentScan.quaternion)
+@@ -976,15 +906,6 @@ const IndustrialTourViewer = forwardRef(({
+         projMat.uniforms.uCurrentInvRot.value.copy(currentInvRot);
+         if (projMat.uniforms.uCurrentRot) projMat.uniforms.uCurrentRot.value.copy(currRot3x3);
+         projMat.uniforms.uTransitionProgress.value = 0.0;
+-
+-        // Calculate Relative Rotation (R_A^-1 * R_B)
+-        const rotB_4 = new THREE.Matrix4().makeRotationFromQuaternion(targetScan.quaternion);
+-        const invRotA_4 = new THREE.Matrix4().makeRotationFromQuaternion(currentScan.quaternion).transpose();
+-        const relRot_4 = invRotA_4.multiply(rotB_4);
+-        relRot3x3.setFromMatrix4(relRot_4);
+-
+-        const activeCachedTex = currentScanIdNum ? textureManager.getTextureCacheObj(currentScanIdNum) : null;
+-        currentCubeMap = activeCachedTex?.['1024'] || activeCachedTex?.['512'] || activeCachedTex?.['256'] || bubbleRef.current?.material?.uniforms?.uCubeMap?.value || nextCubeMap;
+       } else {
+         projMat.uniforms.uCurrentEquirect.value = nextEquirect;
+         projMat.uniforms.uCurrentScanPos.value.copy(targetScan.positionVec);
+@@ -1113,55 +1034,6 @@ const IndustrialTourViewer = forwardRef(({
+             if (projMat.uniforms.uCurrentRot) projMat.uniforms.uCurrentRot.value.copy(nextRot3x3);
+           }
+ 
+-          const isValidCubeTexture = (tex) => {
+-            return Boolean(
+-              tex &&
+-              tex !== dummyTex &&
+-              (tex.isCubeTexture ||
+-               tex.isCompressedCubeTexture ||
+-               tex.isCompressedTexture)
+-            );
+-          };
+-
+-          const activateStaticCubemap = (cubeTex) => {
+-            if (!isValidCubeTexture(cubeTex)) return;
+-            if (activeScanIdRef.current !== targetScanId) return;
+-            if (!bubbleRef.current || !bubbleStaticMatRef.current) return;
+-
+-            const bubbleMat = bubbleStaticMatRef.current;
+-            bubbleMat.uniforms.uCubeMap.value = cubeTex;
+-            bubbleMat.uniforms.uNextCubeMap.value = cubeTex;
+-            bubbleMat.uniforms.uTransitionProgress.value = 1.0;
+-            bubbleMat.uniforms.uOpacity.value = 1.0;
+-
+-            bubbleRef.current.material = bubbleMat;
+-            bubbleRef.current.quaternion.copy(targetScan.quaternion);
+-            bubbleRef.current.position.copy(targetScan.positionVec);
+-            bubbleRef.current.visible = true;
+-
+-            // Wait 2 animation frames before switching model mesh to depth-only occluder.
+-            // This guarantees WebGL has compiled and rendered the static cubemap frame,
+-            // completely eliminating any single-frame black flash or drop.
+-            requestAnimationFrame(() => {
+-              requestAnimationFrame(() => {
+-                if (activeScanIdRef.current === targetScanId && modelRef.current) {
+-                  modelRef.current.visible = true;
+-                  modelRef.current.traverse((child) => {
+-                    if (child.isMesh && depthOccluderMatRef.current) {
+-                      child.material = depthOccluderMatRef.current;
+-                    }
+-                  });
+-                }
+-              });
+-            });
+-          };
+-
+-          // Check if 1024 (or high-res cubemap) is already loaded in memory
+-          const ready1024 = textureManager.getCachedKTX2(nextScanIdNum, '1024');
+-          const validInitialCube = hasKTX2
+-            ? (isValidCubeTexture(ready1024) ? ready1024 : null)
+-            : (isValidCubeTexture(nextCubeMap) ? nextCubeMap : null);
+-
+           // ─── First Enter from Dollhouse: Smooth Dissolve Projection on Arrival ───
+           if (isEnteringFromDollhouse && modelRef.current && sceneRef.current) {
+             const overlayGroup = new THREE.Group();
+@@ -1190,6 +1062,13 @@ const IndustrialTourViewer = forwardRef(({
+             sceneRef.current.add(overlayGroup);
+             revealOverlayRef.current = overlayGroup;
+ 
++            if (bubbleRef.current && bubbleProjMatRef.current) {
++              bubbleRef.current.material = bubbleProjMatRef.current;
++              bubbleRef.current.position.set(0, 0, 0);
++              bubbleRef.current.quaternion.identity();
++              bubbleRef.current.visible = true;
++            }
++
+             // Beautiful 0.5s dissolve: seamlessly projects the 360 photo over the room mesh
+             gsap.to(projMat.uniforms.uOpacity, {
+               value: 1.0,
+@@ -1204,60 +1083,48 @@ const IndustrialTourViewer = forwardRef(({
+                 }
+                 projMat.transparent = false;
+                 projMat.depthWrite = true;
++                projMat.needsUpdate = true;
+ 
+-                if (validInitialCube) {
+-                  activateStaticCubemap(validInitialCube);
+-                } else {
+-                  if (modelRef.current) {
+-                    modelRef.current.traverse((child) => {
+-                      if (child.isMesh) child.material = projMat;
+-                    });
+-                  }
+-                  if (bubbleRef.current && bubbleProjMatRef.current) {
+-                    bubbleRef.current.material = bubbleProjMatRef.current;
+-                    bubbleRef.current.position.set(0, 0, 0);
+-                    bubbleRef.current.quaternion.identity();
+-                    bubbleRef.current.visible = true;
+-                  }
++                if (modelRef.current) {
++                  modelRef.current.visible = true;
++                  modelRef.current.traverse((child) => {
++                    if (child.isMesh) child.material = projMat;
++                  });
++                }
++                if (bubbleRef.current && bubbleProjMatRef.current) {
++                  bubbleRef.current.material = bubbleProjMatRef.current;
++                  bubbleRef.current.position.set(0, 0, 0);
++                  bubbleRef.current.quaternion.identity();
++                  bubbleRef.current.visible = true;
+                 }
+               }
+             });
+           } else {
+-            // Standard station-to-station arrival
+-            if (validInitialCube) {
+-              activateStaticCubemap(validInitialCube);
+-            } else {
+-              if (bubbleRef.current && bubbleProjMatRef.current) {
+-                bubbleRef.current.material = bubbleProjMatRef.current;
+-                bubbleRef.current.position.set(0, 0, 0);
+-                bubbleRef.current.quaternion.identity();
+-                bubbleRef.current.visible = true;
+-              }
+-              if (modelRef.current && projMat) {
+-                modelRef.current.visible = true;
+-                modelRef.current.traverse((child) => {
+-                  if (child.isMesh) {
+-                    child.material = projMat;
+-                  }
+-                });
+-              }
++            // Standard station-to-station arrival: permanent seamless rock-solid lock
++            if (bubbleRef.current && bubbleProjMatRef.current) {
++              bubbleRef.current.material = bubbleProjMatRef.current;
++              bubbleRef.current.position.set(0, 0, 0);
++              bubbleRef.current.quaternion.identity();
++              bubbleRef.current.visible = true;
++            }
++            if (modelRef.current && projMat) {
++              modelRef.current.visible = true;
++              modelRef.current.traverse((child) => {
++                if (child.isMesh) {
++                  child.material = projMat;
++                }
++              });
+             }
+           }
+ 
+-          // Asynchronously upgrade to high-res cubemap as soon as network download finishes
+-          if (hasKTX2 && !validInitialCube) {
+-            const fetch1024 = load1024Promise || textureManager.loadKTX2(nextScanIdNum, '1024');
+-            fetch1024.then((hdTex) => {
+-              if (hdTex && activeScanIdRef.current === targetScanId) {
+-                activateStaticCubemap(hdTex);
+-              }
+-            }).catch(() => { });
+-          } else if (!hasKTX2 && !validInitialCube) {
+-            textureManager.loadCubeMap(nextScanIdNum).then((cubeTex) => {
+-              if (cubeTex && activeScanIdRef.current === targetScanId) {
+-                activateStaticCubemap(cubeTex);
++          // Asynchronously upgrade equirectangular texture to 4K if on mobile/low tier (zero material swap)
++          if (flightTier === '2k') {
++            textureManager.loadEquirect(nextScanIdNum, '4k').then((hdTex) => {
++              if (hdTex && activeScanIdRef.current === targetScanId && projMat?.uniforms) {
++                projMat.uniforms.uCurrentEquirect.value = hdTex;
++                projMat.uniforms.uNextEquirect.value = hdTex;
+               }
+-            }).catch(() => { });
++            }).catch(() => {});
+           }
+ 
+           // Background-preload 256 LOD for closest 3 adjacent scans for instant next hops
+@@ -2013,11 +1880,14 @@ const IndustrialTourViewer = forwardRef(({
+       if (viewerState === 'INSIDE') {
+         modelRef.current.visible = true;
+         modelRef.current.traverse((child) => {
+-          if (child.isMesh && depthOccluderMatRef.current) {
+-            child.material = depthOccluderMatRef.current;
++          if (child.isMesh && projectiveMatRef.current) {
++            child.material = projectiveMatRef.current;
+           }
+         });
+-        if (bubbleRef.current) bubbleRef.current.visible = true;
++        if (bubbleRef.current && bubbleProjMatRef.current) {
++          bubbleRef.current.material = bubbleProjMatRef.current;
++          bubbleRef.current.visible = true;
++        }
+       }
+     }
+   };
