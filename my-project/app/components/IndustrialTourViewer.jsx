@@ -558,10 +558,11 @@ const IndustrialTourViewer = forwardRef(({
               controlsRef.current.update();
             }
 
-            // ─── Setup Scan Hotspots (Raycast onto Floor Meshes with BVH) ───
+            // ─── Setup Scan Hotspots (Multi-Ray Floor Snapping with BVH & Normal Validation) ───
             if (scansArray.length > 0) {
-              const floorMeshes = [];
               model.updateMatrixWorld(true);
+
+              const floorMeshes = [];
               model.traverse((child) => {
                 if (child.isMesh) {
                   floorMeshes.push(child);
@@ -570,20 +571,90 @@ const IndustrialTourViewer = forwardRef(({
 
               const raycaster = new THREE.Raycaster();
               const down = new THREE.Vector3(0, 0, -1);
+              const upVec = new THREE.Vector3(0, 0, 1);
+              const normalMatrix = new THREE.Matrix3();
 
-              const ringPositions = scansArray.map((scan) => {
-                const scanKey = scan['#name'] || scan.id;
-                const sObj = metadataMap[scanKey];
-                if (!sObj) return 0;
-                const origin = sObj.positionVec.clone();
-                raycaster.set(origin, down);
-                const intersects = raycaster.intersectObjects(floorMeshes, false);
-                let floorZ = origin.z - 1.6; // fallback if no floor hit
-                if (intersects.length > 0) {
-                  floorZ = intersects[0].point.z;
+              // Multi-offset pattern around station (radius ~0.38m) to bypass tripod footprint & nadir blind-spot voids
+              const sampleOffsets = [
+                [0, 0],             // Center
+                [0.38, 0],          // East
+                [-0.38, 0],         // West
+                [0, 0.38],          // North
+                [0, -0.38],         // South
+                [0.27, 0.27],       // North-East
+                [-0.27, 0.27],      // North-West
+                [0.27, -0.27],      // South-East
+                [-0.27, -0.27],     // South-West
+              ];
+
+              // Pass 1: Multi-ray sampling per station with physics-based floor validation
+              const stationFloors = [];
+              const detectedDeltas = []; // cameraZ - floorZ
+
+              scansArray.forEach((scan, index) => {
+                const scanKey = scan['#name'] || scan.id || `scan_${index}`;
+                const sObj = metadataMap[scanKey] || metadataMap[String(scanKey).replace(/^scan_/, '')];
+                if (!sObj) {
+                  stationFloors.push(null);
+                  return;
                 }
-                return floorZ;
+
+                const pos = sObj.positionVec;
+                const validFloorHits = [];
+
+                for (let s = 0; s < sampleOffsets.length; s++) {
+                  const [ox, oy] = sampleOffsets[s];
+                  // Shoot downward from camera station level (pos.z + 0.15m)
+                  const rayOrigin = new THREE.Vector3(pos.x + ox, pos.y + oy, pos.z + 0.15);
+                  raycaster.set(rayOrigin, down);
+                  // Floor must be at least 0.75m below camera (filters out tripod head, bracket, scanner body)
+                  raycaster.near = 0.75;
+                  // Floor should not be more than 3.2m below camera station on same deck
+                  raycaster.far = 3.2;
+
+                  const intersects = raycaster.intersectObjects(floorMeshes, false);
+                  for (let i = 0; i < intersects.length; i++) {
+                    const hit = intersects[i];
+                    if (!hit.face) continue;
+
+                    // Calculate world normal of the hit surface
+                    normalMatrix.getNormalMatrix(hit.object.matrixWorld);
+                    const worldNormal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+
+                    // Floor surface MUST be facing upwards in Z-up coordinate system (normal.z > 0.50)
+                    if (worldNormal.z > 0.50) {
+                      validFloorHits.push({
+                        floorZ: hit.point.z,
+                        normal: worldNormal,
+                        dist: pos.z - hit.point.z
+                      });
+                      break; // First valid upward surface along this ray is the floor!
+                    }
+                  }
+                }
+
+                if (validFloorHits.length > 0) {
+                  // Sort by elevation and take the median to reject any outlier/pipe/cable hits
+                  validFloorHits.sort((a, b) => a.floorZ - b.floorZ);
+                  const medianHit = validFloorHits[Math.floor(validFloorHits.length / 2)];
+                  stationFloors.push({
+                    floorZ: medianHit.floorZ,
+                    normal: medianHit.normal,
+                    hitCount: validFloorHits.length
+                  });
+                  detectedDeltas.push(pos.z - medianHit.floorZ);
+                } else {
+                  stationFloors.push(null);
+                }
               });
+
+              // Calculate tour-wide median tripod height (cameraZ - floorZ)
+              detectedDeltas.sort((a, b) => a - b);
+              const medianTripodHeight = detectedDeltas.length > 0
+                ? detectedDeltas[Math.floor(detectedDeltas.length / 2)]
+                : 1.55; // fallback standard 1.55m
+
+              console.log(`[FloorSnap] Calibrated ${detectedDeltas.length}/${scansArray.length} stations. Tour median tripod height: ${medianTripodHeight.toFixed(3)}m`);
 
               // Matterport-grade vector pucks lying flat on the floor in Z-up
               const ringGeo = new THREE.PlaneGeometry(0.78, 0.78);
@@ -602,13 +673,25 @@ const IndustrialTourViewer = forwardRef(({
 
               scansArray.forEach((scan, index) => {
                 const scanKey = scan['#name'] || scan.id || `scan_${index}`;
-                const sObj = metadataMap[scanKey];
+                const sObj = metadataMap[scanKey] || metadataMap[String(scanKey).replace(/^scan_/, '')];
                 const pos = sObj ? sObj.positionVec : new THREE.Vector3();
-                // Elevation offset +0.02m above floor to completely eliminate Z-fighting
-                const floorZ = (ringPositions[index] !== undefined ? ringPositions[index] : (pos.z - 1.55)) + 0.02;
 
-                dummy.position.set(pos.x, pos.y, floorZ);
-                dummy.rotation.set(0, 0, 0); // Flat on XY floor plane facing +Z
+                const floorInfo = stationFloors[index];
+                // If floor detected, use detected floorZ; otherwise calibrate using tour-wide median tripod height
+                const baseFloorZ = floorInfo ? floorInfo.floorZ : (pos.z - medianTripodHeight);
+                // Elevation offset +0.025m (2.5cm) above physical floor to eliminate Z-fighting while remaining attached
+                const finalFloorZ = baseFloorZ + 0.025;
+
+                // Align puck orientation to floor normal if available, or horizontal XY
+                dummy.position.set(pos.x, pos.y, finalFloorZ);
+                const puckQuat = new THREE.Quaternion();
+                if (floorInfo && floorInfo.normal && floorInfo.normal.z > 0.70) {
+                  puckQuat.setFromUnitVectors(upVec, floorInfo.normal);
+                  dummy.quaternion.copy(puckQuat);
+                } else {
+                  dummy.rotation.set(0, 0, 0);
+                  puckQuat.set(0, 0, 0, 1);
+                }
                 dummy.scale.set(1, 1, 1);
                 dummy.updateMatrix();
                 instMesh.setMatrixAt(index, dummy.matrix);
@@ -617,7 +700,9 @@ const IndustrialTourViewer = forwardRef(({
                   id: scanKey,
                   instanceId: index,
                   realPosition: pos,
-                  ringPosition: new THREE.Vector3(pos.x, pos.y, floorZ),
+                  ringPosition: new THREE.Vector3(pos.x, pos.y, finalFloorZ),
+                  ringQuaternion: puckQuat.clone(),
+                  floorDetected: Boolean(floorInfo),
                   isVisible: true
                 });
               });
@@ -1178,9 +1263,9 @@ const IndustrialTourViewer = forwardRef(({
           let targetAlpha = 1.0;
 
           if (viewerState === 'INSIDE') {
-            // Floor filtering: strictly hide rings on other floor levels
+            // Floor filtering: strictly hide rings on other floor decks (deck elevation diff > 2.2m)
             const deltaZ = Math.abs(data.realPosition.z - currentFloorZ);
-            if (deltaZ > 1.4) {
+            if (deltaZ > 2.2) {
               shouldBeVisible = false;
               targetAlpha = 0.0;
             }
@@ -1247,7 +1332,11 @@ const IndustrialTourViewer = forwardRef(({
           if (data.isVisible !== shouldBeVisible) {
             data.isVisible = shouldBeVisible;
             dummy.position.copy(data.ringPosition || data.realPosition);
-            dummy.rotation.set(0, 0, 0);
+            if (data.ringQuaternion) {
+              dummy.quaternion.copy(data.ringQuaternion);
+            } else {
+              dummy.rotation.set(0, 0, 0);
+            }
             dummy.scale.setScalar(shouldBeVisible ? (viewerState === 'INSIDE' ? 1.0 : 0.42) : 0);
             dummy.updateMatrix();
             instancedMesh.setMatrixAt(data.instanceId, dummy.matrix);
