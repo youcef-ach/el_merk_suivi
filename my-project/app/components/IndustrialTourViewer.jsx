@@ -917,7 +917,7 @@ const IndustrialTourViewer = forwardRef(({
               new Promise((r) => setTimeout(() => r(null), 150)) // Cap pre-flight launch delay to 150ms max
             ]);
             if (!nextCubeMap) {
-              nextCubeMap = dummyTex;
+              nextCubeMap = null;
             }
           }
         }
@@ -926,7 +926,7 @@ const IndustrialTourViewer = forwardRef(({
         try {
           nextCubeMap = await textureManager.loadCubeMap(nextScanIdNum);
         } catch (e2) {
-          nextCubeMap = dummyTex;
+          nextCubeMap = null;
         }
       }
 
@@ -1085,61 +1085,121 @@ const IndustrialTourViewer = forwardRef(({
             textureManager.disposeScanTextures(previousScanId.replace('scan_', ''), true);
           }
 
-          if (bubbleRef.current && bubbleStaticMatRef.current) {
-            bubbleRef.current.material = bubbleStaticMatRef.current;
+          // Ensure projective shader uniforms are cleanly locked at destination scan
+          if (projMat?.uniforms) {
+            projMat.uniforms.uTransitionProgress.value = 1.0;
+            projMat.uniforms.uOpacity.value = 1.0;
+            projMat.uniforms.uCurrentEquirect.value = nextEquirect;
+            projMat.uniforms.uCurrentScanPos.value.copy(targetScan.positionVec);
+            projMat.uniforms.uCurrentInvRot.value.copy(targetScan.invRot3x3);
+            if (projMat.uniforms.uCurrentRot) projMat.uniforms.uCurrentRot.value.copy(nextRot3x3);
+          }
+
+          const isValidCubeTexture = (tex) => {
+            return Boolean(
+              tex &&
+              tex !== dummyTex &&
+              (tex.isCubeTexture ||
+               tex.isCompressedCubeTexture ||
+               tex.isCompressedTexture)
+            );
+          };
+
+          const activateStaticCubemap = (cubeTex) => {
+            if (!isValidCubeTexture(cubeTex)) return;
+            if (activeScanIdRef.current !== targetScanId) return;
+            if (!bubbleRef.current || !bubbleStaticMatRef.current) return;
+
+            const bubbleMat = bubbleStaticMatRef.current;
+            bubbleMat.uniforms.uCubeMap.value = cubeTex;
+            bubbleMat.uniforms.uNextCubeMap.value = cubeTex;
+            bubbleMat.uniforms.uTransitionProgress.value = 1.0;
+            bubbleMat.uniforms.uOpacity.value = 1.0;
+
+            bubbleRef.current.material = bubbleMat;
             bubbleRef.current.quaternion.copy(targetScan.quaternion);
             bubbleRef.current.position.copy(targetScan.positionVec);
-            // Dynamic Progressive Landing:
-            // Check if 1024 finished downloading during the 1.1s flight:
-            const ready1024 = textureManager.getCachedKTX2(nextScanIdNum, '1024');
-            const displayTex = ready1024 || nextCubeMap || dummyTex;
-
-            bubbleRef.current.material.uniforms.uCubeMap.value = displayTex;
-            bubbleRef.current.material.uniforms.uNextCubeMap.value = displayTex;
-            bubbleRef.current.material.uniforms.uTransitionProgress.value = 1.0;
-            bubbleRef.current.material.uniforms.uOpacity.value = 1.0;
             bubbleRef.current.visible = true;
 
-            // Upgrade dynamically to 1024px KTX2 as soon as network finishes downloading it:
-            if (hasKTX2 && !ready1024) {
-              const fetch1024 = load1024Promise || textureManager.loadKTX2(nextScanIdNum, '1024');
-              fetch1024.then((hdTex) => {
-                if (hdTex && activeScanIdRef.current === targetScanId && bubbleRef.current?.material?.uniforms) {
-                  bubbleRef.current.material.uniforms.uCubeMap.value = hdTex;
-                  bubbleRef.current.material.uniforms.uNextCubeMap.value = hdTex;
-                }
-              }).catch(() => { });
-            }
-
-            // Background-preload 256 LOD for closest 3 adjacent scans for instant next hops
-            if (scansDataRef.current && typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-              window.requestIdleCallback(() => {
-                try {
-                  const currPos = targetScan.positionVec;
-                  const adjacent = Object.values(scansDataRef.current)
-                    .filter((s) => s.id !== targetScanId)
-                    .map((s) => ({ id: s.id, dist: s.positionVec.distanceTo(currPos) }))
-                    .sort((a, b) => a.dist - b.dist)
-                    .slice(0, 3);
-                  for (const adj of adjacent) {
-                    const adjNum = adj.id.replace('scan_', '');
-                    if (textureManager.hasKTX2(adjNum)) {
-                      textureManager.loadKTX2(adjNum, '256').catch(() => {});
+            // Wait 2 animation frames before switching model mesh to depth-only occluder.
+            // This guarantees WebGL has compiled and rendered the static cubemap frame,
+            // completely eliminating any single-frame black flash or drop.
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                if (activeScanIdRef.current === targetScanId && modelRef.current) {
+                  modelRef.current.visible = true;
+                  modelRef.current.traverse((child) => {
+                    if (child.isMesh && depthOccluderMatRef.current) {
+                      child.material = depthOccluderMatRef.current;
                     }
-                  }
-                } catch (_) {}
+                  });
+                }
+              });
+            });
+          };
+
+          // Check if 1024 (or high-res cubemap) is already loaded in memory
+          const ready1024 = textureManager.getCachedKTX2(nextScanIdNum, '1024');
+          const validInitialCube = hasKTX2
+            ? (isValidCubeTexture(ready1024) ? ready1024 : null)
+            : (isValidCubeTexture(nextCubeMap) ? nextCubeMap : null);
+
+          if (validInitialCube) {
+            activateStaticCubemap(validInitialCube);
+          } else {
+            // High-res cubemap is still downloading in background:
+            // DO NOT switch to dummy black texture!
+            // Keep bubbleProjMatRef and projMat actively rendering nextEquirect.
+            // Both materials already provide full color, 60fps rendering, and depth occlusion.
+            if (bubbleRef.current && bubbleProjMatRef.current) {
+              bubbleRef.current.material = bubbleProjMatRef.current;
+              bubbleRef.current.position.set(0, 0, 0);
+              bubbleRef.current.quaternion.identity();
+              bubbleRef.current.visible = true;
+            }
+            if (modelRef.current && projMat) {
+              modelRef.current.visible = true;
+              modelRef.current.traverse((child) => {
+                if (child.isMesh) {
+                  child.material = projMat;
+                }
               });
             }
           }
 
-          // Set model mesh to Depth-Only Occluder mode inside scan
-          // Keeps physical 3D geometry active in depth buffer so walls/columns naturally occlude rings & objects behind them
-          if (modelRef.current) {
-            modelRef.current.visible = true;
-            modelRef.current.traverse((child) => {
-              if (child.isMesh && depthOccluderMatRef.current) {
-                child.material = depthOccluderMatRef.current;
+          // Asynchronously upgrade to high-res cubemap as soon as network download finishes
+          if (hasKTX2 && !validInitialCube) {
+            const fetch1024 = load1024Promise || textureManager.loadKTX2(nextScanIdNum, '1024');
+            fetch1024.then((hdTex) => {
+              if (hdTex && activeScanIdRef.current === targetScanId) {
+                activateStaticCubemap(hdTex);
               }
+            }).catch(() => { });
+          } else if (!hasKTX2 && !validInitialCube) {
+            textureManager.loadCubeMap(nextScanIdNum).then((cubeTex) => {
+              if (cubeTex && activeScanIdRef.current === targetScanId) {
+                activateStaticCubemap(cubeTex);
+              }
+            }).catch(() => { });
+          }
+
+          // Background-preload 256 LOD for closest 3 adjacent scans for instant next hops
+          if (scansDataRef.current && typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            window.requestIdleCallback(() => {
+              try {
+                const currPos = targetScan.positionVec;
+                const adjacent = Object.values(scansDataRef.current)
+                  .filter((s) => s.id !== targetScanId)
+                  .map((s) => ({ id: s.id, dist: s.positionVec.distanceTo(currPos) }))
+                  .sort((a, b) => a.dist - b.dist)
+                  .slice(0, 3);
+                for (const adj of adjacent) {
+                  const adjNum = adj.id.replace('scan_', '');
+                  if (textureManager.hasKTX2(adjNum)) {
+                    textureManager.loadKTX2(adjNum, '256').catch(() => {});
+                  }
+                }
+              } catch (_) {}
             });
           }
 
@@ -1165,14 +1225,6 @@ const IndustrialTourViewer = forwardRef(({
           if (scanSpheresRef.current) {
             scanSpheresRef.current.visible = true;
           }
-
-          // Ensure full 1024 resolution is active on arrival
-          textureManager.loadKTX2(nextScanIdNum, '1024').then((tex1024) => {
-            if (activeScanIdRef.current === targetScanId && bubbleRef.current?.material?.uniforms) {
-              bubbleRef.current.material.uniforms.uCubeMap.value = tex1024;
-              bubbleRef.current.material.uniforms.uNextCubeMap.value = tex1024;
-            }
-          }).catch(() => { });
 
           // Preload nearest 5 scan bases in background
           preloadNearestScans(targetScanId);
